@@ -1,0 +1,5 @@
+# Compiler image for the two SYCL libraries. Does not use the GPU.
+# icpx 2025.3 segfaults in dlopen against this vLLM image's libsycl.so.9.
+# oneAPI 2026 matches that library.
+FROM vllm/vllm-openai-xpu:v0.30.0@sha256:fc0e112afb64e3a06fe8daff34652435822a629412f38efce8f0f67a46636b8d
+COPY --from=intel/oneapi:2026.0.0-devel-ubuntu24.04 /opt/intel/oneapi /opt/intel-2026/oneapi

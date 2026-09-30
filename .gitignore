@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+build/
+.cache/
+k8v4_v030/mtp-tree/
+*.so

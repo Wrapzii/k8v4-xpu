@@ -1,0 +1,13 @@
+{
+  "label": "fp8-stock",
+  "note": "Stock FP8 fox curve on the same prompts as results/k8v4-held-c1.jsonl. One concurrency-1 sample, 96 decode tokens, temperature 0. Figures are the recorded table, not a second run.",
+  "points": [
+    {"prompt_tokens": 2001, "prefill_tok_s": 1766, "decode_tok_s": 129.9, "step_ms": 37.6, "tokens_per_update": 6, "accepted": 77, "drafted": 114, "ttft_s": 1.133, "vram_mib": [23002, 22638], "kv_cache_usage": 0.0},
+    {"prompt_tokens": 8001, "prefill_tok_s": 1695, "decode_tok_s": 100.0, "step_ms": 39.8, "tokens_per_update": 4, "accepted": 75, "drafted": 138, "ttft_s": 4.719, "vram_mib": [23002, 22638], "kv_cache_usage": 0.067},
+    {"prompt_tokens": 15992, "prefill_tok_s": 1601, "decode_tok_s": 103.0, "step_ms": 42.0, "tokens_per_update": 4, "accepted": 76, "drafted": 126, "ttft_s": 9.991, "vram_mib": [23002, 22638], "kv_cache_usage": 0.086},
+    {"prompt_tokens": 31972, "prefill_tok_s": 1424, "decode_tok_s": 92.8, "step_ms": 46.8, "tokens_per_update": 4, "accepted": 74, "drafted": 126, "ttft_s": 22.448, "vram_mib": [23002, 22638], "kv_cache_usage": 0.107},
+    {"prompt_tokens": 63932, "prefill_tok_s": 1161, "decode_tok_s": 75.6, "step_ms": 55.8, "tokens_per_update": 5, "accepted": 76, "drafted": 126, "ttft_s": 55.055, "vram_mib": [23002, 22638], "kv_cache_usage": 0.153},
+    {"prompt_tokens": 95892, "prefill_tok_s": 988, "decode_tok_s": 56.3, "step_ms": 64.5, "tokens_per_update": 4, "accepted": 74, "drafted": 144, "ttft_s": 97.061, "vram_mib": [23002, 22638], "kv_cache_usage": 0.197},
+    {"prompt_tokens": 127853, "prefill_tok_s": 855, "decode_tok_s": 35.2, "step_ms": 73.3, "tokens_per_update": 3, "accepted": 61, "drafted": 204, "ttft_s": 149.540, "vram_mib": [23002, 22638], "kv_cache_usage": 0.241}
+  ]
+}

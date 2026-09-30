@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="440" viewBox="0 0 760 440">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="72" y="24" font-family="Segoe UI, sans-serif" font-size="16" fill="#111827">Verifier step</text>
+<line x1="72" y1="42" x2="94" y2="42" stroke="#0f766e" stroke-width="2.4"/>
+<text x="100" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">K8/V4</text>
+<line x1="282" y1="42" x2="304" y2="42" stroke="#6b7280" stroke-width="2.4"/>
+<text x="310" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">FP8</text>
+<line x1="72" y1="382.0" x2="736" y2="382.0" stroke="#e5e7eb"/>
+<text x="64" y="386.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">0</text>
+<line x1="72" y1="320.0" x2="736" y2="320.0" stroke="#e5e7eb"/>
+<text x="64" y="324.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">16</text>
+<line x1="72" y1="258.0" x2="736" y2="258.0" stroke="#e5e7eb"/>
+<text x="64" y="262.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">33</text>
+<line x1="72" y1="196.0" x2="736" y2="196.0" stroke="#e5e7eb"/>
+<text x="64" y="200.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">49</text>
+<line x1="72" y1="134.0" x2="736" y2="134.0" stroke="#e5e7eb"/>
+<text x="64" y="138.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">66</text>
+<line x1="72" y1="72.0" x2="736" y2="72.0" stroke="#e5e7eb"/>
+<text x="64" y="76.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">82</text>
+<text x="18" y="227" transform="rotate(-90 18 227)" font-family="Segoe UI, sans-serif" font-size="12" fill="#374151">milliseconds</text>
+<text x="72.0" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">2K</text>
+<text x="103.7" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">8K</text>
+<text x="145.8" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">15K</text>
+<text x="230.1" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">31K</text>
+<text x="398.8" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">63K</text>
+<text x="567.4" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">95K</text>
+<text x="736.0" y="412" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">127K</text>
+<text x="404" y="432" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#374151">prompt tokens</text>
+<path d="M72.0,229.2 L103.7,222.5 L145.8,216.1 L230.1,199.5 L398.8,169.0 L567.4,140.2 L736.0,110.7" fill="none" stroke="#0f766e" stroke-width="2.4"/>
+<circle cx="72.0" cy="229.2" r="3.2" fill="#0f766e"/>
+<circle cx="103.7" cy="222.5" r="3.2" fill="#0f766e"/>
+<circle cx="145.8" cy="216.1" r="3.2" fill="#0f766e"/>
+<circle cx="230.1" cy="199.5" r="3.2" fill="#0f766e"/>
+<circle cx="398.8" cy="169.0" r="3.2" fill="#0f766e"/>
+<circle cx="567.4" cy="140.2" r="3.2" fill="#0f766e"/>
+<circle cx="736.0" cy="110.7" r="3.2" fill="#0f766e"/>
+<path d="M72.0,240.0 L103.7,231.7 L145.8,223.4 L230.1,205.3 L398.8,171.3 L567.4,138.4 L736.0,105.2" fill="none" stroke="#6b7280" stroke-width="2.4"/>
+<circle cx="72.0" cy="240.0" r="3.2" fill="#6b7280"/>
+<circle cx="103.7" cy="231.7" r="3.2" fill="#6b7280"/>
+<circle cx="145.8" cy="223.4" r="3.2" fill="#6b7280"/>
+<circle cx="230.1" cy="205.3" r="3.2" fill="#6b7280"/>
+<circle cx="398.8" cy="171.3" r="3.2" fill="#6b7280"/>
+<circle cx="567.4" cy="138.4" r="3.2" fill="#6b7280"/>
+<circle cx="736.0" cy="105.2" r="3.2" fill="#6b7280"/>
+</svg>

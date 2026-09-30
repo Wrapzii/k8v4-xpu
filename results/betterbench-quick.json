@@ -1,0 +1,67 @@
+{
+  "tool": "BetterBench 0.6.0",
+  "corpus": "v1.0",
+  "corpus_hash": "e332dceff176d033",
+  "mode": "quick",
+  "passes": 5,
+  "warmup": 1,
+  "context": 131072,
+  "requests_per_level": 48,
+  "completed": "48/48",
+  "fp8": {
+    "combined_decode_tok_s": 118.5,
+    "update_p99_ms": 37.0,
+    "ttft_p50_ms": 140,
+    "concurrency": [
+      {"level": 1, "aggregate_tok_s": 103.9, "per_request_tok_s": 126.9, "ttft_p50_ms": 147},
+      {"level": 2, "aggregate_tok_s": 164.2, "per_request_tok_s": 101.4, "ttft_p50_ms": 204},
+      {"level": 4, "aggregate_tok_s": 253.6, "per_request_tok_s": 84.3, "ttft_p50_ms": 237},
+      {"level": 8, "aggregate_tok_s": 344.3, "per_request_tok_s": 62.6, "ttft_p50_ms": 292}
+    ],
+    "categories": [
+      {"name": "chat", "decode_tok_s": 83.8, "tokens_per_update": 3.17},
+      {"name": "code", "decode_tok_s": 122.1, "tokens_per_update": 4.15},
+      {"name": "file edit", "decode_tok_s": 151.0, "tokens_per_update": 5.42},
+      {"name": "json", "decode_tok_s": 151.9, "tokens_per_update": 5.08},
+      {"name": "math", "decode_tok_s": 138.2, "tokens_per_update": 4.96},
+      {"name": "prose", "decode_tok_s": 72.2, "tokens_per_update": 2.64},
+      {"name": "reasoning", "decode_tok_s": 96.5, "tokens_per_update": 3.55},
+      {"name": "summarization", "decode_tok_s": 138.6, "tokens_per_update": 4.43}
+    ],
+    "prefill": [
+      {"depth": "2K", "prompt_tokens": 1544, "tok_s": 1706},
+      {"depth": "8K", "prompt_tokens": 5922, "tok_s": 1707},
+      {"depth": "16K", "prompt_tokens": 11830, "tok_s": 1640},
+      {"depth": "32K", "prompt_tokens": 23578, "tok_s": 1502},
+      {"depth": "64K", "prompt_tokens": 47044, "tok_s": 1283}
+    ]
+  },
+  "k8v4": {
+    "combined_decode_tok_s": 108.0,
+    "update_p99_ms": 40.5,
+    "ttft_p50_ms": 183,
+    "concurrency": [
+      {"level": 1, "aggregate_tok_s": 93.2, "per_request_tok_s": 116.8, "ttft_p50_ms": 179},
+      {"level": 2, "aggregate_tok_s": 146.7, "per_request_tok_s": 91.2, "ttft_p50_ms": 246},
+      {"level": 4, "aggregate_tok_s": 220.7, "per_request_tok_s": 73.5, "ttft_p50_ms": 274},
+      {"level": 8, "aggregate_tok_s": 301.4, "per_request_tok_s": 54.6, "ttft_p50_ms": 343}
+    ],
+    "categories": [
+      {"name": "chat", "decode_tok_s": 76.9, "tokens_per_update": 3.20},
+      {"name": "code", "decode_tok_s": 110.4, "tokens_per_update": 4.15},
+      {"name": "file edit", "decode_tok_s": 139.2, "tokens_per_update": 5.44},
+      {"name": "json", "decode_tok_s": 133.5, "tokens_per_update": 4.94},
+      {"name": "math", "decode_tok_s": 121.6, "tokens_per_update": 4.78},
+      {"name": "prose", "decode_tok_s": 65.5, "tokens_per_update": 2.57},
+      {"name": "reasoning", "decode_tok_s": 98.2, "tokens_per_update": 3.29},
+      {"name": "summarization", "decode_tok_s": 115.3, "tokens_per_update": 4.28}
+    ],
+    "prefill": [
+      {"depth": "2K", "prompt_tokens": 1544, "tok_s": 1957},
+      {"depth": "8K", "prompt_tokens": 5922, "tok_s": 2091},
+      {"depth": "16K", "prompt_tokens": 11830, "tok_s": 2057},
+      {"depth": "32K", "prompt_tokens": 23578, "tok_s": 1956},
+      {"depth": "64K", "prompt_tokens": 47044, "tok_s": 1771}
+    ]
+  }
+}

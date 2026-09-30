@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="440" viewBox="0 0 760 440">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="64" y="24" font-family="Segoe UI, sans-serif" font-size="16" fill="#111827">What moved 64K prefill</text>
+<rect x="64" y="36" width="12" height="12" fill="#6b7280"/>
+<text x="82" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">FP8</text>
+<rect x="234" y="36" width="12" height="12" fill="#b45309"/>
+<text x="252" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">oneDNN</text>
+<rect x="404" y="36" width="12" height="12" fill="#0f766e"/>
+<text x="422" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">+ MLP W4A8</text>
+<rect x="574" y="36" width="12" height="12" fill="#9a3412"/>
+<text x="592" y="46" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">all-GEMM</text>
+<line x1="64" y1="392.0" x2="744" y2="392.0" stroke="#e5e7eb"/>
+<text x="56" y="396.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">0</text>
+<line x1="64" y1="329.2" x2="744" y2="329.2" stroke="#e5e7eb"/>
+<text x="56" y="333.2" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">409</text>
+<line x1="64" y1="266.4" x2="744" y2="266.4" stroke="#e5e7eb"/>
+<text x="56" y="270.4" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">818</text>
+<line x1="64" y1="203.6" x2="744" y2="203.6" stroke="#e5e7eb"/>
+<text x="56" y="207.6" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">1226</text>
+<line x1="64" y1="140.8" x2="744" y2="140.8" stroke="#e5e7eb"/>
+<text x="56" y="144.8" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">1635</text>
+<line x1="64" y1="78.0" x2="744" y2="78.0" stroke="#e5e7eb"/>
+<text x="56" y="82.0" text-anchor="end" font-family="Segoe UI, sans-serif" font-size="11" fill="#4b5563">2044</text>
+<text x="16" y="235" transform="rotate(-90 16 235)" font-family="Segoe UI, sans-serif" font-size="12" fill="#374151">tok/s</text>
+<rect x="339.0" y="213.6" width="28.0" height="178.4" fill="#6b7280"/>
+<text x="353.0" y="207.6" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#111827">1161</text>
+<rect x="373.0" y="177.8" width="28.0" height="214.2" fill="#b45309"/>
+<text x="387.0" y="171.8" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#111827">1394</text>
+<rect x="407.0" y="140.3" width="28.0" height="251.7" fill="#0f766e"/>
+<text x="421.0" y="134.3" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#111827">1638</text>
+<rect x="441.0" y="125.9" width="28.0" height="266.1" fill="#9a3412"/>
+<text x="455.0" y="119.9" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="11" fill="#111827">1732</text>
+<text x="404.0" y="422" text-anchor="middle" font-family="Segoe UI, sans-serif" font-size="12" fill="#111827">64K fox prefill</text>
+</svg>
