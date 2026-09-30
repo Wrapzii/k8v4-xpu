@@ -1,7 +1,7 @@
 #!/bin/bash
 # Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.30 XPU.
 # Two GPUs, tensor parallel 2. Does not stop other containers.
-# Defaults match the measured run: oneDNN prefill, MLP-only W4A8, parallel decode.
+# Current defaults: four sequences, full model context, split draft/verify merge settings.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
@@ -13,6 +13,17 @@ SERVED_NAME=${SERVED_NAME:-Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8}
 MODEL_DIR=${MODEL_DIR:-}
 CACHE=${K8V4_CACHE:-$ROOT/.cache/vllm-k8v4}
 TEMPLATE=${CHAT_TEMPLATE:-$ROOT/templates/chat_template.jinja}
+MAX_MODEL_LEN=${K8V4_MAX_MODEL_LEN:-262144}
+MAX_SEQS=${K8V4_MAX_SEQS:-4}
+GPU_UTIL=${K8V4_GPU_MEMORY_UTILIZATION:-0.95}
+[[ "$MAX_SEQS" =~ ^[1-9][0-9]*$ ]] || { echo "K8V4_MAX_SEQS must be a positive integer" >&2; exit 2; }
+# MTP6 verifies seven tokens per sequence; capture each supported batch width.
+CAPTURE_SIZES="["
+for ((i=1; i<=MAX_SEQS; i++)); do
+  if [ "$i" -gt 1 ]; then CAPTURE_SIZES+=","; fi
+  CAPTURE_SIZES+=$((i * 7))
+done
+CAPTURE_SIZES+="]"
 
 if [ -z "$MODEL_DIR" ] || [ ! -d "$MODEL_DIR" ]; then
   echo "Set MODEL_DIR to the local weights directory." >&2
@@ -96,6 +107,9 @@ docker run -d --name "$NAME" --restart=no \
   -e K8V4_PREFILL="${K8V4_PREFILL:-onednn}" \
   -e K8V4_PREFILL_GEMM="${K8V4_PREFILL_GEMM:-w4a8}" \
   -e XE2_KV_S2_NSG="${XE2_KV_S2_NSG:-32}" \
+  -e XE2_KV_S2_NSG_DRAFT="${XE2_KV_S2_NSG_DRAFT:-32}" \
+  -e XE2_KV_S2_NSG_VERIFY="${XE2_KV_S2_NSG_VERIFY:-8}" \
+  -e XE2_KV_S2_TWO_PASS="${XE2_KV_S2_TWO_PASS:-0}" \
   -e B70_MTP_BF16_DRAFT=1 \
   -e B70_WORKER_AFFINITY=1 \
   -e CCL_SYCL_ALLREDUCE_LL=twoshots \
@@ -117,13 +131,13 @@ docker run -d --name "$NAME" --restart=no \
   --host=0.0.0.0 \
   --port=8000 \
   --served-model-name="$SERVED_NAME" \
-  --gpu-memory-utilization=0.90 \
+  --gpu-memory-utilization="$GPU_UTIL" \
   --dtype=bfloat16 \
-  --max-model-len=131072 \
+  --max-model-len="$MAX_MODEL_LEN" \
   --kv-cache-dtype=int8_k_int4_v \
   --tensor-parallel-size=2 \
-  --max-num-seqs=8 \
-  --max-num-batched-tokens="${K8V4_MAX_BATCHED_TOKENS:-8192}" \
+  --max-num-seqs="$MAX_SEQS" \
+  --max-num-batched-tokens="${K8V4_MAX_BATCHED_TOKENS:-4224}" \
   --enable-auto-tool-choice \
   --tool-call-parser=qwen3_xml \
   --reasoning-parser=qwen3 \
@@ -131,7 +145,7 @@ docker run -d --name "$NAME" --restart=no \
   --language-model-only \
   --trust-remote-code \
   --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
-  --compilation-config='{"cudagraph_mode":"FULL_DECODE_ONLY","cudagraph_capture_sizes":[7,14,21,28,35,42,49,56]}'
+  --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}"
 
 echo "STARTED ${NAME}"
 deadline=$((SECONDS + 2400))

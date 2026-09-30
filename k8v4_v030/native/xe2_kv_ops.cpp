@@ -140,6 +140,7 @@ class Xe2KvTorchAbiS1PagedKernel;
 class Xe2KvTorchAbiS2MergeKernel;
 class Xe2KvTorchAbiS2MergeOutKernel;
 class Xe2KvTorchAbiS2MergeOutHalfKernel;
+template <int N> class Xe2KvTorchAbiS2TwoPassHalf;
 class Xe2KvTorchAbiS2ParallelHalf8;
 class Xe2KvTorchAbiS2ParallelHalf16;
 class Xe2KvTorchAbiS2ParallelHalf32;
@@ -162,8 +163,9 @@ static bool s2_parallel_enabled() {
 // Subgroups per query row for the parallel softmax merge. 32 cuts a 128K
 // page chain from ~2000 serial steps to ~63. 8 and 16 stay available so a
 // bench can pick the occupancy that actually wins.
-static int s2_parallel_subgroups() {
-  const char *value = std::getenv("XE2_KV_S2_NSG");
+static int s2_parallel_subgroups(int tq) {
+  const char *value = std::getenv(tq == 1 ? "XE2_KV_S2_NSG_DRAFT" : "XE2_KV_S2_NSG_VERIFY");
+  if (value == nullptr) value = std::getenv("XE2_KV_S2_NSG");
   if (value == nullptr) return 32;
   const int n = std::atoi(value);
   if (n == 8 || n == 16 || n == 32) return n;
@@ -1006,7 +1008,7 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
 // contiguous run of pages, then subgroup 0 combines those N_SG states.
 // Page Acc is normalized, so the page update scales by w*L. A subgroup
 // state is already the weighted numerator, so the second update scales by w.
-template <typename OutT, typename KernelName, int N_SG>
+template <typename OutT, typename KernelName, int N_SG, bool TWO_PASS = false>
 static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq) {
   constexpr int VEC = 4;
@@ -1042,12 +1044,18 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           sycl::vec<float, VEC> ov[NV];
 #pragma unroll
           for (int t = 0; t < NV; ++t) ov[t] = sycl::vec<float, VEC>(0.f);
+          // Fixed maximum removes the loop-carried rescale of every vector.
+          // Empty causal pages have M=-inf and L=0; retain the explicit guard.
+          if constexpr (TWO_PASS) {
+            for (int s = s0; s < s1; ++s)
+              gm = sycl::max(gm, M[static_cast<size_t>(p0 + s) * BM + row]);
+          }
           for (int s = s0; s < s1; ++s) {
             const size_t mr = static_cast<size_t>(p0 + s) * BM + row;
             const float mv = M[mr];
             const float lv = L[mr];
-            const float new_gm = sycl::max(gm, mv);
-            const float alpha = (gm == -INFINITY) ? 0.f : sycl::exp(gm - new_gm);
+            const float new_gm = TWO_PASS ? gm : sycl::max(gm, mv);
+            const float alpha = TWO_PASS ? 1.f : ((gm == -INFINITY) ? 0.f : sycl::exp(gm - new_gm));
             const float w = (mv == -INFINITY || new_gm == -INFINITY) ? 0.f : sycl::exp(mv - new_gm);
             const float wl = w * lv;
             lsum = lsum * alpha + wl;
@@ -1082,11 +1090,14 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           lsum = 0.f;
 #pragma unroll
           for (int t = 0; t < NV; ++t) ov[t] = sycl::vec<float, VEC>(0.f);
+          if constexpr (TWO_PASS) {
+            for (int i = 0; i < N_SG; ++i) gm = sycl::max(gm, slm[i]);
+          }
           for (int i = 0; i < N_SG; ++i) {
             const float mv = slm[i];
             const float lv = slm[N_SG + i];
-            const float new_gm = sycl::max(gm, mv);
-            const float alpha = (gm == -INFINITY) ? 0.f : sycl::exp(gm - new_gm);
+            const float new_gm = TWO_PASS ? gm : sycl::max(gm, mv);
+            const float alpha = TWO_PASS ? 1.f : ((gm == -INFINITY) ? 0.f : sycl::exp(gm - new_gm));
             const float w = (mv == -INFINITY || new_gm == -INFINITY) ? 0.f : sycl::exp(mv - new_gm);
             lsum = lsum * alpha + w * lv;
 #pragma unroll
@@ -1116,6 +1127,15 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
 static void launch_s2_parallel_half(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                     sycl::half *Out, const std::int32_t *seq_lens, int n_splits,
                                     int tq, int nsg) {
+  if (env_is_1("XE2_KV_S2_TWO_PASS")) {
+    if (nsg == 8)
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<8>, 8, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+    else if (nsg == 16)
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<16>, 16, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+    else
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<32>, 32, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+    return;
+  }
   if (nsg == 8) {
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf8, 8>(q, M, L, Acc, Out, seq_lens,
                                                                     n_splits, tq);
@@ -1479,7 +1499,7 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
   };
   auto launch_s2 = [&]() {
     const bool parallel = s2_parallel_enabled();
-    const int nsg = s2_parallel_subgroups();
+    const int nsg = s2_parallel_subgroups(tq);
     if (half_out) {
       auto *dst = reinterpret_cast<sycl::half *>(out.data_ptr<at::Half>());
       if (parallel)
@@ -1513,7 +1533,7 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
     std::fprintf(stderr,
                  "[xe2_kv_time] s1_us=%.1f s2_us=%.1f n_splits=%d seq0=%d tq=%d parallel=%d nsg=%d\n",
                  s1_us, s2_us, n_splits, seq0, tq, s2_parallel_enabled() ? 1 : 0,
-                 s2_parallel_subgroups());
+                 s2_parallel_subgroups(tq));
     std::fflush(stderr);
   } else {
     launch_s1();

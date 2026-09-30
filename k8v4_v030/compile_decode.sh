@@ -31,6 +31,6 @@ nice -n 19 "$ICPX" -O2 -fsycl -fPIC -shared -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=
   -Wl,-rpath,/opt/venv/lib -Wl,-rpath,/opt/venv/lib/python3.12/site-packages/torch/lib
 '
 sha256sum "$ROOT/build/libxe2_kv.so"
-echo "Measured serving library: 0b7e2dc92262b1778aadefc8ab71e484408d6b6e90ccb8641616ee078f92623a"
+echo "September 30 measured library: 11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498"
 echo "A rebuild can hash differently. The build still succeeds."
 echo DECODE_COMPILE_OK

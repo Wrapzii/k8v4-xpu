@@ -1,0 +1,19 @@
+{
+  "four_history_prompt_tokens_each": 130080,
+  "explicit_integer_four_request_passes": 2,
+  "explicit_integer_completed_requests": 8,
+  "all_explicit_integer_requests_passed": true,
+  "initial_nine_requests_retrieved_distinct_markers_and_correct_sequence": true,
+  "initial_strict_type_failures": 6,
+  "initial_type_note": "Initial prompt did not require an integer JSON marker. Six correct markers were quoted strings, so the original strict-type checks failed. Original check results are preserved. The explicit-type prompt passed all eight completed four-history requests.",
+  "observed_peak_running_requests": 4.0,
+  "observed_peak_kv_pool_fraction_initial": 0.725108225108225,
+  "initial_preemptions_delta": 0.0,
+  "near_maximum_single_prompt_tokens": 261055,
+  "near_maximum_single_completion_tokens": 405,
+  "near_maximum_single_ttft_s": 327.4884776259987,
+  "near_maximum_single_prompt_tokens_per_ttft_s": 797.1425495407271,
+  "near_maximum_single_passed": true,
+  "duplicate_near_maximum_request": "Canceled at user request after the eight explicit-type four-history requests completed; no result claimed.",
+  "rates_are_not_a_cold_prefill_or_concurrency_performance_benchmark": true
+}

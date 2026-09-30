@@ -1,0 +1,326 @@
+[
+  {
+    "name": "mtp",
+    "device": 0,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 3.814697265625e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": 0.00020599365234375,
+    "fp_sdpa": 0.0031986236572265625,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 7.62939453125e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2978515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 3.814697265625e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2470703125,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 7.62939453125e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.09478759765625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 3.814697265625e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 7.62939453125e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2978515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 3.814697265625e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2470703125,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 7.62939453125e-06,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.09478759765625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "seq_len": 63,
+    "max_abs": 2.76171875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "seq_len": 64,
+    "max_abs": 4.2890625,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "seq_len": 65,
+    "max_abs": 3.892578125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "seq_len": 127,
+    "max_abs": 3.046875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "seq_len": 129,
+    "max_abs": 3.126953125,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 0,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "seq_len": 63,
+    "max_abs": 2.76171875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "seq_len": 64,
+    "max_abs": 4.2890625,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "seq_len": 65,
+    "max_abs": 3.892578125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "seq_len": 127,
+    "max_abs": 3.046875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "seq_len": 129,
+    "max_abs": 3.126953125,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 1,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 0,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.404296875,
+    "scale_before": [
+      0.4255208671092987,
+      0.33515626192092896
+    ],
+    "scale_after": [
+      0.8510417342185974,
+      0.6703125238418579
+    ],
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 1,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.001953125,
+    "scale_before": [
+      0.3622395992279053,
+      0.37513023614883423
+    ],
+    "scale_after": [
+      0.7244791984558105,
+      0.7502604722976685
+    ],
+    "passed": true
+  },
+  {
+    "name": "environment",
+    "sha256": "11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498",
+    "device_count": 2,
+    "affinity": null,
+    "image": null,
+    "require_tp2": true
+  }
+]

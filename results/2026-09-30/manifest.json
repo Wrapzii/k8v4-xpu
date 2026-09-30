@@ -1,0 +1,17 @@
+{
+  "candidate-sweep-gpu0.jsonl": "183783907e7403832761adcb8bf372a0d337560e576252ac65d43de60c787a41",
+  "capacity-explicit.jsonl": "b8365e9fa851f36c95eca4fe71823ce52d236628dd1c5e787e5ad89d236a52b3",
+  "capacity-initial.jsonl": "738b18053edf79e60a9231321deafcc7fdd8d90274614b32f8681e0eadf370eb",
+  "capacity-summary.json": "53ce15de1735cc4c8619b7ec2420151d152f1781300b864cd8d0411044255c2a",
+  "graph-sweep-capacity-gpu1.jsonl": "7cf8ea7e1a4dca9fc99de1f5263983f855dd5b6b167f7311cd82eec6500915fe",
+  "graph-sweep-long-gpu0.jsonl": "9ad924d70a52c64466f9058a6238969181efd80ee53e9eadd572397f74b51260",
+  "graph-sweep-small-gpu0.jsonl": "45e513c95579c09858c1402699bcaba1f8c8144342ff77bdffee6fc7bacfae24",
+  "k8-coding-200k-needle.jsonl": "f65e23a9dabc857574ad083fcf04f314f432b37edbecbb470b214c071a579419",
+  "k8-coding-200k.jsonl": "9966fde0bb88d74226643def1e5435af88027310de4c12f92d28e349dbecbfc9",
+  "k8-coding-mid.jsonl": "fcd3622698345d5caddf8a1fe9ebfd4b5bcf400e11ba8c37f84f7b6f61ad206b",
+  "k8-coding-small.jsonl": "5ef0e5dee1849285a0e5953680ac3cf944118db811c1313a1e23fd570e53062b",
+  "kernel-xpu.json": "edc12cb51c6ab0cc1eda5dec88173772a2b7439ab7eed46672a0006377716796",
+  "live-restore.json": "e3fe034f24cb5dee76bda822ed880ff8c8404483cc34f532d639f77e032396b5",
+  "stock-coding-concise.jsonl": "fbae508762c31c010cc0602c62b49856ce74e2de57c25db03a884254f45120a3",
+  "summary.json": "deb2ffcd5f6a860f7eb3b7d3893670b401f2dc34913d72b0d77175d7bf0fe6f7"
+}

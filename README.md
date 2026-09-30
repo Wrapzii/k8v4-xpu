@@ -2,7 +2,28 @@
 
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
-The measured server is tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, and a 131072 context. The numbers below are that machine: PCIe two-shot all-reduce, 2400 MHz, 180 W burst cap. Weights are a local GPTQ INT4 bake (group 128, symmetric, embedding left in int8). This repo does not ship weights.
+The current deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. Weights are a local GPTQ INT4 bake (group 128, symmetric, embedding left in int8). This repo does not ship weights.
+
+## Latest: natural-EOS coding at 200K
+
+The new K8/V4 coding curve reaches **62.49 tok/s median at 200,156 prompt tokens**; adding retrieval of constants from the start of the document reaches **65.04 tok/s median**. Each point has one warmup and three measured requests. All answers stop naturally and pass independent behavior checks.
+
+| prompt tokens | K8/V4 median decode | stock FP8 median decode | K8/V4 update gap |
+| ---: | ---: | ---: | ---: |
+| 2,153 | 137.87 tok/s | 146.26 tok/s | 39.09 ms |
+| 8,159 | 128.63 tok/s | 131.89 tok/s | 40.95 ms |
+| 32,157 | 116.67 tok/s | not measured | 46.85 ms |
+| 127,863 | 77.06 tok/s | not measured | 70.05 ms |
+| 200,156 | 62.49 tok/s | not measured | 87.90 ms |
+| 200,155 + retrieval | 65.04 tok/s | not measured | 87.89 ms |
+
+![Natural-EOS coding decode](docs/charts/coding-decode-20260930.svg)
+
+The 200K ordinary samples range from 59.67 to 63.28 tok/s. This establishes the target on these tasks, rather than guaranteeing 60 tok/s for every answer or at concurrency four. New FP8 comparisons cover only 2K and 8K. GPU clock ceilings were corrected, but workload and MTP acceptance also changed.
+
+The tested native source is now the published source. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification. A slower experimental two-pass merge remains disabled. The new deployment reports **814,581 tokens of shared KV capacity**: four histories near Hermes's half-window compression threshold (~131K each) fit; four fully occupied 262K windows do not.
+
+See the [dated update](docs/2026-09-30-update.md) for raw-data links, source/library hashes, validation, benchmark versus deployment settings, reproduction commands, and Hermes configuration. The historical sections below retain their original workloads and configurations; the forced 96-token fox curve must not be combined with this natural-EOS curve.
 
 ## Cache space
 
@@ -26,7 +47,7 @@ At that 127,853-token prompt the server reported KV-pool usage of **0.199** on K
 
 A 4-KV-head page padded out to the one-GPU layout is larger than FP8 on a rank. This build does not use it.
 
-## Three pieces
+## Historical measurements: three pieces
 
 The served stack is the sum of three switches. They were measured separately. Each row below is its own boot, one 96-token sample, not a factorial grid from a single process.
 
@@ -61,9 +82,9 @@ A 64K oneDNN profile, rank 0, each kernel once, with the profiler attached (the 
 
 Linears dominate. The all-reduce is second. MLP W4A8 takes part of the GEMM and leaves the attention and GDN projections on w4a16. At 63,932 tokens on the served stack, prefill attention was 10.7 s of a 39.0 s time to first token. At 127,853 tokens it was 40.7 s of 97.4 s.
 
-## Single stream
+## Historical single stream
 
-Concurrency 1, temperature 0, 96 decode tokens, the fox prompt in `bench/held_curve.py`. Prefill tok/s is prompt tokens / time to first token. Decode tok/s is the 96 completion tokens after that. The step is the gap between streamed updates. K8/V4 rows are `results/k8v4-held-c1.jsonl`. FP8 rows are the stock server on the same prompts (`results/fp8-held-c1.json`).
+Concurrency 1, temperature 0, 96 decode tokens with `ignore_eos`, the fox prompt in `bench/held_curve.py`. These earlier runs used a 131072 window, eight sequences, 8192 batch tokens and utilization 0.90. Prefill tok/s is prompt tokens / time to first token. Decode tok/s is the 96 completion tokens after that. The step is the gap between streamed updates. K8/V4 rows are `results/k8v4-held-c1.jsonl`. FP8 rows are the stock server on the same prompts (`results/fp8-held-c1.json`).
 
 ![Single-stream prefill](docs/charts/fox-prefill.svg)
 
@@ -99,7 +120,7 @@ Decode attention inside the graph was not timed. `FULL_DECODE_ONLY` replays the 
 
 Clocks were 2400/2400 except the 16K prefill (1717/1750) and the 96K prefill (2350/1850). Power on the K8/V4 points peaked around 155–160 W. The long-context falloff is not the GPU sitting under its cap.
 
-## Concurrency
+## Historical BetterBench concurrency
 
 BetterBench 0.6.0, corpus v1.0 hash `e332dceff176d033`, `--quick` (5 passes, 1 warmup), greedy, cold prefix, context 131072, 48 requests at each concurrency, all 48 completed. Same model, TP2, MTP6, `FULL_DECODE_ONLY`, `max-num-seqs` 8, prefix caching. The K8/V4 run is the served stack (MLP W4A8, oneDNN, parallel decode).
 
@@ -133,11 +154,11 @@ BetterBench's 64K depth is 47,044 tokens, not the fox prompt's 63,932. 1,771 tok
 - Image: `vllm/vllm-openai-xpu:v0.30.0`, digest `sha256:fc0e112afb64e3a06fe8daff34652435822a629412f38efce8f0f67a46636b8d`, plus this package
 - GPUs: 2× Arc Pro B60, `ZE_AFFINITY_MASK=0,1`, composite hierarchy
 - Collectives: `CCL_SYCL_ALLREDUCE_LL=twoshots`, simple threshold `4294967296`, copy engine on. The measured host has no Xe Link
-- Activations bf16, KV dtype `int8_k_int4_v`, TP 2, max length 131072
-- MTP 6, graphs `FULL_DECODE_ONLY`, capture sizes `[7,14,21,28,35,42,49,56]`
-- Prefix caching on, `max-num-seqs` 8, `max-num-batched-tokens` 8192, GPU memory utilization 0.90
+- Activations bf16, KV dtype `int8_k_int4_v`, TP 2, max length 262144
+- MTP 6, graphs `FULL_DECODE_ONLY`, capture sizes `[7,14,21,28]`
+- Prefix caching on, `max-num-seqs` 4, `max-num-batched-tokens` 4224, GPU memory utilization 0.95
 - Tool parser `qwen3_xml`, reasoning parser `qwen3`, language-model-only
-- Env that selects the three pieces: `K8V4_PREFILL=onednn`, `K8V4_PREFILL_GEMM=w4a8`, `XE2_KV_S2_NSG=32`. Parallel decode is the library default. Leave `XE2_KV_S2_PARALLEL` unset
+- Env that selects the three pieces: `K8V4_PREFILL=onednn`, `K8V4_PREFILL_GEMM=w4a8`, `XE2_KV_S2_NSG_DRAFT=32`, `XE2_KV_S2_NSG_VERIFY=8`, `XE2_KV_S2_TWO_PASS=0`. Parallel decode is the library default. Leave `XE2_KV_S2_PARALLEL` unset
 - `B70_MTP_BF16_DRAFT=1` and `B70_WORKER_AFFINITY=1` were set on the measured B60 server. The names are historical. `launch.sh` keeps them
 - Clocks 400–2400 MHz, burst power limit 180 W, when `xpu-smi` is available
 - Chat template in `templates/chat_template.jinja`, mounted over the model template. The curve client sends `enable_thinking=false`
@@ -177,7 +198,7 @@ MODEL_DIR=/path/to/Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8 bash k8v4_v030/laun
 
 `launch.sh` publishes `http://127.0.0.1:8200/v1`, container name `vllm-k8v4-tp2`, restart policy off. Graph capture can take a while. The script waits up to 40 minutes for `/health`.
 
-The measured decode library hashed to `0b7e2dc92262b1778aadefc8ab71e484408d6b6e90ccb8641616ee078f92623a`. A rebuild can hash differently. The script prints that hash and does not fail the build on a mismatch.
+The current tested decode library hashes to `11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498`. The earlier library used by the historical curves hashes to `0b7e2dc92262b1778aadefc8ab71e484408d6b6e90ccb8641616ee078f92623a`. A rebuild can hash differently. The compile script prints the reference hash and does not fail the build on a mismatch.
 
 Overrides, all optional:
 
@@ -190,9 +211,22 @@ Overrides, all optional:
 | `K8V4_PREFILL` | `onednn` | prefill attention |
 | `K8V4_PREFILL_GEMM` | `w4a8` | MLP GEMM |
 | `XE2_KV_S2_NSG` | 32 | parallel stage-2 subgroups |
-| `K8V4_MAX_BATCHED_TOKENS` | 8192 | scheduler cap |
+| `XE2_KV_S2_NSG_DRAFT` | 32 | one-row draft subgroups |
+| `XE2_KV_S2_NSG_VERIFY` | 8 | verifier subgroups |
+| `XE2_KV_S2_TWO_PASS` | 0 | disabled experimental merge |
+| `K8V4_MAX_MODEL_LEN` | 262144 | maximum request window |
+| `K8V4_MAX_SEQS` | 4 | active sequence limit and graph sizes |
+| `K8V4_GPU_MEMORY_UTILIZATION` | 0.95 | memory budget fraction |
+| `K8V4_MAX_BATCHED_TOKENS` | 4224 | scheduler cap |
 
-Same curve the tables came from, concurrency 1:
+New natural-EOS coding curve, concurrency 1:
+
+```bash
+python3 bench/serve_coding.py --lengths 2000,8000,32000,127700,200000 --max-tokens 448
+python3 bench/serve_coding.py --lengths 200000 --max-tokens 448 --needle
+```
+
+The [dated update](docs/2026-09-30-update.md) gives the profile used for the recorded curve. To run the historical forced-token curve:
 
 ```bash
 python3 bench/held_curve.py
@@ -206,6 +240,6 @@ CPU checks that do not need a GPU:
 python3 -m unittest k8v4_v030.tests.test_layout_mtp k8v4_v030.tests.test_patch k8v4_v030.tests.test_public_package
 ```
 
-## Reading the result
+## Reading the historical result
 
 Long context is where the smaller cache and the parallel kernel show up: at 127,853 tokens, prefill 1,313 versus 855 tok/s and decode 57.2 versus 35.2 tok/s, with the step still about 72 ms. Short single-stream decode and the BetterBench concurrency aggregates stay a little behind FP8, mostly from draft acceptance and a few milliseconds of step. The three switches above are the whole serving difference from stock FP8.
