@@ -56,8 +56,11 @@ class PublicPackageTest(unittest.TestCase):
     def test_docs_carry_the_measured_headlines(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         results = (ROOT / "RESULTS.md").read_text(encoding="utf-8")
+        historical = (ROOT / "docs" / "historical-benchmarks.md").read_text(encoding="utf-8")
+        for phrase in ("928 MiB", "onednn", "w4a8"):
+            self.assertIn(phrase, readme)
+            self.assertIn(phrase, results)
         for phrase in (
-            "928 MiB",
             "57.2",
             "35.2",
             "0.199",
@@ -66,10 +69,8 @@ class PublicPackageTest(unittest.TestCase):
             "1,394",
             "301.4",
             "344.3",
-            "onednn",
-            "w4a8",
         ):
-            self.assertIn(phrase, readme)
+            self.assertIn(phrase, historical)
             self.assertIn(phrase, results)
         for name in (
             "fox-prefill.svg",
