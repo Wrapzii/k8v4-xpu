@@ -2,7 +2,9 @@
 
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
-The current deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. Weights are a local GPTQ INT4 bake (group 128, symmetric, embedding left in int8). This repo does not ship weights.
+The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. The October 1 trial switches to Swift 1.5 AutoRound INT4 with GPTQ-compatible loader metadata and low thinking by default. See the [Swift trial and adaptation instructions](docs/swift-1.5-trial.md). This repo does not ship weights.
+
+All performance results below were measured on the previous local Qwen GPTQ INT4 bake (group 128, symmetric, INT8 embedding), with thinking disabled. They do not establish Swift performance.
 
 ## Latest: natural-EOS coding at 200K
 
@@ -23,7 +25,7 @@ The 200K ordinary samples range from 59.67 to 63.28 tok/s. This establishes the 
 
 A separate capacity-validation request completed with **261,055 prompt tokens and 405 output tokens**. Its first token arrived after **327.49 seconds**, equivalent to **797.14 prompt tokens/s** including serving overhead. This is one observation; there is no matching pre-clock run at that length. Repeated cached coding requests above do not establish cold-prefill throughput.
 
-The tested native source is now the published source. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification. A slower experimental two-pass merge remains disabled. The new deployment reports **814,581 tokens of shared KV capacity**: four histories near Hermes's half-window compression threshold (~131K each) fit; four fully occupied 262K windows do not.
+The tested native source is now the published source. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification. A slower experimental two-pass merge remains disabled. The September 30 text-only deployment reported **814,581 tokens of shared KV capacity**; the subsequent vision-enabled bake reported 830,415, and the Swift trial reports **749,485**. Four histories near Hermes's half-window compression threshold (~131K each) fit within the reported Swift pool; four fully occupied 262K windows do not.
 
 See the [dated update](docs/2026-09-30-update.md) for raw-data links, source/library hashes, validation, benchmark versus deployment settings, reproduction commands, and Hermes configuration. Earlier workloads and configurations are preserved in the [historical benchmark archive](docs/historical-benchmarks.md).
 
@@ -63,11 +65,11 @@ The [historical benchmark archive](docs/historical-benchmarks.md) preserves the 
 - Activations bf16, KV dtype `int8_k_int4_v`, TP 2, max length 262144
 - MTP 6, graphs `FULL_DECODE_ONLY`, capture sizes `[7,14,21,28]`
 - Prefix caching on, `max-num-seqs` 4, `max-num-batched-tokens` 4224, GPU memory utilization 0.95
-- Tool parser `qwen3_xml`, reasoning parser `qwen3`, language-model-only
+- Tool parser `qwen3_xml`, reasoning parser `qwen3`; vision enabled with up to four images per request and video disabled
 - Env that selects the three pieces: `K8V4_PREFILL=onednn`, `K8V4_PREFILL_GEMM=w4a8`, `XE2_KV_S2_NSG_DRAFT=32`, `XE2_KV_S2_NSG_VERIFY=8`, `XE2_KV_S2_TWO_PASS=0`. Parallel decode is the library default. Leave `XE2_KV_S2_PARALLEL` unset
 - `B70_MTP_BF16_DRAFT=1` and `B70_WORKER_AFFINITY=1` were set on the measured B60 server. The names are historical. `launch.sh` keeps them
 - Clocks 400–2400 MHz, burst power limit 180 W, when `xpu-smi` is available
-- Chat template in `templates/chat_template.jinja`, mounted over the model template. The curve client sends `enable_thinking=false`
+- Swift trial uses its adapted upstream `chat_template_low.jinja`; Hermes defaults to low and supports medium. Benchmark reproduction uses `templates/chat_template.jinja`; the curve client sends `enable_thinking=false`
 
 These CCL settings raised GPU faults on this platform and are not in the launch script: `CCL_SYCL_ALLREDUCE_ARC=1`, a simple threshold of 0 or 8192, `CCL_ALLREDUCE=direct`, `CCL_ATL_TRANSPORT=mpi`, `CCL_TOPO_FABRIC_VERTEX_CONNECTION_CHECK=0`.
 
