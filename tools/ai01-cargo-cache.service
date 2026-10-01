@@ -1,0 +1,11 @@
+[Unit]
+Description=Idle-only maintenance of superseded Forge Cargo binaries
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/dan/forge-runner/maintain_ci_cargo_cache.py --apply
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=10min

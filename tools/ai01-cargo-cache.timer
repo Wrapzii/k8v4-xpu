@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Forge Cargo cache between jobs
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
