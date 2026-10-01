@@ -1,5 +1,10 @@
 # Swift baked checkpoint publication
 
+Published model: [Wrapzii/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8](https://huggingface.co/Wrapzii/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8).
+Initial release commit: `408925577f800b05e1b09dc47761d203ab4e030f`.
+Public access, the model card, all 36 release files, and all 2,426 indexed
+tensor entries were verified after uploading on 2026-10-01.
+
 The model card and retained licenses are in `huggingface/swift-baked/`.
 The public source is UkisAI's Swift AutoRound checkpoint, pinned to
 `278de52d4252d0b7c0ea01833d1403cd386c65ef`. Launch80's baked Qwen release
