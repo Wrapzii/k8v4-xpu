@@ -1,0 +1,42 @@
+{
+  "date_utc": "2026-10-01",
+  "model": "Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",
+  "image": "vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2",
+  "vllm": "0.30.0",
+  "tensor_parallel": 2,
+  "kv_cache_dtype": "int8_k_int4_v",
+  "speculative_tokens": 6,
+  "max_model_len": 262144,
+  "max_num_seqs": 4,
+  "shared_kv_tokens": 869121,
+  "model_weight_gib_per_rank": 7.47,
+  "previous_unbaked_model_weight_gib_per_rank": 9.23,
+  "embedding_log_count_by_rank": {
+    "0": 2,
+    "1": 2
+  },
+  "embedding_shape_per_rank": [
+    124160,
+    5120
+  ],
+  "embedding_dtype": "int8",
+  "embedding_bytes_per_layer_per_rank": 635947520,
+  "embedding_scale_min": 1.1920928955078125e-07,
+  "embedding_zero_scales": 0,
+  "embedding_scales_all_finite": true,
+  "quantized_linear_pack_roundtrips_passed": 9,
+  "heldout_gptq_below_rtn_passed": 9,
+  "cpu_tp2_padding_and_idempotence_fixture": "pass",
+  "medium_text": "pass",
+  "low_image_red": "pass",
+  "low_parsed_tool_call": "pass",
+  "hermes_low_medium_transport_local": "pass",
+  "hermes_low_medium_transport_server": "pass",
+  "post_reboot_startup": "pass",
+  "post_reboot_cat_errors_observed": 0,
+  "quality_parity_tested": false,
+  "four_user_saturation_tested": false,
+  "decode_library_sha256": "11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498",
+  "coding_outputs_passed": 18,
+  "long_context_repeat_observed_concurrency": 1
+}

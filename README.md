@@ -2,15 +2,28 @@
 
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
-The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. The October 1 trial switches to Swift 1.5 AutoRound INT4 with GPTQ-compatible loader metadata and low thinking by default. See the [Swift trial and adaptation instructions](docs/swift-1.5-trial.md). This repo does not ship weights.
+The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. The October 1 deployment uses Swift 1.5 with its AutoRound INT4 body, a calibrated GPTQ INT4 head/MTP bake, and a verified resident INT8 embedding. Low thinking is the Hermes default, with medium available. See the [Swift bake and reproduction instructions](docs/swift-1.5-bake.md) and the [initial loader adaptation](docs/swift-1.5-trial.md). This repo does not ship weights.
 
-All performance results below were measured on the previous local Qwen GPTQ INT4 bake (group 128, symmetric, INT8 embedding), with thinking disabled. They do not establish Swift performance.
+The historical Qwen results below were measured on the previous local Qwen GPTQ INT4 bake (group 128, symmetric; checkpoint includes an INT8 embedding side file), with thinking disabled. Its checkpoint includes an INT8 embedding side file; resident embedding dtype was not independently recorded for those historical runs. They do not establish Swift performance.
 
-The separate [October 1 Swift speed check](docs/swift-1.5-speed.md) records cold prefill and warmed decode under overlapping live traffic. It does not provide an isolated comparison against these results.
+The earlier unbaked [October 1 Swift speed check](docs/swift-1.5-speed.md) records cold prefill and warmed decode under overlapping live traffic. It does not provide an isolated comparison against these results.
 
-## Latest: natural-EOS coding at 200K
+## Current Swift bake: coding speed
 
-The new K8/V4 coding curve reaches **62.49 tok/s median at 200,156 prompt tokens**; adding retrieval of constants from the start of the document reaches **65.04 tok/s median**. Each point has one warmup and three measured requests. All answers stop naturally and pass independent behavior checks.
+Thinking disabled; warmed decode is the median of two samples. All listed samples observed concurrency one. Fresh prefill includes time to first token and serving overhead.
+
+| prompt tokens | fresh first-token latency | effective fresh prefill | warmed decode | median update gap |
+| ---: | ---: | ---: | ---: | ---: |
+| 2,184 | 1.41 s | 1552.5 tok/s | 136.51 tok/s | 37.20 ms |
+| 8,190 | 5.81 s | 1409.1 tok/s | 133.97 tok/s | 39.18 ms |
+| 128,197 | 115.39 s | 1111.0 tok/s | 77.82 tok/s | 68.49 ms |
+| 200,191 | 218.79 s | 915.0 tok/s | 60.79 tok/s | 86.12 ms |
+
+See the [bake report](docs/swift-1.5-bake.md) for raw records, calibration, validation, observed concurrency, and comparison limits.
+
+## Previous Qwen: natural-EOS coding at 200K
+
+The September 30 K8/V4 coding curve reaches **62.49 tok/s median at 200,156 prompt tokens**; adding retrieval of constants from the start of the document reaches **65.04 tok/s median**. Each point has one warmup and three measured requests. All answers stop naturally and pass independent behavior checks.
 
 | prompt tokens | K8/V4 median decode | stock FP8 median decode | K8/V4 update gap |
 | ---: | ---: | ---: | ---: |
@@ -27,7 +40,7 @@ The 200K ordinary samples range from 59.67 to 63.28 tok/s. This establishes the 
 
 A separate capacity-validation request completed with **261,055 prompt tokens and 405 output tokens**. Its first token arrived after **327.49 seconds**, equivalent to **797.14 prompt tokens/s** including serving overhead. This is one observation; there is no matching pre-clock run at that length. Repeated cached coding requests above do not establish cold-prefill throughput.
 
-The tested native source is now the published source. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification. A slower experimental two-pass merge remains disabled. The September 30 text-only deployment reported **814,581 tokens of shared KV capacity**; the subsequent vision-enabled bake reported 830,415, and the Swift trial reports **749,485**. Four histories near Hermes's half-window compression threshold (~131K each) fit within the reported Swift pool; four fully occupied 262K windows do not.
+The tested native source is now the published source. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification. A slower experimental two-pass merge remains disabled. The September 30 text-only deployment reported **814,581 tokens of shared KV capacity**; the subsequent vision-enabled bake reported 830,415, the unbaked Swift trial reported **749,485**, and the new Swift bake reports **869,121**. Four histories near Hermes's half-window compression threshold (~131K each) fit within the reported baked Swift pool; four fully occupied 262K windows do not.
 
 See the [dated update](docs/2026-09-30-update.md) for raw-data links, source/library hashes, validation, benchmark versus deployment settings, reproduction commands, and Hermes configuration. Earlier workloads and configurations are preserved in the [historical benchmark archive](docs/historical-benchmarks.md).
 

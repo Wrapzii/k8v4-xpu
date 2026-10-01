@@ -1,5 +1,7 @@
 # Swift 1.5 AutoRound trial
 
+This page records the initial, unbaked October 1 trial. The subsequent [special-weight bake](swift-1.5-bake.md) adds calibrated head/MTP INT4 and a resident INT8 embedding.
+
 The October 1 candidate uses [ukisai/Swift-1.5-Qwen3.8-27b-W4A16-AutoRound](https://huggingface.co/ukisai/Swift-1.5-Qwen3.8-27b-W4A16-AutoRound), pinned to revision `278de52d4252d0b7c0ea01833d1403cd386c65ef`. Weights are not included in this repository. The upstream license and notices remain in the downloaded checkpoint.
 
 ## Loader compatibility
