@@ -6,6 +6,8 @@ The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONL
 
 All performance results below were measured on the previous local Qwen GPTQ INT4 bake (group 128, symmetric, INT8 embedding), with thinking disabled. They do not establish Swift performance.
 
+The separate [October 1 Swift speed check](docs/swift-1.5-speed.md) records cold prefill and warmed decode under overlapping live traffic. It does not provide an isolated comparison against these results.
+
 ## Latest: natural-EOS coding at 200K
 
 The new K8/V4 coding curve reaches **62.49 tok/s median at 200,156 prompt tokens**; adding retrieval of constants from the start of the document reaches **65.04 tok/s median**. Each point has one warmup and three measured requests. All answers stop naturally and pass independent behavior checks.
