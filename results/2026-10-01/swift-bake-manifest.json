@@ -1,0 +1,118 @@
+{
+  "source": "ukisai/Swift-1.5-Qwen3.8-27b-W4A16-AutoRound",
+  "changed_dense_linears": [
+    "lm_head.weight",
+    "mtp.fc.weight",
+    "mtp.layers.0.mlp.down_proj.weight",
+    "mtp.layers.0.mlp.gate_proj.weight",
+    "mtp.layers.0.mlp.up_proj.weight",
+    "mtp.layers.0.self_attn.k_proj.weight",
+    "mtp.layers.0.self_attn.o_proj.weight",
+    "mtp.layers.0.self_attn.q_proj.weight",
+    "mtp.layers.0.self_attn.v_proj.weight"
+  ],
+  "body_linears_preserved": 400,
+  "embedding_relative_l2_error": 0.009007108372881538,
+  "special_linear_quantization": {
+    "method": "GPTQ",
+    "bits": 4,
+    "group_size": 128,
+    "sym": true,
+    "desc_act": false,
+    "damp_percent": 0.01
+  },
+  "bake_manifest": {
+    "lm_head.weight": {
+      "K": 5120,
+      "N": 248320,
+      "rows": 34215,
+      "out_err_gptq": 0.035148609429597855,
+      "out_err_rtn_today": 0.07637811452150345,
+      "weight_err": 0.15606030821800232
+    },
+    "mtp.fc.weight": {
+      "K": 10240,
+      "N": 5120,
+      "rows": 80548,
+      "out_err_gptq": 0.05588412284851074,
+      "out_err_rtn_today": 0.11312303692102432,
+      "weight_err": 0.16068647801876068
+    },
+    "mtp.layers.0.self_attn.q_proj.weight": {
+      "K": 5120,
+      "N": 12288,
+      "rows": 80548,
+      "out_err_gptq": 0.021546173840761185,
+      "out_err_rtn_today": 0.04431992769241333,
+      "weight_err": 0.15644676983356476
+    },
+    "mtp.layers.0.self_attn.k_proj.weight": {
+      "K": 5120,
+      "N": 1024,
+      "rows": 80548,
+      "out_err_gptq": 0.0502769835293293,
+      "out_err_rtn_today": 0.10386740416288376,
+      "weight_err": 0.1768253743648529
+    },
+    "mtp.layers.0.self_attn.v_proj.weight": {
+      "K": 5120,
+      "N": 1024,
+      "rows": 80548,
+      "out_err_gptq": 0.04091091454029083,
+      "out_err_rtn_today": 0.08242995291948318,
+      "weight_err": 0.15972280502319336
+    },
+    "mtp.layers.0.self_attn.o_proj.weight": {
+      "K": 6144,
+      "N": 5120,
+      "rows": 80548,
+      "out_err_gptq": 0.05045706033706665,
+      "out_err_rtn_today": 0.11874345690011978,
+      "weight_err": 0.17204757034778595
+    },
+    "mtp.layers.0.mlp.gate_proj.weight": {
+      "K": 5120,
+      "N": 17408,
+      "rows": 80548,
+      "out_err_gptq": 0.030193425714969635,
+      "out_err_rtn_today": 0.06498680263757706,
+      "weight_err": 0.1456814408302307
+    },
+    "mtp.layers.0.mlp.up_proj.weight": {
+      "K": 5120,
+      "N": 17408,
+      "rows": 80548,
+      "out_err_gptq": 0.04703190177679062,
+      "out_err_rtn_today": 0.09750272333621979,
+      "weight_err": 0.14492812752723694
+    },
+    "mtp.layers.0.mlp.down_proj.weight": {
+      "K": 17408,
+      "N": 5120,
+      "rows": 80548,
+      "out_err_gptq": 0.06009127199649811,
+      "out_err_rtn_today": 0.11512927711009979,
+      "weight_err": 0.197829931974411
+    }
+  },
+  "calibration": {
+    "source": "https://raw.githubusercontent.com/pytorch/examples/main/word_language_model/data/wikitext-2/valid.txt",
+    "sha256": "f0737ed31fc1329026e95cb8b98e19c2a182c39c240ab909dc31abf2f8af58e8",
+    "prompts": 128,
+    "seq_len": 384,
+    "generation_limit": 64,
+    "tensor_parallel": 2,
+    "heldout_stride": 64,
+    "heldout_cap": 1024
+  },
+  "revision": "278de52d4252d0b7c0ea01833d1403cd386c65ef",
+  "checkpoint_audit": {
+    "source_tensors": 2399,
+    "candidate_tensors": 2426,
+    "removed_dense_linears": 9,
+    "unchanged_hardlinked_shards": 5,
+    "unchanged_rewritten_tensors_byte_checked": 7,
+    "body_qweight_tensors": 400,
+    "passed": true
+  }
+}

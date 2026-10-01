@@ -1,0 +1,4 @@
+FROM vllm-openai-xpu:v0.30.0-k8v4
+COPY k8v4_v030/embed_int8_runtime.py /opt/venv/lib/python3.12/site-packages/swift_embed_int8_runtime.py
+COPY tools/patch_embed_int8_v030.py /tmp/patch_embed_int8_v030.py
+RUN python /tmp/patch_embed_int8_v030.py
