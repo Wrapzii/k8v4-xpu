@@ -78,4 +78,4 @@ Deployment checks and resident-memory observations: [swift-bake-validation.json]
 
 Raw records: [initial mixed-load run](../results/2026-10-01/swift-baked-coding-live.jsonl), [clean long-context repeat](../results/2026-10-01/swift-baked-coding-c1.jsonl). The earlier [unbaked Swift live-load run](swift-1.5-speed.md) observed two to three requests, so it cannot isolate a quantization-only speedup. The historical Qwen coding curve uses a different checkpoint and different prompt lengths; the new results show similar serving performance on this task, not a controlled quality or FP8 comparison.
 
-The server's CI runner is now limited to eight CPUs, with eight CPUs allowed per CI job and `CARGO_BUILD_JOBS=8`. Job capacity remains one and the existing memory limits are retained.
+The server's CI runner is limited to eight CPUs, with eight CPUs allowed per CI job. `CARGO_BUILD_JOBS` was initially eight; after CI linker OOMs during the later VM recovery, it was reduced to four. Job capacity remains one and the existing memory limits are retained. See the [memory incident and recovery](2026-10-01-memory-recovery.md).
