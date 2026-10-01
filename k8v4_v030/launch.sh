@@ -16,6 +16,19 @@ TEMPLATE=${CHAT_TEMPLATE:-$ROOT/templates/chat_template.jinja}
 MAX_MODEL_LEN=${K8V4_MAX_MODEL_LEN:-262144}
 MAX_SEQS=${K8V4_MAX_SEQS:-4}
 GPU_UTIL=${K8V4_GPU_MEMORY_UTILIZATION:-0.95}
+VISION=${K8V4_VISION:-0}
+MAX_IMAGES=${K8V4_MAX_IMAGES:-4}
+MAX_IMAGE_PIXELS=${K8V4_MAX_IMAGE_PIXELS:-1048576}
+[[ "$VISION" =~ ^[01]$ ]] || { echo "K8V4_VISION must be 0 or 1" >&2; exit 2; }
+[[ "$MAX_IMAGES" =~ ^[1-9][0-9]*$ && "$MAX_IMAGE_PIXELS" =~ ^[1-9][0-9]*$ ]] || { echo "Image limits must be positive integers" >&2; exit 2; }
+multimodal=()
+if [ "$VISION" = 1 ]; then
+  multimodal+=(--limit-mm-per-prompt="{\"image\":$MAX_IMAGES,\"video\":0}")
+  multimodal+=(--mm-processor-kwargs="{\"max_pixels\":$MAX_IMAGE_PIXELS}")
+  multimodal+=(--mm-processor-cache-gb="${K8V4_MM_PROCESSOR_CACHE_GB:-0.125}")
+else
+  multimodal+=(--language-model-only)
+fi
 [[ "$MAX_SEQS" =~ ^[1-9][0-9]*$ ]] || { echo "K8V4_MAX_SEQS must be a positive integer" >&2; exit 2; }
 # MTP6 verifies seven tokens per sequence; capture each supported batch width.
 CAPTURE_SIZES="["
@@ -142,7 +155,7 @@ docker run -d --name "$NAME" --restart=no \
   --tool-call-parser=qwen3_xml \
   --reasoning-parser=qwen3 \
   --enable-prefix-caching \
-  --language-model-only \
+  "${multimodal[@]}" \
   --trust-remote-code \
   --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
   --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}"

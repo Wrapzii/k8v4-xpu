@@ -102,6 +102,8 @@ MODEL_DIR=/path/to/Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8 bash k8v4_v030/laun
 
 `launch.sh` publishes `http://127.0.0.1:8200/v1`, container name `vllm-k8v4-tp2`, restart policy off. Graph capture can take a while. The script waits up to 40 minutes for `/health`.
 
+The checkpoint includes its vision tower. Set `K8V4_VISION=1` to load it and accept OpenAI `image_url` content parts. This permits four images per prompt, limits image processing to 1,048,576 pixels, disables video input, and uses a 0.125 GiB processor cache. The default remains the measured text-only configuration. Vision startup and image inference on this patched XPU stack are pending validation after a GPU driver fault interrupted the deployment restart on October 1. All published benchmark results and the 814,581-token KV capacity were measured with vision disabled; enabling vision consumes additional memory and requires checking the new capacity.
+
 The current tested decode library hashes to `11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498`. The earlier library used by the historical curves hashes to `0b7e2dc92262b1778aadefc8ab71e484408d6b6e90ccb8641616ee078f92623a`. A rebuild can hash differently. The compile script prints the reference hash and does not fail the build on a mismatch.
 
 Overrides, all optional:
@@ -121,6 +123,10 @@ Overrides, all optional:
 | `K8V4_MAX_MODEL_LEN` | 262144 | maximum request window |
 | `K8V4_MAX_SEQS` | 4 | active sequence limit and graph sizes |
 | `K8V4_GPU_MEMORY_UTILIZATION` | 0.95 | memory budget fraction |
+| `K8V4_VISION` | 0 | set to 1 to load the vision tower |
+| `K8V4_MAX_IMAGES` | 4 | image limit per prompt when vision is enabled |
+| `K8V4_MAX_IMAGE_PIXELS` | 1048576 | image processor pixel limit |
+| `K8V4_MM_PROCESSOR_CACHE_GB` | 0.125 | multimodal processor cache size |
 | `K8V4_MAX_BATCHED_TOKENS` | 4224 | scheduler cap |
 
 New natural-EOS coding curve, concurrency 1:
