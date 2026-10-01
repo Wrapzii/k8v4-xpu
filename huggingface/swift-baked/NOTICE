@@ -1,0 +1,28 @@
+Swift 1.5 Qwen3.8-27B
+Copyright 2026 UkisAI
+
+UkisAI's contribution (the "Swift Contribution") is licensed under the
+Swift Open License v1.0. See LICENSE.
+
+This model is a Derivative Work of Qwen3.8-27B
+  https://huggingface.co/Qwen/Qwen3.8-27B
+  Copyright 2026 Alibaba Cloud
+  Licensed under the Apache License, Version 2.0. See LICENSE-APACHE-2.0.
+
+Swift 1.5 continues UkisAI's Swift 1.0 model, itself a Qwen3.8-27B
+derivative. The full release incorporates the Qwen3.8-27B Base Model and
+UkisAI's Swift 1.0 and Swift 1.5 contributions.
+
+Changes made by UkisAI (Apache License 2.0, Section 4(b) change notice):
+  - model-*.safetensors, model.safetensors.index.json: the model weights from
+    Swift 1.0 were further adapted by UkisAI using additional post-training
+    methods.
+  - README.md: replaced. LICENSE and NOTICE added.
+  - All other files (config.json, generation_config.json, chat_template.jinja,
+    tokenizer.json, tokenizer_config.json, vocab.json, merges.txt,
+    preprocessor_config.json, video_preprocessor_config.json) are retained from
+    the parent model and remain available under Apache License, Version 2.0.
+
+Wrapzii derivative modifications — 2026-10-01
+Swift-specific calibrated GPTQ INT4 bake of nine output-head/MTP linears; INT8 embedding side file and TP-aware runtime; GPTQ compatibility metadata; low-default chat template; K8/V4 serving measurements. Swift/UkisAI, Qwen and upstream notices above are retained. See MODIFICATIONS.json and BAKE.json. Launch80/B65 tooling attribution is retained in the linked k8v4-xpu repository.
+
