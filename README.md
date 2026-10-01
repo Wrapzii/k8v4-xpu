@@ -104,6 +104,8 @@ MODEL_DIR=/path/to/Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8 bash k8v4_v030/laun
 
 The checkpoint includes its vision tower. Vision is enabled by default and accepts OpenAI `image_url` content parts. This permits four images per prompt, limits image processing to 1,048,576 pixels, disables video input, and uses a 0.125 GiB processor cache. Set `K8V4_VISION=0` to reproduce the measured text-only configuration. On October 1, after a VM reboot cleared a GPU driver fault, the production server started with these image settings and correctly identified a 64×64 red image through `/v1/chat/completions`. Its startup reported 830,415 tokens of shared KV capacity (3.17 full 262,144-token windows); four full windows still do not fit simultaneously. This is a startup capacity report and a functional image check, not a new performance benchmark. All published benchmark results and the earlier 814,581-token capacity were measured with vision disabled.
 
+The [October 1 runtime update](docs/2026-10-01-runtime.md) documents Hermes low/medium thinking controls, the corrected boot-time GPU limits, and the live memory-pressure investigation.
+
 The current tested decode library hashes to `11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498`. The earlier library used by the historical curves hashes to `0b7e2dc92262b1778aadefc8ab71e484408d6b6e90ccb8641616ee078f92623a`. A rebuild can hash differently. The compile script prints the reference hash and does not fail the build on a mismatch.
 
 Overrides, all optional:
