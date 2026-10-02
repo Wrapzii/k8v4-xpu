@@ -1,0 +1,20 @@
+[Unit]
+Description=Forgejo runner with dedicated HDD storage
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/hdd-500gb /home/dan/forge-runner/host-workdir /home/dan/forge-runner/cache /home/dan/forge-runner/workspace
+BindsTo=mnt-hdd\x2d500gb.mount
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dan/forge-runner
+ExecStartPre=/usr/bin/python3 /home/dan/forge-runner/runner_storage_guard.py --uuid d457230b-767b-4ff2-8a0e-4366b7b030f4
+ExecStart=/usr/bin/docker compose up --abort-on-container-exit --exit-code-from runner runner
+ExecStop=/usr/bin/docker compose stop --timeout 30 runner
+Restart=on-failure
+RestartSec=30
+TimeoutStopSec=45
+
+[Install]
+WantedBy=multi-user.target

@@ -19,12 +19,23 @@ import time
 
 VOLUME = 'wrapzii-cargo-target-ai01'
 RUNNER = 'wrapzii-server-runner'
-ROOT = Path('/var/lib/docker/volumes') / VOLUME / '_data'
+ROOT = Path(os.environ.get('CI_CARGO_STORAGE_ROOT', '/var/lib/docker/volumes/' + VOLUME + '/_data'))
 GIB = 1024**3
 ARTIFACT = re.compile(r'^(.*)-([0-9a-f]{16})$')
 
 def docker(*args):
     return subprocess.check_output(['docker', *args], text=True, timeout=30).strip()
+
+def validate_volume_root(root, info):
+    """Accept the named volume's native directory or its exact local bind source."""
+    options = info.get('Options') or {}
+    if info.get('Name') != VOLUME or info.get('Driver') != 'local':
+        raise RuntimeError('Unexpected Cargo volume identity')
+    if options:
+        if options.get('type') != 'none' or options.get('o') != 'bind' or options.get('device') != str(root):
+            raise RuntimeError('Unexpected Cargo bind source')
+    elif info.get('Mountpoint') != str(root):
+        raise RuntimeError('Unexpected Cargo volume path')
 
 def active_build():
     names = docker('ps', '--format', '{{.Names}}').splitlines()
@@ -92,8 +103,12 @@ def main():
     if not 0 < a.target_gib < a.max_gib or not 0 < a.emergency_gib <= a.reserve_gib:
         raise ValueError('Invalid thresholds')
     root = ROOT.resolve(strict=True)
-    if ROOT.is_symlink() or root != ROOT or docker('volume', 'inspect', VOLUME, '--format', '{{.Mountpoint}}') != str(root):
+    if ROOT.is_symlink() or root != ROOT:
         raise RuntimeError('Unexpected Cargo volume path')
+    validate_volume_root(root, json.loads(docker('volume', 'inspect', VOLUME))[0])
+    expected_uuid = os.environ.get('CI_CARGO_STORAGE_UUID')
+    if expected_uuid and subprocess.check_output(['findmnt', '-n', '-o', 'UUID', '--target', str(root)], text=True).strip() != expected_uuid:
+        raise RuntimeError('Cargo storage disk is not mounted as expected')
     if not any((root / name).is_file() for name in ('.rustc_info.json', 'CACHEDIR.TAG')):
         if not (root / 'debug').exists() and not (root / 'release').exists():
             print('Deferred: no populated Cargo cache yet')
@@ -123,6 +138,10 @@ def main():
                 if reason:
                     print('Deferred after dispatch check:', reason)
                     return
+                if expected_uuid and shutil.disk_usage('/').free < a.emergency_gib * GIB:
+                    docker('stop', '--time', '30', RUNNER)
+                    paused = False
+                    raise RuntimeError('System disk below emergency reserve; idle runner stopped. HDD cleanup cannot reclaim system storage.')
             with ExitStack() as cargo_locks:
                 try:
                     # Lock each profile, including current fine-grained locks.

@@ -3,10 +3,19 @@ import os
 from pathlib import Path
 import tempfile
 import time
-from maintain_ci_cargo_cache import candidates
+from maintain_ci_cargo_cache import candidates, validate_volume_root, VOLUME
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary).resolve()
+    validate_volume_root(root, {'Name': VOLUME, 'Driver': 'local', 'Mountpoint': str(root), 'Options': None})
+    validate_volume_root(root, {'Name': VOLUME, 'Driver': 'local', 'Options': {'type': 'none', 'o': 'bind', 'device': str(root)}})
+    try:
+        validate_volume_root(root, {'Name': VOLUME, 'Driver': 'local', 'Options': {'type': 'none', 'o': 'bind', 'device': '/wrong-disk'}})
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('Mismatched bind source must be rejected')
+    print('PASS: native and HDD-backed volume validation; wrong bind source rejected')
     deps = root / 'debug/deps'
     deps.mkdir(parents=True)
     now = time.time()
