@@ -68,3 +68,8 @@ leaving about 44 GiB free. Libraries and incremental state were retained.
 Normal and emergency allowlist fixtures passed. No full engine rerun or speedup
 was measured as part of this repair. A single build can still exceed available
 space; additional storage or reduced debug information is needed for that case.
+
+Immediately afterward, a separate concurrent process removed the remaining
+Cargo build artifacts; disk free rose to about 94 GiB. The actor was not
+identified. Subsequent CI will need a cold build. The helper safely defers
+when no populated Cargo cache exists, rather than fabricating cache markers.

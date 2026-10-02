@@ -94,6 +94,9 @@ def main():
     if ROOT.is_symlink() or root != ROOT or docker('volume', 'inspect', VOLUME, '--format', '{{.Mountpoint}}') != str(root):
         raise RuntimeError('Unexpected Cargo volume path')
     if not any((root / name).is_file() for name in ('.rustc_info.json', 'CACHEDIR.TAG')):
+        if not (root / 'debug').exists() and not (root / 'release').exists():
+            print('Deferred: no populated Cargo cache yet')
+            return
         raise RuntimeError('Missing Cargo cache marker')
     with Path('/run/lock/ai01-cargo-cache.lock').open('w') as lock:
         try:
