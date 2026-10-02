@@ -16,3 +16,12 @@ Validation: two profile-limit/history tests pass using the canonical test runner
 including A-to-B-to-A config isolation. The broader existing stale-vision suite
 was blocked by its real-install manifest access under the home-I/O guard; no
 full-suite success or live repaired-conversation success is claimed.
+
+## Server deployment (2026-10-02)
+
+The same patch and four-image setting were applied to the AI server default,
+wrapzii, cursor-engine (Compose), and reviewer-luna profiles. Both regression
+checks passed against real server imports and temporary A/B/A profile homes.
+The canonical runner could not start because that runtime lacks pytest; the
+checks were also executed directly without adding dependencies. Room gateways
+were restarted to load the patch.
