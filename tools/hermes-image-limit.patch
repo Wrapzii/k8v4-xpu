@@ -1,0 +1,64 @@
+diff --git a/agent/chat_completion_helpers.py b/agent/chat_completion_helpers.py
+index bc2ea9c30d..c96184db1d 100644
+--- a/agent/chat_completion_helpers.py
++++ b/agent/chat_completion_helpers.py
+@@ -2245,7 +2245,8 @@ def _iteration_summary_api_messages(agent, messages: list) -> list:
+     api_messages = agent._sanitize_api_messages(api_messages)
+     # Same send-path vision eviction as the main loop (#89296).
+     from agent.context_compressor import evict_stale_outbound_tool_images
+-    evict_stale_outbound_tool_images(api_messages)
++    from agent.image_eviction_policy import configured_outbound_image_limit
++    evict_stale_outbound_tool_images(api_messages, limit=configured_outbound_image_limit())
+     # Same per-model image strip as turn_api_request.build_api_request: this path builds
+     # api_messages by hand and calls _build_api_kwargs directly, so a model recorded in
+     # agent._image_rejecting_models would otherwise get images here → 4xx → no summary.
+diff --git a/agent/context_compressor.py b/agent/context_compressor.py
+index 5357187552..cf39159776 100644
+--- a/agent/context_compressor.py
++++ b/agent/context_compressor.py
+@@ -1475,7 +1475,7 @@ def _image_payload(msg: Dict[str, Any]) -> Tuple[int, int]:
+     return blocks, payload
+ 
+ 
+-def evict_stale_outbound_tool_images(api_messages: List[Dict[str, Any]]) -> int:
++def evict_stale_outbound_tool_images(api_messages: List[Dict[str, Any]], *, limit: int = 20) -> int:
+     """Drop stale screenshot/vision payloads from the per-call API copy.
+ 
+     Compression's keep-newest pass only runs when prune/compress fires, and the Anthropic
+@@ -1507,6 +1507,7 @@ def evict_stale_outbound_tool_images(api_messages: List[Dict[str, Any]]) -> int:
+         reserved_blocks,
+         carrier_bytes_newest_first=[size for _, (_, size) in carriers],
+         reserved_bytes=reserved_bytes,
++        limit=limit,
+     )
+     pruned = 0
+     for i, _ in carriers[len(carriers) - retire:]:
+diff --git a/agent/image_eviction_policy.py b/agent/image_eviction_policy.py
+index cde689d3d1..51c947d776 100644
+--- a/agent/image_eviction_policy.py
++++ b/agent/image_eviction_policy.py
+@@ -94,3 +94,10 @@ def outbound_image_retire_count(
+         if _fits(total - retire):
+             break
+     return retire
++
++
++def configured_outbound_image_limit() -> int:
++    """Resolve the current profile limit at the scoped request boundary."""
++    from hermes_cli.config import load_config_readonly
++    value = load_config_readonly().get("model", {}).get("max_images_per_request")
++    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else OUTBOUND_IMAGE_LIMIT
+diff --git a/agent/turn_request_assembly.py b/agent/turn_request_assembly.py
+index 79a56c6278..70531ca2ca 100644
+--- a/agent/turn_request_assembly.py
++++ b/agent/turn_request_assembly.py
+@@ -152,7 +152,8 @@ def assemble_api_request(
+     # place; persisted history is untouched.
+     from agent.context_compressor import evict_stale_outbound_tool_images
+ 
+-    evict_stale_outbound_tool_images(api_messages)
++    from agent.image_eviction_policy import configured_outbound_image_limit
++    evict_stale_outbound_tool_images(api_messages, limit=configured_outbound_image_limit())
+ 
+     # One-time repeated-heal notice goes out via the status/warning callback, NEVER
+     # appended to messages: the cached prompt prefix stays byte-identical.
