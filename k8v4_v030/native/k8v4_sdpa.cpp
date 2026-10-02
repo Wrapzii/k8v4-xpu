@@ -17,6 +17,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <cstdio>
 #include <limits>
 #include <map>
@@ -46,6 +48,9 @@ struct Partition {
   dnnl::graph::compiled_partition compiled;
   std::vector<logical_tensor> inputs;
   std::vector<logical_tensor> outputs;
+  // Stable host scalars: this map entry outlives every submitted execution.
+  int32_t len_k;
+  int32_t len_q;
 };
 
 struct HostScale {
@@ -163,7 +168,8 @@ Partition &partition_for(Engine &engine, int64_t q_len, int64_t kv_len, int64_t 
   std::fprintf(stderr, "k8v4_sdpa compile q=%lld kv=%lld hq=%lld hk=%lld ms=%lld\n",
                static_cast<long long>(q_len), static_cast<long long>(kv_len), static_cast<long long>(hq),
                static_cast<long long>(hk), static_cast<long long>(ms));
-  return cache.emplace(shape_key, Partition{std::move(compiled), std::move(inputs), std::move(outputs)}).first->second;
+  return cache.emplace(shape_key, Partition{std::move(compiled), std::move(inputs), std::move(outputs),
+      static_cast<int32_t>(kv_len), static_cast<int32_t>(q_len)}).first->second;
 }
 
 void sdpa_len(at::Tensor query, at::Tensor key, at::Tensor value, at::Tensor out, double scale, int64_t len_k,
@@ -196,22 +202,29 @@ void sdpa_len(at::Tensor query, at::Tensor key, at::Tensor value, at::Tensor out
   if (!host.neg_inf.defined()) {
     host.neg_inf = at::full({1}, -std::numeric_limits<float>::infinity(), query.options().dtype(at::kFloat));
   }
-  int32_t len_k_i = static_cast<int32_t>(len_k);
-  int32_t len_q_i = static_cast<int32_t>(len_q);
+  static const bool async_mode = [] {
+    const char *value = std::getenv("K8V4_SDPA_ASYNC");
+    return value != nullptr && std::strcmp(value, "1") == 0;
+  }();
+  TORCH_CHECK(!async_mode || queue.is_in_order(), "async SDPA requires an in-order XPU queue");
   using tensor = dnnl::graph::tensor;
   std::vector<tensor> inputs{
       tensor(part.inputs[0], engine.eng, query.data_ptr()),
       tensor(part.inputs[1], engine.eng, key.data_ptr()),
       tensor(part.inputs[2], engine.eng, host.divisor.data_ptr()),
-      tensor::make_scalar_tensor(part.inputs[3], &len_k_i),
-      tensor::make_scalar_tensor(part.inputs[4], &len_q_i),
+      tensor::make_scalar_tensor(part.inputs[3], &part.len_k),
+      tensor::make_scalar_tensor(part.inputs[4], &part.len_q),
       tensor(part.inputs[5], engine.eng, host.neg_inf.data_ptr()),
       tensor(part.inputs[6], engine.eng, value.data_ptr()),
   };
   std::vector<tensor> outputs{tensor(part.outputs[0], engine.eng, out.data_ptr())};
   dnnl::graph::sycl_interop::execute(part.compiled, engine.stream, inputs, outputs);
-  // Host scalars are stack memory. The stream must finish reading them before return.
-  engine.stream.wait();
+  // Shapes and host scalars are immutable in stable std::map entries.
+  // On an in-order current stream, downstream Torch operations consume the
+  // output after this execution without a per-head host wait.
+  if (!async_mode) {
+    engine.stream.wait();
+  }
 }
 
 }  // namespace

@@ -195,17 +195,24 @@ def head_major_prefill(
     q_pad = query_pad_rows(q_len, bucket)
     padded = pad_queries_top(query, q_pad)
     out = torch.empty((q_pad, HQ, D), dtype=query.dtype, device=query.device)
+    gather = gather_dequant_head
+    gather_mode = os.environ.get("K8V4_PREFILL_GATHER", "torch")
+    if gather_mode not in ("torch", "triton"):
+        raise RuntimeError("K8V4_PREFILL_GATHER must be torch or triton")
+    if gather_mode == "triton" and query.device.type == "xpu":
+        from k8v4_v030.prefill_gather_triton import gather_dequant_head_fused
+        gather = gather_dequant_head_fused
     for head in range(HKV):
         if profile_enabled():
             with profile_range("attn_gather", "gather_dequant_head"):
-                key, value = gather_dequant_head(
+                key, value = gather(
                     views, block_row, seq_len, head, pages_per_block, query.dtype
                 )
             qg = padded[:, head * GQA : (head + 1) * GQA, :]
             with profile_range("attn_sdpa", "score_one_group"):
                 scored = score_one_group(qg, key, value, scale, seq_len, q_pad)
         else:
-            key, value = gather_dequant_head(
+            key, value = gather(
                 views, block_row, seq_len, head, pages_per_block, query.dtype
             )
             qg = padded[:, head * GQA : (head + 1) * GQA, :]
