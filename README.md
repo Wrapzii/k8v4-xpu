@@ -70,6 +70,7 @@ A 4-KV-head page padded out to the one-GPU layout is larger than FP8 on a rank. 
 
 - **Paged K8/V4 decode:** native SYCL attention runs inside `FULL_DECODE_ONLY` graphs. Stage-2 uses 32 subgroups for the one-row draft and 8 for verification, selected independently by the launcher.
 - **oneDNN prefill:** one KV head is dequantized at a time for oneDNN Graph SDPA, outside the decode graph. The graph pattern is adapted from [exl3xpu](https://github.com/0xSero/exl3xpu) (`csrc/exl3_ops.sycl`, MIT, Copyright (c) 2026 0xSero).
+- **Fused paged gather:** the launcher selects `K8V4_PREFILL_GATHER=triton`, removing intermediate GPU int32/fp32 tensors while preserving bitwise gather outputs. The small full-model timing differences are provisional; this is a confirmed memory reduction, not a claimed new throughput gain. [Implementation and measurements](docs/prefill-optimization-2026-10-02.md).
 - **MLP-only W4A8:** large `.mlp.` prefill linears quantize activations to int8. Attention and GDN projections, and small MTP decode linears, keep `int4_gemm_w4a16`.
 
 The [historical benchmark archive](docs/historical-benchmarks.md) preserves the earlier component experiments, forced-token fox curve and BetterBench comparisons. They are separate from the current coding results above.
@@ -136,6 +137,8 @@ Overrides, all optional:
 | `SERVED_NAME` | `Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8` | must match the benchmark client |
 | `K8V4_CACHE` | `.cache/vllm-k8v4` | prefix-cache directory |
 | `K8V4_PREFILL` | `onednn` | prefill attention |
+| `K8V4_PREFILL_GATHER` | `triton` | fused GPU paged gather; `torch` restores original gather |
+| `K8V4_SDPA_ASYNC` | `0` | experimental host-wait removal; no measured cold-128K gain |
 | `K8V4_PREFILL_GEMM` | `w4a8` | MLP GEMM |
 | `XE2_KV_S2_NSG` | 32 | parallel stage-2 subgroups |
 | `XE2_KV_S2_NSG_DRAFT` | 32 | one-row draft subgroups |
