@@ -1,0 +1,109 @@
+{
+  "image_id": "sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742",
+  "args": [
+    "/model",
+    "--host=0.0.0.0",
+    "--port=8000",
+    "--served-model-name",
+    "Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",
+    "Swift-1.5-Qwen3.8-27b-AutoRound-GPTQ-compat",
+    "Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8",
+    "--gpu-memory-utilization=0.95",
+    "--dtype=bfloat16",
+    "--max-model-len=262144",
+    "--kv-cache-dtype=int8_k_int4_v",
+    "--tensor-parallel-size=2",
+    "--max-num-seqs=4",
+    "--max-num-batched-tokens=4224",
+    "--enable-auto-tool-choice",
+    "--tool-call-parser=qwen3_xml",
+    "--reasoning-parser=qwen3",
+    "--enable-prefix-caching",
+    "--limit-mm-per-prompt={\"image\":4,\"video\":0}",
+    "--mm-processor-kwargs={\"max_pixels\":1048576}",
+    "--mm-processor-cache-gb=0.125",
+    "--trust-remote-code",
+    "--speculative-config={\"method\":\"mtp\",\"num_speculative_tokens\":6}",
+    "--compilation-config={\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":[7,14,21,28]}"
+  ],
+  "gpu_env": {
+    "K8V4_PREFILL": "onednn",
+    "CCL_SYCL_ALLREDUCE_SIMPLE_READ": "1",
+    "CCL_SYCL_ALLREDUCE_SIMPLE_THRESHOLD": "4294967296",
+    "CCL_SYCL_ALLTOALL_TMP_BUF": "1",
+    "ZE_AFFINITY_MASK": "0,1",
+    "K8V4_SDPA_LIB": "/opt/k8v4/libk8v4_sdpa.so",
+    "K8V4_PREFILL_GEMM": "w4a8",
+    "CCL_SYCL_ALLGATHERV_SIMPLE_THRESHOLD": "4294967296",
+    "VLLM_TARGET_DEVICE": "xpu",
+    "VLLM_XPU_ENABLE_XPU_GRAPH": "1",
+    "ZE_FLAT_DEVICE_HIERARCHY": "COMPOSITE",
+    "XE2_KV_S2_NSG_DRAFT": "32",
+    "XE2_KV_S2_NSG_VERIFY": "8",
+    "XE2_KV_S2_TWO_PASS": "0",
+    "XE2_KV_S2_NSG": "32",
+    "CCL_SYCL_ALLREDUCE_LL": "twoshots",
+    "CCL_SYCL_COPY_ENGINE": "1",
+    "CCL_SYCL_REDUCE_SCATTER_SIMPLE_THRESHOLD": "4294967296",
+    "XE2_KV_LIB": "/opt/k8v4/libxe2_kv.so",
+    "VLLM_WORKER_MULTIPROC_METHOD": "spawn"
+  },
+  "mounts": [
+    {
+      "Type": "bind",
+      "Source": "/srv/models/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",
+      "Destination": "/model",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/dev/dri",
+      "Destination": "/dev/dri",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/srv/models/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8/chat_template_low.jinja",
+      "Destination": "/model/chat_template.jinja",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/dan/k8v4-opt-20260930/serve-stack",
+      "Destination": "/opt/k8v4-opt",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/dev/dri/by-path",
+      "Destination": "/dev/dri/by-path",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/dan/k8v4-opt-20260930/merge-candidate/libxe2_kv_candidate.so",
+      "Destination": "/opt/k8v4/libxe2_kv.so",
+      "Mode": "ro",
+      "RW": false,
+      "Propagation": "rprivate"
+    },
+    {
+      "Type": "bind",
+      "Source": "/home/dan/k8v4-v030-build/cache-stack",
+      "Destination": "/root/.cache/vllm",
+      "Mode": "",
+      "RW": true,
+      "Propagation": "rprivate"
+    }
+  ]
+}
