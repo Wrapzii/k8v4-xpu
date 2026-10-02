@@ -3,7 +3,7 @@ Description=Check Forge Cargo cache between jobs
 
 [Timer]
 OnBootSec=10min
-OnUnitInactiveSec=15min
+OnUnitInactiveSec=1min
 Persistent=true
 
 [Install]

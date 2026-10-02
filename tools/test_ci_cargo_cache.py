@@ -34,3 +34,9 @@ with tempfile.TemporaryDirectory() as temporary:
     assert [entry[1] for entry in selected] == [old], selected
     assert old.exists(), 'Candidate selection must not delete'
     print('PASS: newest variants, libraries, fresh files, symlinks and hardlinks retained; selection is read-only')
+
+    emergency = candidates(root, now, min_age=0, keep=0)
+    assert len(emergency) == 8, emergency
+    assert all(x[1].name.startswith(('test_case-', 'recent-', 'shared-')) for x in emergency)
+    assert old.exists(), 'Emergency selection must not delete'
+    print('PASS: emergency includes sole/new binaries, still excludes libraries/symlinks/hardlinks')

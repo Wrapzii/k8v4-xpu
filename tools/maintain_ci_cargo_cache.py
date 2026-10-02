@@ -2,6 +2,7 @@
 
 Linux only. Defaults to dry-run. With --apply, pauses the idle runner before
 rechecking jobs/processes and taking Cargo's target-directory advisory lock.
+Under low disk space, linked executables may be discarded and relinked next job.
 Never deletes libraries, sources, model files, or whole target directories.
 """
 import argparse
@@ -85,7 +86,7 @@ def main():
     p.add_argument('--apply', action='store_true')
     p.add_argument('--max-gib', type=float, default=60)
     p.add_argument('--target-gib', type=float, default=50)
-    p.add_argument('--reserve-gib', type=float, default=20)
+    p.add_argument('--reserve-gib', type=float, default=40)
     a = p.parse_args()
     if not 0 < a.target_gib < a.max_gib or a.reserve_gib <= 0:
         raise ValueError('Invalid thresholds')
@@ -136,7 +137,8 @@ def main():
                 if total <= a.max_gib * GIB and free >= a.reserve_gib * GIB:
                     print(json.dumps({'action': 'none', 'cache_gib': round(total/GIB, 2), 'free_gib': round(free/GIB, 2)}))
                     return
-                plan = candidates(root, time.time())
+                emergency = free < a.reserve_gib * GIB
+                plan = candidates(root, time.time(), min_age=0, keep=0) if emergency else candidates(root, time.time())
                 reclaimed = 0
                 removed = 0
                 for _, file, size in plan:
@@ -154,7 +156,13 @@ def main():
                     'cache_gib_before': round(total/GIB, 2), 'free_gib_before': round(free/GIB, 2),
                     'duplicate_executables': removed, 'reclaimable_gib': round(reclaimed/GIB, 2),
                     'budget_met_estimate': total-reclaimed <= a.target_gib*GIB and free+reclaimed >= a.reserve_gib*GIB,
-                    'policy': 'retain newest two variants per executable name; minimum age one hour; preserve all libraries/incremental/build/fingerprints'}))
+                    'emergency': emergency,
+                    'policy': ('low-space: discard linked executables; preserve libraries/incremental/build/fingerprints' if emergency else 'retain newest two variants per executable name; minimum age one hour; preserve all libraries/incremental/build/fingerprints')}))
+                if a.apply and shutil.disk_usage(root).free < a.reserve_gib * GIB:
+                    # Do not admit another job when the allowlist cannot make space.
+                    docker('stop', '--time', '30', RUNNER)
+                    paused = False
+                    raise RuntimeError('Insufficient disk reserve after cleanup; runner stopped. Reclaim storage, then start runner explicitly.')
         finally:
             if paused:
                 docker('unpause', RUNNER)
