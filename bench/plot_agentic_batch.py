@@ -64,5 +64,7 @@ fig.text(.08, .015, '27 synthetic coding turns; shared warmed 64K seed; one fres
          'Chunked SSE delivery is measured at the client; it is not a kernel-time trace. One pass per cap.', fontsize=9)
 fig.tight_layout(rect=[0, .05, 1, .94])
 a.output.parent.mkdir(parents=True, exist_ok=True)
-fig.savefig(a.output.with_suffix('.svg'))
+svg_path = a.output.with_suffix('.svg')
+fig.savefig(svg_path)
+svg_path.write_text('\n'.join(line.rstrip() for line in svg_path.read_text().splitlines()) + '\n')
 fig.savefig(a.output.with_suffix('.png'), dpi=160)
