@@ -21,6 +21,8 @@ Thinking disabled; warmed decode is the median of two samples. All listed sample
 
 See the [bake report](docs/swift-1.5-bake.md) for raw records, calibration, validation, observed concurrency, and comparison limits.
 
+The [October 2 batch-size comparison](docs/batched-prefill-2026-10-02.md) tests 4,224 versus 16,384 scheduled tokens with K8/V4. Larger chunks cut isolated 200K cold-prefill latency by 6.7% and completed a 27-turn overlapping agent workload 4.5% sooner, but increased its longest streaming pause from 5.33 to 15.61 seconds and reduced KV capacity from 869K to 765K tokens. The production default remains 4,224. The report includes delivery-over-time charts, raw stream timestamps, cached versus cold measurements, and reproduction clients.
+
 ## Previous Qwen: natural-EOS coding at 200K
 
 The September 30 K8/V4 coding curve reaches **62.49 tok/s median at 200,156 prompt tokens**; adding retrieval of constants from the start of the document reaches **65.04 tok/s median**. Each point has one warmup and three measured requests. All answers stop naturally and pass independent behavior checks.
