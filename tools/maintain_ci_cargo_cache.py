@@ -87,8 +87,9 @@ def main():
     p.add_argument('--max-gib', type=float, default=60)
     p.add_argument('--target-gib', type=float, default=50)
     p.add_argument('--reserve-gib', type=float, default=40)
+    p.add_argument('--emergency-gib', type=float, default=10)
     a = p.parse_args()
-    if not 0 < a.target_gib < a.max_gib or a.reserve_gib <= 0:
+    if not 0 < a.target_gib < a.max_gib or not 0 < a.emergency_gib <= a.reserve_gib:
         raise ValueError('Invalid thresholds')
     root = ROOT.resolve(strict=True)
     if ROOT.is_symlink() or root != ROOT or docker('volume', 'inspect', VOLUME, '--format', '{{.Mountpoint}}') != str(root):
@@ -140,7 +141,7 @@ def main():
                 if total <= a.max_gib * GIB and free >= a.reserve_gib * GIB:
                     print(json.dumps({'action': 'none', 'cache_gib': round(total/GIB, 2), 'free_gib': round(free/GIB, 2)}))
                     return
-                emergency = free < a.reserve_gib * GIB
+                emergency = free < a.emergency_gib * GIB
                 plan = candidates(root, time.time(), min_age=0, keep=0) if emergency else candidates(root, time.time())
                 reclaimed = 0
                 removed = 0
@@ -161,7 +162,7 @@ def main():
                     'budget_met_estimate': total-reclaimed <= a.target_gib*GIB and free+reclaimed >= a.reserve_gib*GIB,
                     'emergency': emergency,
                     'policy': ('low-space: discard linked executables; preserve libraries/incremental/build/fingerprints' if emergency else 'retain newest two variants per executable name; minimum age one hour; preserve all libraries/incremental/build/fingerprints')}))
-                if a.apply and shutil.disk_usage(root).free < a.reserve_gib * GIB:
+                if a.apply and shutil.disk_usage(root).free < a.emergency_gib * GIB:
                     # Do not admit another job when the allowlist cannot make space.
                     docker('stop', '--time', '30', RUNNER)
                     paused = False

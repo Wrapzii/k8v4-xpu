@@ -28,7 +28,7 @@ It defaults to dry-run; the systemd service uses `--apply`.
   cache and 40 GiB free space.
 - Remove only duplicate hash-named ELF executables older than one hour,
   retaining the newest two variants per executable name.
-- Below the free-space reserve, also allow removing sole/recent hash-named
+- Below 10 GiB free space, also allow removing sole/recent hash-named
   linked executables. Cargo relinks those outputs; dependency libraries remain.
 - Preserve all libraries, build-script output, fingerprints, incremental
   compilation state, hardlinked files and symlinks.
@@ -37,7 +37,7 @@ It defaults to dry-run; the systemd service uses `--apply`.
 
 These thresholds are soft targets. The helper stops when there are no eligible
 executables; it never deletes protected artifacts merely to meet a budget.
-If applying cleanup cannot restore the free-space reserve, it stops the idle
+If applying cleanup cannot restore at least 10 GiB free, it stops the idle
 runner and reports failure. Reclaim storage and explicitly start the runner.
 The timer defers during builds; this is not a per-job admission reservation.
 The current cache was about 80 GiB, of which 71 GiB was under `debug/deps`
@@ -73,3 +73,7 @@ Immediately afterward, a separate concurrent process removed the remaining
 Cargo build artifacts; disk free rose to about 94 GiB. The actor was not
 identified. Subsequent CI will need a cold build. The helper safely defers
 when no populated Cargo cache exists, rather than fabricating cache markers.
+
+Emergency cleanup automatically triggers below 10 GiB free (every-minute idle
+check), aiming to restore 40 GiB free. Between 10 and 40 GiB, only conservative
+superseded-output cleanup runs. Active jobs defer deletion until they finish.
