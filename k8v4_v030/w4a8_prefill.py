@@ -219,6 +219,51 @@ def _apply_w4a8(kernel, layer, activation, bias):
     return out.to(dtype=activation.dtype)
 
 
+# The outer vLLM graph spans decode and prefill sizes. An opaque runtime
+# dispatch prevents a symbolic row-count branch from being folded into one
+# precision path for that entire graph range.
+_QUANT_COMPILED = None
+_RUNTIME_ENABLED = False
+_DIAGNOSTICS = os.environ.get("K8V4_GEMM_DIAGNOSTICS") == "1"
+_BRANCH_LOGGED = set()
+
+
+def _w4a16_runtime(flat, packed, scales, zeros, group_size, bias):
+    return torch.ops._xpu_C.int4_gemm_w4a16(
+        flat, packed, bias, scales, zeros, group_size, None,
+    )
+
+
+def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
+    flat = x.reshape(-1, x.shape[-1])
+    branch = "w4a16" if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX else "w4a8"
+    if _DIAGNOSTICS and branch not in _BRANCH_LOGGED:
+        import sys
+        sys.stderr.write("k8v4_mlp_gemm: branch=%s rows=%s input=%s\n" %
+                         (branch, flat.shape[0], x.dtype))
+        _BRANCH_LOGGED.add(branch)
+    if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX:
+        return _w4a16_runtime(flat, packed, scales, zeros, group_size, bias)
+    global _QUANT_COMPILED
+    if _QUANT_COMPILED is None:
+        _QUANT_COMPILED = torch.compile(_quantize_stored, dynamic=True, fullgraph=True)
+    quant_x, x_scale, x_zero = _QUANT_COMPILED(flat)
+    return w4a8_gemm(quant_x, x_scale, x_zero, packed, scales, zeros,
+                    group_size, bias).to(dtype=x.dtype)
+
+
+@torch.library.custom_op("k8v4_prefill::mlp_gemm", mutates_args=())
+def runtime_mlp_gemm(x: torch.Tensor, packed: torch.Tensor, scales: torch.Tensor,
+                     zeros: torch.Tensor, group_size: int,
+                     bias: torch.Tensor | None) -> torch.Tensor:
+    return _runtime_mlp_body(x, packed, scales, zeros, group_size, bias)
+
+
+@runtime_mlp_gemm.register_fake
+def _runtime_mlp_fake(x, packed, scales, zeros, group_size, bias):
+    return x.new_empty((x.numel() // x.shape[-1], packed.shape[1]))
+
+
 def _install_on_class(cls) -> None:
     global _ORIG_APPLY
     current = cls.apply_weights
@@ -227,7 +272,13 @@ def _install_on_class(cls) -> None:
     _ORIG_APPLY = current
 
     def apply_weights(self, layer, x, bias=None):
-        if not _large_m(x) or not _mlp_linear(layer):
+        if not _mlp_linear(layer):
+            return _ORIG_APPLY(self, layer, x, bias)
+        if torch.compiler.is_compiling():
+            packed, scales, zeros = _compile_safe_views(self, layer)
+            return runtime_mlp_gemm(x, packed, scales, zeros,
+                                    int(self.config.group_size), bias)
+        if not _large_m(x):
             return _ORIG_APPLY(self, layer, x, bias)
         return _apply_w4a8(self, layer, x, bias)
 
@@ -326,3 +377,16 @@ def remove_import_hook(finder=None) -> None:
         return
 
 
+
+
+def install_if_requested() -> None:
+    """Install before model compilation; cached opaque calls honor opt-out too."""
+    global _RUNTIME_ENABLED
+    mode = os.environ.get("K8V4_PREFILL_GEMM", "w4a16")
+    if mode not in ("w4a16", "w4a8"):
+        raise RuntimeError("K8V4_PREFILL_GEMM must be w4a16 or w4a8")
+    _RUNTIME_ENABLED = mode == "w4a8"
+    if _RUNTIME_ENABLED:
+        install()
+        import sys
+        sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")

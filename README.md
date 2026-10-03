@@ -8,9 +8,13 @@ The historical Qwen results below were measured on the previous local Qwen GPTQ 
 
 The earlier unbaked [October 1 Swift speed check](docs/swift-1.5-speed.md) records cold prefill and warmed decode under overlapping live traffic. It does not provide an isolated comparison against these results.
 
+## October 2: active MLP W4A8 prefill
+
+A runtime audit found that the vLLM 0.30 image requested W4A8 but never installed its MLP hook. The corrected path measured **1,255 tok/s fresh prefill at 128,197 tokens**, versus 1,157 before the fix (102.15 versus 110.81 seconds to first token). Long-context decode measured 78–81 tok/s in the new checks. The scheduler cap stays at 4,224; shared KV capacity is now 860,324 tokens, about 1% lower. These targeted concurrency-one checks do not establish unchanged multi-agent latency or general quality equivalence. See the [implementation, raw data, validation, and rejected attention candidate](docs/w4a8-wiring-2026-10-02.md).
+
 ## Current Swift bake: coding speed
 
-Thinking disabled; warmed decode is the median of two samples. All listed samples observed concurrency one. Fresh prefill includes time to first token and serving overhead.
+The table below preserves the October 1 bake measurements; see the October 2 report above for the latest runtime. Thinking disabled; warmed decode is the median of two samples. All listed samples observed concurrency one. Fresh prefill includes time to first token and serving overhead.
 
 | prompt tokens | fresh first-token latency | effective fresh prefill | warmed decode | median update gap |
 | ---: | ---: | ---: | ---: | ---: |

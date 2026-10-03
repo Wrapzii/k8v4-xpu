@@ -1,5 +1,7 @@
 # Measured numbers
 
+Latest October 2 runtime: the [MLP W4A8 wiring fix](docs/w4a8-wiring-2026-10-02.md) measured fresh 128,197-token prefill at **1,254.9 tok/s / 102.153 s to first token**, versus **1,156.9 tok/s / 110.810 s** before the fix. Both had zero cached prompt tokens; these are individual concurrency-one observations.
+
 ## New natural-EOS coding curve, September 30
 
 | prompt tokens | K8/V4 median tok/s | FP8 median tok/s | K8/V4 median update ms |

@@ -1,5 +1,7 @@
 # Prefill batch-size and overlapping agent conversations — October 2, 2026
 
+Runtime audit correction: these vLLM 0.30 comparisons used W4A16 GEMMs despite the requested W4A8 environment setting. The missing installer is fixed in the [subsequent wiring report](w4a8-wiring-2026-10-02.md); the timings here remain measurements of the earlier path.
+
 This measures `--max-num-batched-tokens=4224` against `16384` on the deployed
 Swift 1.5 GPTQ INT4 bake, with the Xe2 K8/V4 backend on two Arc Pro B60s.
 The image, weights, native library, TP=2, MTP=6, graphs, vision settings,
