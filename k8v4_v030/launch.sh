@@ -113,6 +113,7 @@ docker run -d --name "$NAME" --restart=no \
   -v "${MODEL_DIR}:/model:ro" \
   -v "${TEMPLATE}:/model/chat_template.jinja:ro" \
   -v "${CACHE}:/root/.cache/vllm" \
+  -v "${HERE}:/opt/k8v4/k8v4_v030:ro" \
   "${extra[@]}" \
   -e PYTHONPATH=/opt/k8v4 \
   -e XE2_KV_LIB=/opt/k8v4/libxe2_kv.so \
@@ -121,6 +122,7 @@ docker run -d --name "$NAME" --restart=no \
   -e K8V4_PREFILL_GATHER="${K8V4_PREFILL_GATHER:-triton}" \
   -e K8V4_SDPA_ASYNC="${K8V4_SDPA_ASYNC:-0}" \
   -e K8V4_PREFILL_GEMM="${K8V4_PREFILL_GEMM:-w4a8}" \
+  -e VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-/root/.cache/vllm/${K8V4_PREFILL_GEMM:-w4a8}-wired-v1}" \
   -e XE2_KV_S2_NSG="${XE2_KV_S2_NSG:-32}" \
   -e XE2_KV_S2_NSG_DRAFT="${XE2_KV_S2_NSG_DRAFT:-32}" \
   -e XE2_KV_S2_NSG_VERIFY="${XE2_KV_S2_NSG_VERIFY:-8}" \

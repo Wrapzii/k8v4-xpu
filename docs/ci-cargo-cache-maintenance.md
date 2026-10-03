@@ -17,7 +17,7 @@ not the only reason jobs take over twelve minutes.
 ## Installed maintenance
 
 `ai01-cargo-cache.timer` checks every minute. The helper is
-`tools/maintain_ci_cargo_cache.py`, installed under `/home/dan/forge-runner`.
+`tools/maintain_ci_cargo_cache.py`, installed under `<runner-home>/forge-runner`.
 It defaults to dry-run; the systemd service uses `--apply`.
 
 - Verify the exact named Cargo volume and target marker.
@@ -92,7 +92,7 @@ Runner data lives under `/mnt/hdd-500gb/forge-runner`:
 - `cargo-target`, `cargo-registry`, `cargo-git`: the existing Docker volume names
   now use the local driver's explicit bind sources on the HDD.
 - `host-workdir`, `cache`, `workspace`: bind mounts preserve the runner's
-  existing `/home/dan/forge-runner/...` paths.
+  existing `<runner-home>/forge-runner/...` paths.
 
 The idle runner was stopped before copying its existing build cache with
 `rsync -aHAX --numeric-ids`; a second dry-run compared the source and copy.
@@ -125,7 +125,7 @@ than the previous SSD-backed volume.
 Post-migration verification: all three Cargo mounts were writable ext4 from a
 test container, and the existing `.rustc_info.json` marker was retained. The
 runner re-declared its existing registration and began processing tasks
-17553–17555. Both runner service and cleanup timer are active and enabled;
+17553â€“17555. Both runner service and cleanup timer are active and enabled;
 maintenance correctly deferred for an active CI job. System-disk free space
 increased from approximately 48 GiB to 96 GiB, with approximately 403 GiB free
 on the HDD. A deliberately mismatched UUID was rejected by the startup guard.

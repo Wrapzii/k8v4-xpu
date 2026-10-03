@@ -75,7 +75,7 @@
     },
     {
       "Type": "bind",
-      "Source": "/home/dan/k8v4-opt-20260930/serve-stack",
+      "Source": "<server-home>/k8v4-opt-20260930/serve-stack",
       "Destination": "/opt/k8v4-opt",
       "Mode": "ro",
       "RW": false,
@@ -91,7 +91,7 @@
     },
     {
       "Type": "bind",
-      "Source": "/home/dan/k8v4-opt-20260930/merge-candidate/libxe2_kv_candidate.so",
+      "Source": "<server-home>/k8v4-opt-20260930/merge-candidate/libxe2_kv_candidate.so",
       "Destination": "/opt/k8v4/libxe2_kv.so",
       "Mode": "ro",
       "RW": false,
@@ -99,11 +99,17 @@
     },
     {
       "Type": "bind",
-      "Source": "/home/dan/k8v4-v030-build/cache-stack",
+      "Source": "<server-home>/k8v4-v030-build/cache-stack",
       "Destination": "/root/.cache/vllm",
       "Mode": "",
       "RW": true,
       "Propagation": "rprivate"
     }
-  ]
+  ],
+  "runtime_audit": {
+    "prefill_gemm_requested": "w4a8",
+    "prefill_gemm_observed": "w4a16",
+    "reason": "The 0.30 image did not invoke the MLP W4A8 installer. Saved compiled graphs had no W4A8 calls. This receipt describes the baseline before the wiring fix.",
+    "host_paths": "Home-directory prefixes are sanitized placeholders."
+  }
 }

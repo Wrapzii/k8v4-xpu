@@ -8,6 +8,7 @@ ENV PYTHONPATH=/opt/k8v4 \
     K8V4_SDPA_LIB=/opt/k8v4/libk8v4_sdpa.so \
     K8V4_PREFILL=onednn \
     K8V4_PREFILL_GEMM=w4a8 \
+    VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-wired-v1 \
     XE2_KV_S2_NSG=32
 RUN python3 -m py_compile \
       /opt/k8v4/k8v4_v030/backend.py \

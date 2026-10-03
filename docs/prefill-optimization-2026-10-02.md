@@ -1,10 +1,12 @@
 # Prefill optimization, 2026-10-02
 
+Runtime audit correction: these vLLM 0.30 comparisons used W4A16 GEMMs despite the requested W4A8 environment setting. The missing installer is fixed in the [subsequent wiring report](w4a8-wiring-2026-10-02.md); the timings here remain measurements of the earlier path.
+
 The fused paged gather reduces GPU temporary memory. The small full-model speed differences below do **not** establish a repeatable throughput gain. In particular, similar numbers were already observed with the larger scheduler batch cap; those changes must not be added together as independent gains.
 
 ## Fused paged gather
 
-`K8V4_PREFILL_GATHER=triton` selects `k8v4_v030/prefill_gather_triton.py` on XPU. The default remains `torch` for existing deployments. The server trial uses Triton with the original 4,224 scheduler cap.
+`K8V4_PREFILL_GATHER=triton` selects `k8v4_v030/prefill_gather_triton.py` on XPU. The published launcher now defaults to `triton`; set the selector to `torch` for the reference path. The server uses Triton with the original 4,224 scheduler cap.
 
 A single Triton kernel gathers a logical KV head from paged region-major storage, unpacks V nibbles, and applies the existing K scale and V affine scale/zero in fp32. It writes the same floating-point K/V tensors needed by oneDNN attention. Floating-point fusion is disabled to preserve rounding. The token count is a runtime argument, avoiding a separate gather compilation for every context length.
 

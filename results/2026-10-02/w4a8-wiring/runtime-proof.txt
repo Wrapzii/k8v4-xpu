@@ -1,0 +1,9 @@
+(Worker_TP0 pid=257) k8v4_w4a8: MLP-only installer active; small-M runtime gate=128
+(Worker_TP1 pid=258) k8v4_w4a8: MLP-only installer active; small-M runtime gate=128
+(Worker_TP0 pid=257) k8v4_mlp_gemm: branch=w4a8 rows=4224 input=torch.bfloat16
+(Worker_TP1 pid=258) k8v4_mlp_gemm: branch=w4a8 rows=4224 input=torch.bfloat16
+(Worker_TP0 pid=257) k8v4_mlp_gemm: branch=w4a16 rows=4 input=torch.bfloat16
+(Worker_TP1 pid=258) k8v4_mlp_gemm: branch=w4a16 rows=4 input=torch.bfloat16
+(EngineCore pid=193) INFO 10-03 00:12:30 [kv_cache_utils.py:2395] XPU KV cache size: 860,324 tokens, Maximum concurrency for 262,144 tokens per request: 3.28x
+(Worker_TP0 pid=147) k8v4_w4a8: MLP-only installer active; small-M runtime gate=128
+(Worker_TP1 pid=148) k8v4_w4a8: MLP-only installer active; small-M runtime gate=128
