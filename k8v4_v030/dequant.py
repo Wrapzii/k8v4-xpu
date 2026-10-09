@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import torch
 
-from k8v4_v030.layout import D, PAGE, PageLayout
+from k8v4_v030.layout import D, GQA, PAGE, PageLayout
 
 # fp32 bytes for one HQ * query_rows * key_tile score. 128 MiB is one tile.
 # The 96K fault gathered the whole suffix (about 82K tokens) on a full card.
@@ -188,7 +188,12 @@ def eager_gqa_attention(
     if query.shape[-1] != D or key.shape[-1] != D:
         raise RuntimeError("eager attention head shape")
     # Head layout comes from the tensors; an unsupported pair fails loudly.
-    layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
+    # PageLayout raises ValueError; this public path raised RuntimeError on
+    # origin/main, so keep that type for callers catching it.
+    try:
+        layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
+    except ValueError as error:
+        raise RuntimeError("eager attention head shape: %s" % error) from error
     if query.shape[0] > key.shape[0]:
         raise RuntimeError("query longer than the KV sequence")
     rows, key_tile = attention_tiles(query.shape[0], key.shape[0], layout.hq)
@@ -215,13 +220,20 @@ def eager_prefill(
         return query
     if q_len > seq_len:
         raise RuntimeError("query longer than the KV sequence")
+    # The views carry this rank's KV head count; the query must carry its Q count.
+    hkv = _views_hkv(views)
+    if int(query.shape[1]) != GQA * hkv:
+        raise RuntimeError(
+            "query has %d heads, the K8/V4 cache holds %d (needs %d)"
+            % (int(query.shape[1]), hkv, GQA * hkv)
+        )
     rows, key_tile = attention_tiles(q_len, seq_len, int(query.shape[1]))
     if key_tile >= seq_len:
         k_fp, v_fp = gather_dequant(views, block_row, seq_len, pages_per_block, query.dtype)
         return eager_gqa_attention(query, k_fp, v_fp, scale)
     return _online_paged(
         query, views, block_row, seq_len, pages_per_block, float(scale), rows, key_tile,
-        _views_hkv(views),
+        hkv,
     )
 
 
@@ -288,6 +300,7 @@ def _sdpa_gqa(
     tile, key_tile = attention_tiles(q_len, seq_len, int(query.shape[1]))
     if key_tile < seq_len:
         hkv = int(query.shape[1]) // gqa
+        _derived_gqa(int(query.shape[1]), hkv)
         return _online_dense(query, key, value, float(scale), tile, key_tile, hkv)
     if tile >= q_len:
         return _sdpa_rows(query, key, value, scale, repeat_kv, 0, q_len)
@@ -307,6 +320,16 @@ def _sdpa_gqa(
         )
     return torch.cat(parts, dim=0)
 
+def _derived_gqa(query_heads: int, hkv: int) -> int:
+    """Query heads per KV head; the kernel math is GQA=6, so a derived value must be."""
+    gqa, rem = divmod(int(query_heads), hkv)
+    if rem != 0 or gqa != GQA:
+        raise RuntimeError(
+            "K8/V4 attention needs %d query heads over %d KV heads, got %d"
+            % (GQA * hkv, hkv, query_heads)
+        )
+    return gqa
+
 
 def _online_accumulate(
     query: torch.Tensor,
@@ -325,7 +348,7 @@ def _online_accumulate(
     """One key tile of online-softmax GQA. State is ``[HKV, GQA, rows, ...]``."""
     rows = int(query.shape[0])
     kt = int(key.shape[0])
-    gqa = int(query.shape[1]) // hkv
+    gqa = _derived_gqa(int(query.shape[1]), hkv)
     qf = query.to(torch.float32).reshape(rows, hkv, gqa, D)
     kf = key.to(torch.float32)
     vf = value.to(torch.float32)
@@ -429,7 +452,7 @@ def _online_paged(
 ) -> torch.Tensor:
     """Stream key tiles once. Query rows are scored in budget-sized groups."""
     q_len = int(query.shape[0])
-    gqa = int(query.shape[1]) // hkv
+    gqa = _derived_gqa(int(query.shape[1]), hkv)
     device = query.device
     acc = torch.zeros((hkv, gqa, q_len, D), dtype=torch.float32, device=device)
     running_max = torch.full(

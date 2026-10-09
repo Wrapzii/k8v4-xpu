@@ -156,7 +156,12 @@ def head_major_attention(
     ``query`` is ``[q_len, HQ, D]`` and is the suffix of ``key``/``value``
     ``[seq_len, HKV, D]``. The head layout comes from those shapes.
     """
-    layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
+    # This path raised RuntimeError on origin/main; keep the type and add the
+    # layout detail instead of letting PageLayout's ValueError escape.
+    try:
+        layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
+    except ValueError as error:
+        raise RuntimeError("head-major attention head shape: %s" % error) from error
     gqa = layout.gqa
     hq = layout.hq
     hkv = layout.hkv

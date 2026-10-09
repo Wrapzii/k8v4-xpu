@@ -354,6 +354,44 @@ class EagerPrefillTest(unittest.TestCase):
                 self.assertTrue(torch.allclose(online[0], masked[0], atol=1e-5, rtol=1e-5))
                 self.assertGreater((online[-1] - masked[-1]).abs().max().item(), 1e-4)
 
+    def test_bad_head_pairs_keep_the_origin_main_error_types(self):
+        # Serving paths raised RuntimeError on origin/main; keep that type.
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                key = torch.randn(4, layout.hkv, D)
+                value = torch.randn(4, layout.hkv, D)
+                wrong_q = torch.randn(1, layout.hq + 1, D)
+                with self.assertRaises(RuntimeError):
+                    eager_gqa_attention(wrong_q, key, value, 0.0625)
+                with self.assertRaises(RuntimeError):
+                    eager_gqa_attention(
+                        torch.randn(1, layout.hq, D),
+                        torch.randn(4, layout.hkv + 1, D),
+                        value,
+                        0.0625,
+                    )
+                from k8v4_v030.onednn_prefill import head_major_attention
+
+                with self.assertRaises(RuntimeError):
+                    head_major_attention(wrong_q, key, value, 0.0625)
+                # eager_prefill checks the query heads against the bound views.
+                blob = bytearray(layout.page_bytes)
+                raw = torch.frombuffer(blob, dtype=torch.int8)
+                views = bind_regions(raw, layout)
+                block_row = torch.tensor([0], dtype=torch.int32)
+                with self.assertRaises(RuntimeError):
+                    eager_prefill(
+                        wrong_q, views, block_row, 1, 1, 0.0625
+                    )
+        # oracle.causal_gqa raised ValueError on origin/main; it still does.
+        from k8v4_v030.oracle import causal_gqa
+
+        key = deterministic_rows(2, 2, seed=71)
+        value = deterministic_rows(2, 2, seed=72)
+        query = [[[0.0] * D] * 13, [[0.0] * D] * 13]
+        with self.assertRaises(ValueError):
+            causal_gqa(query, key, value, 2, 1)
+
 
 if __name__ == "__main__":
     unittest.main()
