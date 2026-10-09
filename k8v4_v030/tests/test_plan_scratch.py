@@ -30,6 +30,7 @@ class PlanTest(unittest.TestCase):
         starts = [i * 7 for i in range(9)]
         self.assertEqual(uniform_packed_q_len(starts), 7)
         self.assertEqual(query_segments(starts), [(0, 8, 7)])
+        self.assertEqual(token_span(starts, 0, 8, 7), (0, 56))
 
     def test_mixed_prefill_is_not_a_packed_decode(self):
         starts = [0, 7, 14, 114]

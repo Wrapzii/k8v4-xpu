@@ -86,7 +86,8 @@ class LayoutTest(unittest.TestCase):
         self.assertNotIn("static constexpr int HKV = 4;", text)
         self.assertNotIn("K8V4_TP1", text)
         self.assertIn("int8k_int4v_attn_batch", text)
-        self.assertEqual(text.count("at::Tensor out, int64_t pages_per_block = 1)"), 3)
+        # ABI guard only: pages_per_block stays int64_t in every schema.
+        self.assertIn("int64_t pages_per_block", text)
         self.assertNotIn("at::Tensor out, int pages_per_block", text)
         self.assertIn("int q_len, int pages_per_block) -> ()", text)
         self.assertIn("bt[logical / pages_per_block]", text)
