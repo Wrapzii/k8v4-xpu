@@ -9,6 +9,7 @@ The head layout is per deployment, not a module constant: a TP2 rank holds
 Byte-level code carries an explicit :class:`PageLayout`; nothing here reads
 the environment.
 """
+
 from __future__ import annotations
 
 import dataclasses

@@ -1,6 +1,8 @@
 # OPTIONAL TP1 + DFlash2 drafter: the 27B keeps K8/V4 while the layers named by
 # --kv-cache-dtype-skip-layers (the drafter) run the stock XPU flash backend in
 # VLLM_KV_SKIP_DTYPE (fp8). Needs the padded-page vLLM patches, applied by
+# tools/patch_vllm_skip_fp8.py in the RUN below (idempotent: re-running a
+# patched image is a no-op).
 ARG BASE=vllm-openai-xpu:v0.30.0-k8v4-tp1
 FROM ${BASE}
 COPY tools/patch_vllm_skip_fp8.py /tmp/patch_vllm_skip_fp8.py
