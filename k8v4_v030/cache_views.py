@@ -67,6 +67,14 @@ def memory_order_bytes(kv_cache: torch.Tensor) -> torch.Tensor:
 
 def bind_regions(kv_cache: torch.Tensor, layout: PageLayout) -> dict[str, torch.Tensor]:
     """Five region views sharing ``kv_cache`` storage. No copy."""
+    # vLLM hands us [block, head, token, cell]; the head dim names the true
+    # KV head count. A 4-head cache bound with the 2-head layout would pass
+    # the byte-multiple check below and alias garbage.
+    if kv_cache.dim() == 4 and kv_cache.shape[1] > 1 and kv_cache.shape[1] != layout.hkv:
+        raise RuntimeError(
+            "K8/V4 cache has %d KV heads, layout serves %d"
+            % (int(kv_cache.shape[1]), layout.hkv)
+        )
     raw = memory_order_bytes(kv_cache)
     if raw.numel() % layout.page_bytes != 0:
         raise RuntimeError(

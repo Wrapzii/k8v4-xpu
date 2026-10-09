@@ -1,4 +1,4 @@
-"""Native vLLM 0.30 attention backend for the TP2 K8/V4 kernel.
+"""Native vLLM 0.30 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
 
 vLLM owns the block table and the slot map. Decode is one C++ op per
 uniform batch. Prefill stays on the eager path unless K8V4_PREFILL=onednn,
@@ -90,6 +90,7 @@ class Xe2K8V4Metadata(AttentionMetadata):
         max_seq_len: int,
         pages_per_block: int,
         packed_q_len: int,
+        layout: PageLayout,
     ):
         self.seq_lens = seq_lens
         self.slot_mapping = slot_mapping
@@ -102,6 +103,7 @@ class Xe2K8V4Metadata(AttentionMetadata):
         self.max_seq_len = max_seq_len
         self.pages_per_block = pages_per_block
         self.packed_q_len = packed_q_len
+        self.layout = layout
 
 
 class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
@@ -175,6 +177,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             max_seq_len=int(cam.max_seq_len),
             pages_per_block=attention_pages(spec.block_size, self.kernel_block_size),
             packed_q_len=uniform_packed_q_len(starts),
+            layout=self.layout,
         )
 
 
@@ -259,6 +262,19 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         cache = _one_cache(kv_cache)
         if cache.numel() == 0 or query.shape[0] == 0:
             return output
+        # The builder reads the KV cache spec, the impl reads the attention
+        # module; a mismatch would otherwise surface as a scratch error.
+        if attn_metadata.layout != self.layout:
+            raise RuntimeError(
+                "K8/V4 KV cache was built for %d KV / %d Q heads but the "
+                "attention impl derived %d KV / %d Q"
+                % (
+                    attn_metadata.layout.hkv,
+                    attn_metadata.layout.hq,
+                    self.layout.hkv,
+                    self.layout.hq,
+                )
+            )
         if attn_metadata.packed_q_len:
             self._packed(query, cache, attn_metadata, output)
             return output
