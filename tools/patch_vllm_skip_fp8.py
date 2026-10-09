@@ -13,11 +13,23 @@ root = Path(spec.origin).parent
 
 
 def patch(path, pairs):
+    """Apply each (old, new) hunk once. Already-applied hunks are skipped; a
+    hunk matching neither the original nor the patched text fails loudly."""
     s = path.read_text()
+    changed = False
     for old, new in pairs:
-        assert s.count(old) == 1, (path, s.count(old), old[:70])
-        s = s.replace(old, new, 1)
-    path.write_text(s)
+        if old in s:
+            assert s.count(old) == 1, (path, s.count(old), old[:70])
+            s = s.replace(old, new, 1)
+            changed = True
+        else:
+            assert s.count(new) == 1, (
+                path, 'hunk matches neither original nor patched text', old[:70])
+    if changed:
+        path.write_text(s)
+        print('patched', path)
+    else:
+        print('already patched', path)
 
 
 att = root / 'model_executor/layers/attention/attention.py'
