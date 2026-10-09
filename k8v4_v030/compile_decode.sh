@@ -2,13 +2,14 @@
 # Build build/libxe2_kv.so. One library serves both head layouts: 2 KV heads
 # on a TP2 rank and 4 on a single GPU; the ops dispatch at runtime.
 # Does not use the GPU and does not define a stamp build.
-# On a 12 GB host, stop the model server first. The two instantiations need
-# more compile memory than the single-layout build did.
+# The two-instantiation compile measured ~610 MiB peak container memory
+# (cgroup memory.peak, Oct 9). Capped at 1200m with a 4g swap bound, so
+# even a 12 GB host can build while the model server is running.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 mkdir -p "$ROOT/build"
-docker run --rm --memory=16g --entrypoint bash \
+docker run --rm --memory=1200m --memory-swap=4g --entrypoint bash \
   -v "$ROOT/k8v4_v030/native:/src:ro" \
   -v "$ROOT/build:/out" \
   k8v4-compile-2026 -lc '
