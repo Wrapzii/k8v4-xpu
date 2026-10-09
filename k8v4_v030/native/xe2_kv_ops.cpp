@@ -41,16 +41,12 @@ static constexpr int NTN = BN / TN;
 static constexpr int PV_NCHUNK = 4;
 static constexpr int KV_HALF = BK / 2;
 static constexpr float INV_SQRT_D = 0.0625f;
-// TP2 local heads. The one-GPU kernel was HKV=4, HQ=24. Padding a TP rank's
-// 2 KV heads out to 4 makes the cache larger than FP8, so this build is the
-// native 2-head layout. Stage2's grid is resized with S2_NWG (below).
-static constexpr int HKV = 2;
-static constexpr int HQ = 12;
-static constexpr int GQA = HQ / HKV;
+// Local KV heads per GPU: a TP2 rank holds 2 (12 Q heads), a single GPU
+// holding the whole model holds 4 (24 Q). One library serves both: kernels
+// are templated on HKV and the torch ops pick the instantiation from the
+// head count their tensors carry (dispatch_hkv below). GQA stays 6.
 static constexpr int PAGE = BM;
-static constexpr int QQUANT_HEADS = HKV;
 static constexpr int STORE_WG = 32;
-static constexpr int S2_NWG = 16;
 static constexpr int S2_SG_COUNT = 8;
 
 static constexpr int kSbytes = BM * BN * static_cast<int>(sizeof(float));
@@ -62,8 +58,35 @@ static constexpr int kSlmFloats =
 static_assert(BK % TK_I8 == 0, "int8 TK=32 must divide head dim 256");
 static_assert(TM == 8 && TN == 16, "bmg_g21 int8 tile is M<=8, N=16, K=32");
 static_assert(sizeof(at::Half) == sizeof(sycl::half), "fp16 width");
-static_assert(S2_NWG * S2_SG_COUNT == HKV * BM, "Stage2 1 row/SG");
-static_assert(GQA == 6 && HQ == HKV * GQA, "Qwen3.8-27B TP2 local GQA");
+
+// Head counts for one instantiation. HQ = 6 * HKV is the Qwen3.8-27B GQA
+// ratio the kernel math bakes in (one query row block per KV head).
+template <int HKV>
+struct Heads {
+  static constexpr int hkv = HKV;
+  static constexpr int hq = 6 * HKV;
+  static constexpr int gqa = 6;
+  static constexpr int qquant_heads = HKV;
+  static constexpr int s2_nwg = HKV * BM / 8;  // one row per stage-2 sub-group, 8 a work-group
+  static_assert(s2_nwg * S2_SG_COUNT == HKV * BM, "Stage2 1 row/SG");
+};
+
+// Instantiate the op for the layout the tensors name. 2 is TP2, 4 is the
+// one-GPU build; anything else fails loudly rather than guessing.
+static int checked_hkv(int64_t hkv) {
+  TORCH_CHECK(hkv == 2 || hkv == 4, "unsupported per-GPU KV head count ", hkv,
+              " (this library serves 2 or 4)");
+  return static_cast<int>(hkv);
+}
+
+template <class F>
+static void dispatch_hkv(int hkv, F &&run) {
+  if (hkv == 2) {
+    run(std::integral_constant<int, 2>{});
+    return;
+  }
+  run(std::integral_constant<int, 4>{});
+}
 
 static sycl::queue &current_xpu_queue() { return c10::xpu::getCurrentXPUStream().queue(); }
 
@@ -129,25 +152,25 @@ static inline void decode_v_int4_vec_strided(int lid, const std::uint8_t *v4_hea
   }
 }
 
-class Xe2KvTorchAbiQquantKernel;
-class Xe2KvTorchAbiPackQquantKernel;
+template <int HKV> class Xe2KvTorchAbiQquantKernel;
+template <int HKV> class Xe2KvTorchAbiPackQquantKernel;
 class Xe2KvTorchAbiKstoreKernel;
 class Xe2KvTorchAbiVstoreKernel;
-class Xe2KvTorchAbiS1Kernel;
-class Xe2KvTorchAbiKstorePagedKernel;
-class Xe2KvTorchAbiVstorePagedKernel;
-class Xe2KvTorchAbiS1PagedKernel;
-class Xe2KvTorchAbiS2MergeKernel;
-class Xe2KvTorchAbiS2MergeOutKernel;
-class Xe2KvTorchAbiS2MergeOutHalfKernel;
-template <int N> class Xe2KvTorchAbiS2TwoPassHalf;
-class Xe2KvTorchAbiS2ParallelHalf8;
-class Xe2KvTorchAbiS2ParallelHalf16;
-class Xe2KvTorchAbiS2ParallelHalf32;
-class Xe2KvTorchAbiS2ParallelFloat8;
-class Xe2KvTorchAbiS2ParallelFloat16;
-class Xe2KvTorchAbiS2ParallelFloat32;
-class Xe2KvTorchAbiUnpackKernel;
+template <int HKV> class Xe2KvTorchAbiS1Kernel;
+template <int HKV> class Xe2KvTorchAbiKstorePagedKernel;
+template <int HKV> class Xe2KvTorchAbiVstorePagedKernel;
+template <int HKV> class Xe2KvTorchAbiS1PagedKernel;
+template <int HKV> class Xe2KvTorchAbiS2MergeKernel;
+template <int HKV> class Xe2KvTorchAbiS2MergeOutKernel;
+template <int HKV> class Xe2KvTorchAbiS2MergeOutHalfKernel;
+template <int HKV, int N> class Xe2KvTorchAbiS2TwoPassHalf;
+template <int HKV> class Xe2KvTorchAbiS2ParallelHalf8;
+template <int HKV> class Xe2KvTorchAbiS2ParallelHalf16;
+template <int HKV> class Xe2KvTorchAbiS2ParallelHalf32;
+template <int HKV> class Xe2KvTorchAbiS2ParallelFloat8;
+template <int HKV> class Xe2KvTorchAbiS2ParallelFloat16;
+template <int HKV> class Xe2KvTorchAbiS2ParallelFloat32;
+template <int HKV> class Xe2KvTorchAbiUnpackKernel;
 
 static bool env_is_1(const char *name) {
   const char *value = std::getenv(name);
@@ -173,14 +196,18 @@ static int s2_parallel_subgroups(int tq) {
 }
 
 
+template <int HKV>
 static void launch_pack_q_quant(sycl::queue &q, const sycl::half *Qtok, std::int8_t *Q8,
                                 float *Qsc, int tq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  constexpr int QQUANT_HEADS = Heads<HKV>::qquant_heads;
   // Pack [T,HQ,D] -> Q-once layout [HKV,BM,D] and quantize in one submit.
   // Pad rows (row >= tq*GQA) get scale=0 / q8=0.
   sycl::range<1> g(static_cast<size_t>(QQUANT_HEADS) * WG_SIZE);
   sycl::range<1> l(WG_SIZE);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiPackQquantKernel>(
+    h.parallel_for<Xe2KvTorchAbiPackQquantKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int kv_head = static_cast<int>(item.get_group(0));
@@ -223,11 +250,13 @@ static void launch_pack_q_quant(sycl::queue &q, const sycl::half *Qtok, std::int
   });
 }
 
+template <int HKV>
 static void launch_q_quant(sycl::queue &q, const sycl::half *Qfp, std::int8_t *Q8, float *Qsc) {
+  constexpr int QQUANT_HEADS = Heads<HKV>::qquant_heads;
   sycl::range<1> g(static_cast<size_t>(QQUANT_HEADS) * WG_SIZE);
   sycl::range<1> l(WG_SIZE);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiQquantKernel>(
+    h.parallel_for<Xe2KvTorchAbiQquantKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int kv_head = static_cast<int>(item.get_group(0));
@@ -337,16 +366,17 @@ static void launch_v_store(sycl::queue &q, const sycl::half *Vfp, std::uint8_t *
   });
 }
 
+template <int HKV>
 static void launch_int8k_int4v_s1(sycl::queue &q, const std::int8_t *Q8, const float *Qsc,
                                   const std::int8_t *K8, const float *Ksc, const std::uint8_t *V4,
                                   const float *VS, const float *VZ, float *O, int nprog) {
-  TORCH_CHECK(nprog > 0 && (nprog % HKV) == 0, "nprog must be a positive multiple of HKV=4");
+  TORCH_CHECK(nprog > 0 && (nprog % HKV) == 0, "nprog must be a positive multiple of HKV=", HKV);
   const int n_splits = nprog / HKV;
   sycl::range<1> g(static_cast<size_t>(nprog) * WG_SIZE);
   sycl::range<1> l(WG_SIZE);
   q.submit([&](sycl::handler &h) {
     sycl::local_accessor<float, 1> slm(sycl::range<1>(kSlmFloats), h);
-    h.parallel_for<Xe2KvTorchAbiS1Kernel>(
+    h.parallel_for<Xe2KvTorchAbiS1Kernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int prog = static_cast<int>(item.get_group(0));
@@ -497,13 +527,14 @@ static void launch_int8k_int4v_s1(sycl::queue &q, const std::int8_t *Q8, const f
 
 // Gate C decode store: ONE q.submit for all ntok. T=q_len=7 is one kernel,
 // grid = ntok * HKV * STORE_WG workgroups, not seven host launches.
+template <int HKV>
 static void launch_k_store_paged(sycl::queue &q, const sycl::half *Kfp, const std::int64_t *slots,
                                  std::int8_t *K8, float *Ksc, int64_t ntok, int64_t nblocks,
                                  size_t page_stride, size_t sc_page_stride) {
   sycl::range<1> g(static_cast<size_t>(ntok) * HKV * STORE_WG);
   sycl::range<1> l(STORE_WG);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiKstorePagedKernel>(
+    h.parallel_for<Xe2KvTorchAbiKstorePagedKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int gid = static_cast<int>(item.get_group(0));
@@ -537,13 +568,14 @@ static void launch_k_store_paged(sycl::queue &q, const sycl::half *Kfp, const st
 }
 
 // Same batched contract as K: T=7 is one VstorePaged kernel, not 7.
+template <int HKV>
 static void launch_v_store_paged(sycl::queue &q, const sycl::half *Vfp, const std::int64_t *slots,
                                  std::uint8_t *V4, float *VS, float *VZ, int64_t ntok,
                                  int64_t nblocks, size_t page_stride, size_t sc_page_stride) {
   sycl::range<1> g(static_cast<size_t>(ntok) * HKV * STORE_WG);
   sycl::range<1> l(STORE_WG);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiVstorePagedKernel>(
+    h.parallel_for<Xe2KvTorchAbiVstorePagedKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int gid = static_cast<int>(item.get_group(0));
@@ -588,6 +620,7 @@ static void launch_v_store_paged(sycl::queue &q, const sycl::half *Vfp, const st
   });
 }
 
+template <int HKV>
 static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, const float *Qsc,
                                         const std::int8_t *K8, const float *Ksc, const std::uint8_t *V4,
                                         const float *VS, const float *VZ, const std::int32_t *bt,
@@ -596,6 +629,7 @@ static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, c
                                         size_t k_page_stride, size_t v_page_stride, size_t sc_page_stride,
                                         const std::int32_t *visible_lens = nullptr,
                                         int pages_per_block = 1) {
+  constexpr int GQA = Heads<HKV>::gqa;
   const int nprog = n_splits * HKV;
   const int k_tok_stride = HKV * BK;
   const int v_tok_stride = HKV * V4_COLS;
@@ -604,7 +638,7 @@ static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, c
   sycl::range<1> l(WG_SIZE);
   q.submit([&](sycl::handler &h) {
     sycl::local_accessor<float, 1> slm(sycl::range<1>(kSlmFloats), h);
-    h.parallel_for<Xe2KvTorchAbiS1PagedKernel>(
+    h.parallel_for<Xe2KvTorchAbiS1PagedKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           const int lid = static_cast<int>(item.get_local_id(0));
           const int prog = static_cast<int>(item.get_group(0));
@@ -804,15 +838,17 @@ static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, c
   });
 }
 
+template <int HKV>
 static void launch_s2_merge(sycl::queue &q, const float *M, const float *L, const float *Acc,
                             float *Merged, const std::int32_t *seq_lens, int n_splits) {
+  constexpr int S2_NWG = Heads<HKV>::s2_nwg;
   constexpr int VEC = 4;
   constexpr int NV = BV / (SG_SIZE * VEC);
   constexpr int WG = S2_SG_COUNT * SG_SIZE;
   sycl::range<1> g(static_cast<size_t>(S2_NWG) * WG);
   sycl::range<1> l(WG);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiS2MergeKernel>(
+    h.parallel_for<Xe2KvTorchAbiS2MergeKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           auto sg = item.get_sub_group();
           const int gid = static_cast<int>(item.get_group(0));
@@ -867,16 +903,20 @@ static void launch_s2_merge(sycl::queue &q, const float *M, const float *L, cons
 }
 
 
+template <int HKV>
 static void launch_s2_merge_to_out(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                    float *Out, const std::int32_t *seq_lens, int n_splits, int tq) {
   // Stage2 online-softmax merge + HQ unpack in ONE submit (no Merged staging).
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  constexpr int S2_NWG = Heads<HKV>::s2_nwg;
   constexpr int VEC = 4;
   constexpr int NV = BV / (SG_SIZE * VEC);
   constexpr int WG = S2_SG_COUNT * SG_SIZE;
   sycl::range<1> g(static_cast<size_t>(S2_NWG) * WG);
   sycl::range<1> l(WG);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiS2MergeOutKernel>(
+    h.parallel_for<Xe2KvTorchAbiS2MergeOutKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           auto sg = item.get_sub_group();
           const int gid = static_cast<int>(item.get_group(0));
@@ -936,16 +976,20 @@ static void launch_s2_merge_to_out(sycl::queue &q, const float *M, const float *
 }
 
 // Same as launch_s2_merge_to_out but writes sycl::half (skips Python f32→f16 copy).
+template <int HKV>
 static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const float *L,
                                         const float *Acc, sycl::half *Out,
                                         const std::int32_t *seq_lens, int n_splits, int tq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  constexpr int S2_NWG = Heads<HKV>::s2_nwg;
   constexpr int VEC = 4;
   constexpr int NV = BV / (SG_SIZE * VEC);
   constexpr int WG = S2_SG_COUNT * SG_SIZE;
   sycl::range<1> g(static_cast<size_t>(S2_NWG) * WG);
   sycl::range<1> l(WG);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiS2MergeOutHalfKernel>(
+    h.parallel_for<Xe2KvTorchAbiS2MergeOutHalfKernel<HKV>>(
         sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
           auto sg = item.get_sub_group();
           const int gid = static_cast<int>(item.get_group(0));
@@ -1008,9 +1052,11 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
 // contiguous run of pages, then subgroup 0 combines those N_SG states.
 // Page Acc is normalized, so the page update scales by w*L. A subgroup
 // state is already the weighted numerator, so the second update scales by w.
-template <typename OutT, typename KernelName, int N_SG, bool TWO_PASS = false>
+template <typename OutT, typename KernelName, int HKV, int N_SG, bool TWO_PASS = false>
 static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
   constexpr int VEC = 4;
   constexpr int NV = BV / (SG_SIZE * VEC);
   constexpr int WG = N_SG * SG_SIZE;
@@ -1124,50 +1170,57 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
   });
 }
 
+template <int HKV>
 static void launch_s2_parallel_half(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                     sycl::half *Out, const std::int32_t *seq_lens, int n_splits,
                                     int tq, int nsg) {
   if (env_is_1("XE2_KV_S2_TWO_PASS")) {
     if (nsg == 8)
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<8>, 8, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 8>, HKV, 8, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
     else if (nsg == 16)
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<16>, 16, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 16>, HKV, 16, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
     else
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<32>, 32, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 32>, HKV, 32, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
     return;
   }
   if (nsg == 8) {
-    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf8, 8>(q, M, L, Acc, Out, seq_lens,
-                                                                    n_splits, tq);
+    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf8<HKV>, HKV, 8>(q, M, L, Acc, Out,
+                                                                            seq_lens, n_splits, tq);
   } else if (nsg == 16) {
-    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf16, 16>(q, M, L, Acc, Out, seq_lens,
-                                                                     n_splits, tq);
+    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf16<HKV>, HKV, 16>(q, M, L, Acc, Out,
+                                                                              seq_lens, n_splits,
+                                                                              tq);
   } else {
-    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf32, 32>(q, M, L, Acc, Out, seq_lens,
-                                                                     n_splits, tq);
+    launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf32<HKV>, HKV, 32>(q, M, L, Acc, Out,
+                                                                              seq_lens, n_splits,
+                                                                              tq);
   }
 }
 
+template <int HKV>
 static void launch_s2_parallel_float(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                      float *Out, const std::int32_t *seq_lens, int n_splits, int tq,
                                      int nsg) {
   if (nsg == 8) {
-    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat8, 8>(q, M, L, Acc, Out, seq_lens, n_splits,
-                                                                tq);
+    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat8<HKV>, HKV, 8>(q, M, L, Acc, Out,
+                                                                        seq_lens, n_splits, tq);
   } else if (nsg == 16) {
-    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat16, 16>(q, M, L, Acc, Out, seq_lens,
-                                                                  n_splits, tq);
+    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat16<HKV>, HKV, 16>(q, M, L, Acc, Out,
+                                                                          seq_lens, n_splits, tq);
   } else {
-    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat32, 32>(q, M, L, Acc, Out, seq_lens,
-                                                                  n_splits, tq);
+    launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat32<HKV>, HKV, 32>(q, M, L, Acc, Out,
+                                                                          seq_lens, n_splits, tq);
   }
 }
 
+template <int HKV>
 static void launch_unpack(sycl::queue &q, const float *Merged, float *Out, int tq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
   sycl::range<1> g(static_cast<size_t>(tq) * HQ * SG_SIZE);
   sycl::range<1> l(SG_SIZE);
   q.submit([&](sycl::handler &h) {
-    h.parallel_for<Xe2KvTorchAbiUnpackKernel>(sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) {
+    h.parallel_for<Xe2KvTorchAbiUnpackKernel<HKV>>(sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) {
       const int gid = static_cast<int>(item.get_group(0));
       const int lane = static_cast<int>(item.get_local_id(0));
       const int t = gid / HQ;
@@ -1193,11 +1246,16 @@ static void q_quant_once(const at::Tensor &q_fp16, at::Tensor q8, at::Tensor q_s
   TORCH_CHECK(q_fp16.scalar_type() == at::kHalf, "q_fp16 must be float16");
   TORCH_CHECK(q8.scalar_type() == at::kChar, "q8 must be int8");
   TORCH_CHECK(q_scale.scalar_type() == at::kFloat, "q_scale must be float32");
-  TORCH_CHECK(q_fp16.numel() == static_cast<int64_t>(HKV) * BM * BK, "q_fp16 numel [4,64,256]");
-  TORCH_CHECK(q8.numel() == q_fp16.numel(), "q8 numel");
-  TORCH_CHECK(q_scale.numel() == static_cast<int64_t>(HKV) * BM, "q_scale numel [4,64]");
-  launch_q_quant(current_xpu_queue(), as_half_c(q_fp16), q8.data_ptr<int8_t>(),
-                 q_scale.data_ptr<float>());
+  TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(1) == BM && q_fp16.size(2) == BK,
+              "q_fp16 shape [HKV,64,256]");
+  dispatch_hkv(checked_hkv(q_fp16.size(0)), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    TORCH_CHECK(q_fp16.numel() == static_cast<int64_t>(HKV) * BM * BK, "q_fp16 numel [HKV,64,256]");
+    TORCH_CHECK(q8.numel() == q_fp16.numel(), "q8 numel");
+    TORCH_CHECK(q_scale.numel() == static_cast<int64_t>(HKV) * BM, "q_scale numel [HKV,64]");
+    launch_q_quant<HKV>(current_xpu_queue(), as_half_c(q_fp16), q8.data_ptr<int8_t>(),
+                       q_scale.data_ptr<float>());
+  });
 }
 
 static void k_store(const at::Tensor &k_fp16, at::Tensor k8, at::Tensor k_scale) {
@@ -1245,22 +1303,28 @@ static void int8k_int4v_s1(const at::Tensor &q8, const at::Tensor &q_scale, cons
   TORCH_CHECK(q8.scalar_type() == at::kChar && k8.scalar_type() == at::kChar, "q8/k8 int8");
   TORCH_CHECK(v4.scalar_type() == at::kByte, "v4 uint8");
   TORCH_CHECK(out.scalar_type() == at::kFloat, "out float32");
-  TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 unique [4,64,256]");
-  const int64_t k_rows = k8.numel() / BK;
-  TORCH_CHECK(k8.numel() % BK == 0, "k8 must be rows x 256");
-  TORCH_CHECK(k_rows % BM == 0, "k8 rows must be a multiple of BM=64");
-  const int nprog = static_cast<int>(k_rows / BM);
-  TORCH_CHECK(nprog > 0 && (nprog % HKV) == 0, "nprog multiple of 4");
-  TORCH_CHECK(k_scale.numel() == k_rows && v_scale.numel() == k_rows && v_zero.numel() == k_rows,
-              "scales [nprog,64]");
-  TORCH_CHECK(v4.numel() == k_rows * V4_COLS, "v4 [nprog,64,128]");
-  TORCH_CHECK(out.numel() == k_rows * BV, "out [nprog,64,256]");
-  launch_int8k_int4v_s1(current_xpu_queue(), q8.data_ptr<int8_t>(), q_scale.data_ptr<float>(),
-                        k8.data_ptr<int8_t>(), k_scale.data_ptr<float>(), v4.data_ptr<uint8_t>(),
-                        v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), out.data_ptr<float>(),
-                        nprog);
+  TORCH_CHECK(q8.dim() == 3 && q8.size(1) == BM && q8.size(2) == BK, "q8 shape [HKV,64,256]");
+  dispatch_hkv(checked_hkv(q8.size(0)), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 unique [HKV,64,256]");
+    const int64_t k_rows = k8.numel() / BK;
+    TORCH_CHECK(k8.numel() % BK == 0, "k8 must be rows x 256");
+    TORCH_CHECK(k_rows % BM == 0, "k8 rows must be a multiple of BM=64");
+    const int nprog = static_cast<int>(k_rows / BM);
+    TORCH_CHECK(nprog > 0 && (nprog % HKV) == 0, "nprog multiple of HKV");
+    TORCH_CHECK(k_scale.numel() == k_rows && v_scale.numel() == k_rows && v_zero.numel() == k_rows,
+                "scales [nprog,64]");
+    TORCH_CHECK(v4.numel() == k_rows * V4_COLS, "v4 [nprog,64,128]");
+    TORCH_CHECK(out.numel() == k_rows * BV, "out [nprog,64,256]");
+    launch_int8k_int4v_s1<HKV>(current_xpu_queue(), q8.data_ptr<int8_t>(),
+                               q_scale.data_ptr<float>(), k8.data_ptr<int8_t>(),
+                               k_scale.data_ptr<float>(), v4.data_ptr<uint8_t>(),
+                               v_scale.data_ptr<float>(), v_zero.data_ptr<float>(),
+                               out.data_ptr<float>(), nprog);
+  });
 }
 
+template <int HKV>
 static void check_paged_k(const at::Tensor &k_cache, const at::Tensor &k_scale) {
   TORCH_CHECK(k_cache.is_xpu() && k_scale.is_xpu(), "k_cache/k_scale XPU");
   TORCH_CHECK(k_cache.scalar_type() == at::kChar, "k_cache int8");
@@ -1278,6 +1342,7 @@ static void check_paged_k(const at::Tensor &k_cache, const at::Tensor &k_scale) 
               "k_scale within-page strides");
 }
 
+template <int HKV>
 static void check_paged_v(const at::Tensor &v_cache, const at::Tensor &v_scale,
                           const at::Tensor &v_zero) {
   TORCH_CHECK(v_cache.is_xpu() && v_scale.is_xpu() && v_zero.is_xpu(), "v_* XPU");
@@ -1302,34 +1367,39 @@ static void k_store_paged(const at::Tensor &k_fp16, const at::Tensor &slot_mappi
                           at::Tensor k_cache, at::Tensor k_scale) {
   check_xpu_contig(k_fp16, "k_fp16");
   check_xpu_contig(slot_mapping, "slot_mapping");
-  check_paged_k(k_cache, k_scale);
+  TORCH_CHECK(k_fp16.dim() == 3 && k_fp16.size(2) == BK, "k_fp16 [T,HKV,256]");
   TORCH_CHECK(k_fp16.scalar_type() == at::kHalf, "k_fp16 float16");
   TORCH_CHECK(slot_mapping.scalar_type() == at::kLong, "slot_mapping int64");
-  TORCH_CHECK(k_fp16.dim() == 3 && k_fp16.size(1) == HKV && k_fp16.size(2) == BK,
-              "k_fp16 [T,4,256]");
-  TORCH_CHECK(slot_mapping.numel() == k_fp16.size(0), "slot_mapping [T]");
-  launch_k_store_paged(current_xpu_queue(), as_half_c(k_fp16), slot_mapping.data_ptr<int64_t>(),
-                       k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(), k_fp16.size(0),
-                       k_cache.size(0),
-                       static_cast<size_t>(k_cache.stride(0)),
-                       static_cast<size_t>(k_scale.stride(0)));
+  dispatch_hkv(checked_hkv(k_fp16.size(1)), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    check_paged_k<HKV>(k_cache, k_scale);
+    TORCH_CHECK(slot_mapping.numel() == k_fp16.size(0), "slot_mapping [T]");
+    launch_k_store_paged<HKV>(current_xpu_queue(), as_half_c(k_fp16),
+                              slot_mapping.data_ptr<int64_t>(), k_cache.data_ptr<int8_t>(),
+                              k_scale.data_ptr<float>(), k_fp16.size(0), k_cache.size(0),
+                              static_cast<size_t>(k_cache.stride(0)),
+                              static_cast<size_t>(k_scale.stride(0)));
+  });
 }
 
 static void v_store_paged(const at::Tensor &v_fp16, const at::Tensor &slot_mapping,
                           at::Tensor v_cache, at::Tensor v_scale, at::Tensor v_zero) {
   check_xpu_contig(v_fp16, "v_fp16");
   check_xpu_contig(slot_mapping, "slot_mapping");
-  check_paged_v(v_cache, v_scale, v_zero);
+  TORCH_CHECK(v_fp16.dim() == 3 && v_fp16.size(2) == BK, "v_fp16 [T,HKV,256]");
   TORCH_CHECK(v_fp16.scalar_type() == at::kHalf, "v_fp16 float16");
   TORCH_CHECK(slot_mapping.scalar_type() == at::kLong, "slot_mapping int64");
-  TORCH_CHECK(v_fp16.dim() == 3 && v_fp16.size(1) == HKV && v_fp16.size(2) == BK,
-              "v_fp16 [T,4,256]");
-  TORCH_CHECK(slot_mapping.numel() == v_fp16.size(0), "slot_mapping [T]");
-  launch_v_store_paged(current_xpu_queue(), as_half_c(v_fp16), slot_mapping.data_ptr<int64_t>(),
-                       v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(),
-                       v_zero.data_ptr<float>(), v_fp16.size(0), v_cache.size(0),
-                       static_cast<size_t>(v_cache.stride(0)),
-                       static_cast<size_t>(v_scale.stride(0)));
+  dispatch_hkv(checked_hkv(v_fp16.size(1)), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    check_paged_v<HKV>(v_cache, v_scale, v_zero);
+    TORCH_CHECK(slot_mapping.numel() == v_fp16.size(0), "slot_mapping [T]");
+    launch_v_store_paged<HKV>(current_xpu_queue(), as_half_c(v_fp16),
+                              slot_mapping.data_ptr<int64_t>(), v_cache.data_ptr<uint8_t>(),
+                              v_scale.data_ptr<float>(), v_zero.data_ptr<float>(),
+                              v_fp16.size(0), v_cache.size(0),
+                              static_cast<size_t>(v_cache.stride(0)),
+                              static_cast<size_t>(v_scale.stride(0)));
+  });
 }
 
 // One Python→C++ entry for decode K+V pack (two SYCL submits, one ABI hop).
@@ -1339,30 +1409,33 @@ static void kv_store_paged(const at::Tensor &k_fp16, const at::Tensor &v_fp16,
   check_xpu_contig(k_fp16, "k_fp16");
   check_xpu_contig(v_fp16, "v_fp16");
   check_xpu_contig(slot_mapping, "slot_mapping");
-  check_paged_k(k_cache, k_scale);
-  check_paged_v(v_cache, v_scale, v_zero);
+  TORCH_CHECK(k_fp16.dim() == 3 && k_fp16.size(2) == BK, "k_fp16 [T,HKV,256]");
   TORCH_CHECK(k_fp16.scalar_type() == at::kHalf && v_fp16.scalar_type() == at::kHalf,
               "k/v_fp16 float16");
   TORCH_CHECK(slot_mapping.scalar_type() == at::kLong, "slot_mapping int64");
-  TORCH_CHECK(k_fp16.dim() == 3 && k_fp16.size(1) == HKV && k_fp16.size(2) == BK,
-              "k_fp16 [T,4,256]");
   TORCH_CHECK(v_fp16.sizes() == k_fp16.sizes(), "v_fp16 must match k_fp16");
-  TORCH_CHECK(slot_mapping.numel() == k_fp16.size(0), "slot_mapping [T]");
   TORCH_CHECK(k_cache.size(0) == v_cache.size(0), "k/v num_blocks");
   auto &q = current_xpu_queue();
   const int64_t ntok = k_fp16.size(0);
   const int64_t nblocks = k_cache.size(0);
   const auto *slots = slot_mapping.data_ptr<int64_t>();
-  launch_k_store_paged(q, as_half_c(k_fp16), slots, k_cache.data_ptr<int8_t>(),
-                       k_scale.data_ptr<float>(), ntok, nblocks,
-                       static_cast<size_t>(k_cache.stride(0)),
-                       static_cast<size_t>(k_scale.stride(0)));
-  launch_v_store_paged(q, as_half_c(v_fp16), slots, v_cache.data_ptr<uint8_t>(),
-                       v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), ntok, nblocks,
-                       static_cast<size_t>(v_cache.stride(0)),
-                       static_cast<size_t>(v_scale.stride(0)));
+  dispatch_hkv(checked_hkv(k_fp16.size(1)), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    check_paged_k<HKV>(k_cache, k_scale);
+    check_paged_v<HKV>(v_cache, v_scale, v_zero);
+    TORCH_CHECK(slot_mapping.numel() == k_fp16.size(0), "slot_mapping [T]");
+    launch_k_store_paged<HKV>(q, as_half_c(k_fp16), slots, k_cache.data_ptr<int8_t>(),
+                              k_scale.data_ptr<float>(), ntok, nblocks,
+                              static_cast<size_t>(k_cache.stride(0)),
+                              static_cast<size_t>(k_scale.stride(0)));
+    launch_v_store_paged<HKV>(q, as_half_c(v_fp16), slots, v_cache.data_ptr<uint8_t>(),
+                              v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), ntok, nblocks,
+                              static_cast<size_t>(v_cache.stride(0)),
+                              static_cast<size_t>(v_scale.stride(0)));
+  });
 }
 
+template <int HKV>
 static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_scale,
                                  const at::Tensor &k_cache, const at::Tensor &k_scale,
                                  const at::Tensor &v_cache, const at::Tensor &v_scale,
@@ -1374,10 +1447,12 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
                                  const at::Tensor &l_ws,
                                  const at::Tensor &merged_ws,
                                  int pages_per_block = 1) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
   check_xpu_contig(q8, "q8");
   check_xpu_contig(q_scale, "q_scale");
-  check_paged_k(k_cache, k_scale);
-  check_paged_v(v_cache, v_scale, v_zero);
+  check_paged_k<HKV>(k_cache, k_scale);
+  check_paged_v<HKV>(v_cache, v_scale, v_zero);
   check_xpu_contig(block_table, "block_table");
   check_xpu_contig(out, "out");
   TORCH_CHECK(q8.scalar_type() == at::kChar, "q8 int8");
@@ -1385,7 +1460,7 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
   TORCH_CHECK(block_table.scalar_type() == at::kInt, "block_table int32");
   TORCH_CHECK(out.scalar_type() == at::kFloat || out.scalar_type() == at::kHalf,
               "out float32 or float16");
-  TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 unique [4,64,256]");
+  TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 unique [HKV,64,256]");
   TORCH_CHECK(k_cache.size(0) == v_cache.size(0), "k/v num_blocks");
   TORCH_CHECK(seq_lens.scalar_type() == at::kInt && seq_lens.numel() >= 1, "seq_lens int32");
   TORCH_CHECK(seq_lens.is_xpu() && seq_lens.is_contiguous(), "seq_lens XPU contig (graph input)");
@@ -1410,7 +1485,7 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
     }
   }
   TORCH_CHECK(out.dim() == 3 && out.size(1) == HQ && out.size(2) == BV,
-              "out [Tq,24,256]");
+              "out [Tq,HQ,256]");
   const int tq = static_cast<int>(out.size(0));
   TORCH_CHECK(tq > 0 && tq * GQA <= BM, "Tq*GQA must fit BM=64 pad");
   const std::int32_t *visible_ptr = nullptr;
@@ -1486,7 +1561,8 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
   const std::int32_t *s2_seq = visible_ptr ? visible_ptr : seq_lens.data_ptr<int32_t>();
   const bool half_out = out.scalar_type() == at::kHalf;
   auto launch_s1 = [&]() {
-    launch_int8k_int4v_s1_paged(current_xpu_queue(), q8.data_ptr<int8_t>(), q_scale.data_ptr<float>(),
+    launch_int8k_int4v_s1_paged<HKV>(current_xpu_queue(), q8.data_ptr<int8_t>(),
+                                q_scale.data_ptr<float>(),
                                 k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
                                 v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(),
                                 v_zero.data_ptr<float>(), bt.data_ptr<int32_t>(),
@@ -1503,17 +1579,17 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
     if (half_out) {
       auto *dst = reinterpret_cast<sycl::half *>(out.data_ptr<at::Half>());
       if (parallel)
-        launch_s2_parallel_half(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq, n_splits, tq,
-                                nsg);
+        launch_s2_parallel_half<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq,
+                                n_splits, tq, nsg);
       else
-        launch_s2_merge_to_out_half(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq,
+        launch_s2_merge_to_out_half<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq,
                                     n_splits, tq);
     } else if (parallel) {
-      launch_s2_parallel_float(current_xpu_queue(), m_ptr, l_ptr, part_ptr, out.data_ptr<float>(), s2_seq,
-                               n_splits, tq, nsg);
+      launch_s2_parallel_float<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr,
+                                out.data_ptr<float>(), s2_seq, n_splits, tq, nsg);
     } else {
-      launch_s2_merge_to_out(current_xpu_queue(), m_ptr, l_ptr, part_ptr, out.data_ptr<float>(), s2_seq,
-                             n_splits, tq);
+      launch_s2_merge_to_out<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr,
+                             out.data_ptr<float>(), s2_seq, n_splits, tq);
     }
   };
   // Host waits are bench-only. Graph replay must not take this branch.
@@ -1546,9 +1622,12 @@ static void int8k_int4v_s1_paged(const at::Tensor &q8, const at::Tensor &q_scale
                                  const at::Tensor &v_cache, const at::Tensor &v_scale,
                                  const at::Tensor &v_zero, const at::Tensor &block_table,
                                  const at::Tensor &seq_lens, at::Tensor out) {
-  int8k_int4v_s1_paged_impl(q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table,
-                            seq_lens, out, at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor(),
-                            at::Tensor());
+  TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
+  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+    int8k_int4v_s1_paged_impl<decltype(hkv)::value>(
+        q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens, out,
+        at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor());
+  });
 }
 
 static void int8k_int4v_s1_varlen_paged(const at::Tensor &q8, const at::Tensor &q_scale,
@@ -1560,11 +1639,50 @@ static void int8k_int4v_s1_varlen_paged(const at::Tensor &q8, const at::Tensor &
                                          const at::Tensor &partials_ws, const at::Tensor &m_ws,
                                          const at::Tensor &l_ws, const at::Tensor &merged_ws,
                                          at::Tensor out, int64_t pages_per_block = 1) {
-  int8k_int4v_s1_paged_impl(q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table,
-                            seq_lens, out, visible_lens, partials_ws, m_ws, l_ws, merged_ws,
-                            static_cast<int>(pages_per_block));
+  TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
+  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+    int8k_int4v_s1_paged_impl<decltype(hkv)::value>(
+        q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens, out,
+        visible_lens, partials_ws, m_ws, l_ws, merged_ws, static_cast<int>(pages_per_block));
+  });
 }
 
+
+template <int HKV>
+static void int8k_int4v_s1_varlen_from_q_impl(
+    const at::Tensor &q_fp16, at::Tensor q8, at::Tensor q_scale, const at::Tensor &k_cache,
+    const at::Tensor &k_scale, const at::Tensor &v_cache, const at::Tensor &v_scale,
+    const at::Tensor &v_zero, const at::Tensor &block_table, const at::Tensor &seq_lens,
+    const at::Tensor &visible_lens, const at::Tensor &partials_ws, const at::Tensor &m_ws,
+    const at::Tensor &l_ws, const at::Tensor &merged_ws, at::Tensor out, int64_t pages_per_block = 1) {
+  // Native direct entry: pack+quant (token Q) or quant (padded Q), then varlen S1+S2.
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  check_xpu_contig(q_fp16, "q_fp16");
+  check_xpu_contig(q8, "q8");
+  check_xpu_contig(q_scale, "q_scale");
+  TORCH_CHECK(q_fp16.scalar_type() == at::kHalf, "q_fp16 must be float16");
+  TORCH_CHECK(q8.scalar_type() == at::kChar, "q8 must be int8");
+  TORCH_CHECK(q_scale.scalar_type() == at::kFloat, "q_scale must be float32");
+  TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 numel [HKV,64,256]");
+  TORCH_CHECK(q_scale.numel() == static_cast<int64_t>(HKV) * BM, "q_scale numel [HKV,64]");
+  auto &queue = current_xpu_queue();
+  if (q_fp16.dim() == 3 && q_fp16.size(1) == HQ && q_fp16.size(2) == BK) {
+    // Token layout [T,HQ,D] — pack+quant in one submit (no Python pack_q).
+    const int tq = static_cast<int>(q_fp16.size(0));
+    TORCH_CHECK(tq > 0 && tq * GQA <= BM, "tq*GQA exceeds BM");
+    launch_pack_q_quant<HKV>(queue, as_half_c(q_fp16), q8.data_ptr<int8_t>(),
+                             q_scale.data_ptr<float>(), tq);
+  } else {
+    // Legacy padded layout [HKV,BM,D].
+    TORCH_CHECK(q_fp16.numel() == static_cast<int64_t>(HKV) * BM * BK, "q_fp16 numel");
+    launch_q_quant<HKV>(queue, as_half_c(q_fp16), q8.data_ptr<int8_t>(),
+                        q_scale.data_ptr<float>());
+  }
+  int8k_int4v_s1_paged_impl<HKV>(q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
+                                 block_table, seq_lens, out, visible_lens, partials_ws, m_ws, l_ws,
+                                 merged_ws, static_cast<int>(pages_per_block));
+}
 
 static void int8k_int4v_s1_varlen_from_q(const at::Tensor &q_fp16, at::Tensor q8,
                                          at::Tensor q_scale, const at::Tensor &k_cache,
@@ -1575,30 +1693,12 @@ static void int8k_int4v_s1_varlen_from_q(const at::Tensor &q_fp16, at::Tensor q8
                                          const at::Tensor &partials_ws, const at::Tensor &m_ws,
                                          const at::Tensor &l_ws, const at::Tensor &merged_ws,
                                          at::Tensor out, int64_t pages_per_block = 1) {
-  // Native direct entry: pack+quant (token Q) or quant (padded Q), then varlen S1+S2.
-  check_xpu_contig(q_fp16, "q_fp16");
-  check_xpu_contig(q8, "q8");
-  check_xpu_contig(q_scale, "q_scale");
-  TORCH_CHECK(q_fp16.scalar_type() == at::kHalf, "q_fp16 must be float16");
-  TORCH_CHECK(q8.scalar_type() == at::kChar, "q8 must be int8");
-  TORCH_CHECK(q_scale.scalar_type() == at::kFloat, "q_scale must be float32");
-  TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 numel [4,64,256]");
-  TORCH_CHECK(q_scale.numel() == static_cast<int64_t>(HKV) * BM, "q_scale numel [4,64]");
-  auto &queue = current_xpu_queue();
-  if (q_fp16.dim() == 3 && q_fp16.size(1) == HQ && q_fp16.size(2) == BK) {
-    // Token layout [T,HQ,D] — pack+quant in one submit (no Python pack_q).
-    const int tq = static_cast<int>(q_fp16.size(0));
-    TORCH_CHECK(tq > 0 && tq * GQA <= BM, "tq*GQA exceeds BM");
-    launch_pack_q_quant(queue, as_half_c(q_fp16), q8.data_ptr<int8_t>(),
-                        q_scale.data_ptr<float>(), tq);
-  } else {
-    // Legacy padded layout [HKV,BM,D].
-    TORCH_CHECK(q_fp16.numel() == static_cast<int64_t>(HKV) * BM * BK, "q_fp16 numel");
-    launch_q_quant(queue, as_half_c(q_fp16), q8.data_ptr<int8_t>(), q_scale.data_ptr<float>());
-  }
-  int8k_int4v_s1_varlen_paged(q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
-                              block_table, seq_lens, visible_lens, partials_ws, m_ws, l_ws,
-                              merged_ws, out, pages_per_block);
+  TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
+  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+    int8k_int4v_s1_varlen_from_q_impl<decltype(hkv)::value>(
+        q_fp16, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens,
+        visible_lens, partials_ws, m_ws, l_ws, merged_ws, out, pages_per_block);
+  });
 }
 
 // Decode one-shot: kv_store_paged + pack_q_quant + varlen S1/S2 on the same queue.
@@ -1629,35 +1729,41 @@ static void int8k_int4v_attn_batch(const at::Tensor &q_fp16, at::Tensor q8, at::
                                    const at::Tensor &partials_ws, const at::Tensor &m_ws,
                                    const at::Tensor &l_ws, const at::Tensor &merged_ws,
                                    at::Tensor out, int64_t q_len, int64_t pages_per_block) {
+  constexpr int GQA = Heads<2>::gqa;
   TORCH_CHECK(pages_per_block >= 1, "pages_per_block");
   TORCH_CHECK(q_len > 0 && q_len * GQA <= BM, "q_len*GQA exceeds BM");
-  TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(1) == HQ && q_fp16.size(2) == BK,
-              "q_fp16 [T,HQ,D]");
-  TORCH_CHECK(out.sizes() == q_fp16.sizes(), "out shape");
-  TORCH_CHECK(q_fp16.size(0) % q_len == 0, "T must be B*q_len");
-  const int batch = static_cast<int>(q_fp16.size(0) / q_len);
-  TORCH_CHECK(batch >= 1, "empty batch");
-  TORCH_CHECK(block_table.dim() == 2 && block_table.size(0) == batch, "block_table [B, splits]");
-  TORCH_CHECK(seq_lens.numel() >= batch, "seq_lens [B]");
-  const bool has_vis = visible_lens.defined() && visible_lens.numel() > 0;
-  if (has_vis) {
-    TORCH_CHECK(visible_lens.dim() == 2 && visible_lens.size(0) == batch &&
-                    visible_lens.size(1) >= q_len + 1,
-                "visible_lens [B, 1+q_len]");
-  }
-  auto seq_flat = seq_lens.reshape({-1});
-  for (int i = 0; i < batch; ++i) {
-    const int64_t begin = static_cast<int64_t>(i) * q_len;
-    auto q_i = q_fp16.narrow(0, begin, q_len);
-    auto out_i = out.narrow(0, begin, q_len);
-    auto bt_i = block_table.select(0, i);
-    auto sl_i = seq_flat.narrow(0, i, 1);
-    at::Tensor vis_i;
-    if (has_vis) vis_i = visible_lens.select(0, i);
-    int8k_int4v_s1_varlen_from_q(q_i, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
-                                 bt_i, sl_i, vis_i, partials_ws, m_ws, l_ws, merged_ws, out_i,
-                                 pages_per_block);
-  }
+  TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(2) == BK, "q_fp16 [T,HQ,D]");
+  TORCH_CHECK(q_fp16.size(1) % GQA == 0, "q_fp16 heads must be a multiple of GQA=6");
+  dispatch_hkv(checked_hkv(q_fp16.size(1) / GQA), [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    constexpr int HQ = Heads<HKV>::hq;
+    TORCH_CHECK(q_fp16.size(1) == HQ, "q_fp16 [T,HQ,D]");
+    TORCH_CHECK(out.sizes() == q_fp16.sizes(), "out shape");
+    TORCH_CHECK(q_fp16.size(0) % q_len == 0, "T must be B*q_len");
+    const int batch = static_cast<int>(q_fp16.size(0) / q_len);
+    TORCH_CHECK(batch >= 1, "empty batch");
+    TORCH_CHECK(block_table.dim() == 2 && block_table.size(0) == batch, "block_table [B, splits]");
+    TORCH_CHECK(seq_lens.numel() >= batch, "seq_lens [B]");
+    const bool has_vis = visible_lens.defined() && visible_lens.numel() > 0;
+    if (has_vis) {
+      TORCH_CHECK(visible_lens.dim() == 2 && visible_lens.size(0) == batch &&
+                      visible_lens.size(1) >= q_len + 1,
+                  "visible_lens [B, 1+q_len]");
+    }
+    auto seq_flat = seq_lens.reshape({-1});
+    for (int i = 0; i < batch; ++i) {
+      const int64_t begin = static_cast<int64_t>(i) * q_len;
+      auto q_i = q_fp16.narrow(0, begin, q_len);
+      auto out_i = out.narrow(0, begin, q_len);
+      auto bt_i = block_table.select(0, i);
+      auto sl_i = seq_flat.narrow(0, i, 1);
+      at::Tensor vis_i;
+      if (has_vis) vis_i = visible_lens.select(0, i);
+      int8k_int4v_s1_varlen_from_q_impl<HKV>(q_i, q8, q_scale, k_cache, k_scale, v_cache, v_scale,
+                                             v_zero, bt_i, sl_i, vis_i, partials_ws, m_ws, l_ws,
+                                             merged_ws, out_i, pages_per_block);
+    }
+  });
 }
 
 }  // namespace
