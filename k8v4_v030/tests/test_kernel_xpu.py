@@ -190,16 +190,19 @@ class KernelXpuTest(unittest.TestCase):
             max_store_tokens=1, max_out_tokens=1,
         )
         partials, m_state, l_state, merged = scratch.workspace(workspace_programs(4, 1, TP2))
+        # Every case is shaped to pass the earlier TORCH_CHECKs (dims, dtypes,
+        # head-multiple), so the raise is checked_hkv's own message.
+        message = r"unsupported per-GPU KV head count %d \(this library serves 2 or 4\)"
         for hkv in (3, 8, 1, 0):
             with self.subTest(store_hkv=hkv):
                 k = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
                 v = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
                     self._store(views, k, v, slots)
             with self.subTest(batch_hkv=hkv):
                 q = torch.randn(1, 6 * hkv, D, dtype=torch.float16, device=device)
                 out = torch.empty_like(q)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
                     ops().int8k_int4v_attn_batch(
                         q, scratch.q8, scratch.q_scale,
                         views["k"], views["k_scale"], views["v"], views["v_scale"],
@@ -211,7 +214,7 @@ class KernelXpuTest(unittest.TestCase):
                 scales = torch.zeros(4, PAGE, hkv, dtype=torch.float32, device=device)
                 v_cache = torch.zeros(4, PAGE, hkv, V4_COLS, dtype=torch.uint8, device=device)
                 out = torch.zeros(1, TP2.hq, D, dtype=torch.float16, device=device)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
                     ops().int8k_int4v_s1_paged(
                         scratch.q8, scratch.q_scale, k_cache, scales, v_cache,
                         scales, scales, table, seq, out,
