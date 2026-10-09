@@ -23,6 +23,10 @@ def patch(path, triples):
     changed = False
     for old, new, marker in triples:
         if marker in s:
+            # A marker present twice means a hunk was applied twice (e.g. by
+            # hand after a rebase); that tree is corrupt, not "already patched".
+            assert s.count(marker) == 1, (
+                path, 'marker present %d times, expected exactly one' % s.count(marker), marker)
             if new not in s:
                 raise AssertionError(
                     (path, 'marker present but the patched text differs', marker))
@@ -181,4 +185,4 @@ patch(kvi, [
     view_5d = torch.as_strided(""",
      'XPU padded KV page needs an NHD layout'),
 ])
-print('Verified skip-layer fp8 patch:', root)
+print('skip-layer fp8 patch present exactly once per hunk:', root)
