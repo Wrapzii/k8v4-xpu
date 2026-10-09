@@ -19,4 +19,6 @@ RUN python3 -m py_compile /opt/k8v4/k8v4_v030/backend.py /opt/k8v4/k8v4_v030/deq
       /opt/k8v4/k8v4_v030/w4a8_prefill.py /opt/k8v4/k8v4_v030/layout.py \
  && python3 /opt/k8v4/k8v4_v030/patch_installed_vllm.py \
  && python3 /tmp/patch_embed_int8_v030.py && PYTHONPATH=/workspace/vllm python3 /tmp/patch_embed_int8_v030.py \
+ && python3 -c "import torch; torch.ops.load_library('/opt/k8v4/libxe2_kv.so')" \
+ && python3 -c "d = open('/opt/k8v4/libxe2_kv.so','rb').read(); assert b'Xe2KvTorchAbiS1PagedKernel<2>' in d and b'Xe2KvTorchAbiS1PagedKernel<4>' in d; print('libxe2_kv serves both HKV instantiations')" \
  && python3 -c "from k8v4_v030.layout import PageLayout; tp1 = PageLayout(4); assert (tp1.hkv, tp1.hq, tp1.page_bytes) == (4, 24, 101376); print('layout check', tp1.hkv, tp1.hq, tp1.page_bytes)"

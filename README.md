@@ -116,7 +116,7 @@ Keep capture sizes as multiples of `1 + num_speculative_tokens` (7 when MTP is 6
 
 ## Run it
 
-The two GPUs are exclusive. Stop whatever else is using them before launch. On a host with about 12 GB of RAM, compile while the model is not loaded. The oneAPI image used for compile is large. Compile does not use the GPU. icpx 2025.3 segfaults against this image's `libsycl.so.9`; the compile image copies oneAPI 2026.
+The two GPUs are exclusive. Stop whatever else is using them before launch. `compile_decode.sh` caps its container at 1200 MB (the two-instantiation build measured ~610 MiB peak) plus a 4 GB swap bound, so a 12 GB host can compile next to a loaded model. The oneAPI image used for compile is large. Compile does not use the GPU. icpx 2025.3 segfaults against this image's `libsycl.so.9`; the compile image copies oneAPI 2026. `compile_sdpa.sh` builds `build/libk8v4_sdpa.so` and copies the compile image's bundled `libdnnl.so.3` beside it.
 
 ```bash
 bash k8v4_v030/compile_image.sh
