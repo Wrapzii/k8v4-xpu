@@ -114,7 +114,13 @@ def causal_gqa(
         raise ValueError("query width")
     if len(key) < seq_len or len(value) < seq_len:
         raise ValueError("cache shorter than seq_len")
-    layout = PageLayout.for_heads(len(query[0]), len(key[0]))
+    if q_len == 0:
+        # origin/main built no output rows for an empty query; keep that.
+        return []
+    # An empty cache has no head row to read, so the layout then comes from
+    # the query heads alone (origin/main used module constants here).
+    kv_heads = len(key[0]) if key else len(query[0]) // GQA
+    layout = PageLayout.for_heads(len(query[0]), kv_heads)
     hkv, hq = layout.hkv, layout.hq
     kq = []
     vq = []

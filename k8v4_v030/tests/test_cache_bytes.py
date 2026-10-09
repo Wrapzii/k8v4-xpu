@@ -383,7 +383,8 @@ class EagerPrefillTest(unittest.TestCase):
                     eager_prefill(
                         wrong_q, views, block_row, 1, 1, 0.0625
                     )
-        # oracle.causal_gqa raised ValueError on origin/main; it still does.
+        # oracle.causal_gqa's own argument errors were ValueError on origin/main;
+        # the derived head pair keeps that type (origin/main never checked it).
         from k8v4_v030.oracle import causal_gqa
 
         key = deterministic_rows(2, 2, seed=71)
@@ -391,6 +392,11 @@ class EagerPrefillTest(unittest.TestCase):
         query = [[[0.0] * D] * 13, [[0.0] * D] * 13]
         with self.assertRaises(ValueError):
             causal_gqa(query, key, value, 2, 1)
+        # Empty inputs keep the origin/main contract: no output rows for an
+        # empty query, zero-valued rows for an empty cache.
+        query12 = [[[0.0] * D] * 12]
+        self.assertEqual(causal_gqa([], key, value, 2, 0), [])
+        self.assertEqual(causal_gqa(query12, [], [], 0, 1), [[[0.0] * D] * 12])
 
 
 if __name__ == "__main__":
