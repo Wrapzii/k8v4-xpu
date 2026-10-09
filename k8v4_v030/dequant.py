@@ -57,7 +57,12 @@ def physical_pages(
 
 def _views_hkv(views: dict[str, torch.Tensor]) -> int:
     """Per-GPU KV head count named by the bound region views, validated."""
-    return PageLayout(int(views["k"].shape[2])).hkv
+    # The public callers (eager_prefill, the gathers) raised RuntimeError for
+    # bad head shapes on origin/main; do not leak PageLayout's ValueError.
+    try:
+        return PageLayout(int(views["k"].shape[2])).hkv
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
 
 
 def gather_dequant_range(
@@ -319,6 +324,7 @@ def _sdpa_gqa(
             )
         )
     return torch.cat(parts, dim=0)
+
 
 def _derived_gqa(query_heads: int, hkv: int) -> int:
     """Query heads per KV head; the kernel math is GQA=6, so a derived value must be."""

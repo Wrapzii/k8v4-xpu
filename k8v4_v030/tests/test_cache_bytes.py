@@ -383,6 +383,13 @@ class EagerPrefillTest(unittest.TestCase):
                     eager_prefill(
                         wrong_q, views, block_row, 1, 1, 0.0625
                     )
+                # An unsupported head count in the views must raise like the
+                # other public paths (RuntimeError), not PageLayout's ValueError.
+                bad_views = {"k": torch.zeros(1, PAGE, 3, D, dtype=torch.int8)}
+                with self.assertRaisesRegex(
+                    RuntimeError, "unsupported per-GPU KV head count"
+                ):
+                    eager_prefill(torch.randn(1, layout.hq, D), bad_views, block_row, 1, 1, 0.0625)
         # oracle.causal_gqa's own argument errors were ValueError on origin/main;
         # the derived head pair keeps that type (origin/main never checked it).
         from k8v4_v030.oracle import causal_gqa
