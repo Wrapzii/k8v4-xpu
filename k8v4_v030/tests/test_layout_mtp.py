@@ -2,7 +2,8 @@
 
 The ~59.5K case is the historic signed-int16 wrap. These checks pin the
 numbers the kernel is given; the XPU test compares the same lengths against
-the running op.
+the running op. Byte geometry runs for both served layouts: 2 KV heads on a
+TP2 rank and 4 on a single GPU.
 """
 
 from __future__ import annotations
@@ -11,19 +12,14 @@ import unittest
 from pathlib import Path
 
 from k8v4_v030.layout import (
-    BYTES_PER_TOKEN,
     CACHE_DTYPE,
     D,
     DECODE_MAX_T,
-    FP8_BYTES_PER_TOKEN,
     GQA,
     HISTORIC_MTP_LEN,
-    HKV,
-    HQ,
-    PADDED_HKV4_BYTES_PER_TOKEN,
     PAGE,
-    PAGE_BYTES,
     SLOT_BYTES_PER_HEAD,
+    PageLayout,
     as_int16,
     block_byte_span,
     builtin_q_end,
@@ -45,31 +41,52 @@ from k8v4_v030.oracle import causal_gqa, dequant_k, dequant_v, deterministic_row
 ROOT = Path(__file__).resolve().parents[1]
 KERNEL = ROOT / "native" / "xe2_kv_ops.cpp"
 
+TP2 = PageLayout(2)
+TP1 = PageLayout(4)
+LAYOUTS = (TP2, TP1)
+
 
 class LayoutTest(unittest.TestCase):
-    def test_tp2_page_is_smaller_than_fp8_and_than_padded_hkv4(self):
-        self.assertEqual(HKV, 2)
-        self.assertEqual(HQ, 12)
+    def test_both_layouts_are_smaller_than_fp8(self):
         self.assertEqual(GQA, 6)
         self.assertEqual(SLOT_BYTES_PER_HEAD, 396)
-        self.assertEqual(BYTES_PER_TOKEN, 792)
-        self.assertEqual(PAGE_BYTES, 50688)
-        self.assertEqual(PAGE_BYTES, BYTES_PER_TOKEN * PAGE)
-        self.assertLess(BYTES_PER_TOKEN, FP8_BYTES_PER_TOKEN)
-        self.assertEqual(FP8_BYTES_PER_TOKEN, 1024)
-        self.assertGreater(PADDED_HKV4_BYTES_PER_TOKEN, FP8_BYTES_PER_TOKEN)
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                self.assertEqual(layout.hq, 6 * layout.hkv)
+                self.assertEqual(layout.bytes_per_token, 396 * layout.hkv)
+                self.assertEqual(layout.page_bytes, layout.bytes_per_token * PAGE)
+                self.assertLess(layout.bytes_per_token, layout.fp8_bytes_per_token)
+                self.assertEqual(layout.fp8_bytes_per_token, 512 * layout.hkv)
+        # TP2 keeps its hand-measured numbers.
+        self.assertEqual(TP2.bytes_per_token, 792)
+        self.assertEqual(TP2.page_bytes, 50688)
+        self.assertEqual(TP2.fp8_bytes_per_token, 1024)
+        self.assertEqual(TP1.bytes_per_token, 1584)
+        self.assertEqual(TP1.page_bytes, 101376)
+        # A TP2 rank padding its 2 KV heads out to the one-GPU layout would pay
+        # more than fp8; that is why 4 heads only run on a single GPU.
+        self.assertGreater(TP1.bytes_per_token, TP2.fp8_bytes_per_token)
         self.assertEqual(CACHE_DTYPE, "int8_k_int4_v")
         self.assertNotEqual(CACHE_DTYPE, "turboquant_k8v4")
+        with self.assertRaises(ValueError):
+            PageLayout(1)
+        with self.assertRaises(ValueError):
+            PageLayout(3)
+        with self.assertRaises(ValueError):
+            PageLayout.for_heads(12, 4)
+        with self.assertRaises(ValueError):
+            PageLayout.for_heads(24, 2)
 
-    def test_kernel_source_is_the_tp2_head_count(self):
+    def test_kernel_source_serves_both_head_counts_at_runtime(self):
         text = KERNEL.read_text(encoding="utf-8")
-        self.assertIn("static constexpr int HKV = 2;", text)
-        self.assertIn("static constexpr int HQ = 12;", text)
-        self.assertIn("static constexpr int S2_NWG = 16;", text)
+        self.assertIn("template <int HKV>", text)
+        self.assertIn("hkv == 2 || hkv == 4", text)
+        # The head count is no longer a compile-time constant.
+        self.assertNotIn("static constexpr int HKV = 2;", text)
         self.assertNotIn("static constexpr int HKV = 4;", text)
-        self.assertNotIn("static constexpr int S2_NWG = 32;", text)
+        self.assertNotIn("K8V4_TP1", text)
         self.assertIn("int8k_int4v_attn_batch", text)
-        self.assertEqual(text.count("at::Tensor out, int64_t pages_per_block = 1)"), 2)
+        self.assertEqual(text.count("at::Tensor out, int64_t pages_per_block = 1)"), 3)
         self.assertNotIn("at::Tensor out, int pages_per_block", text)
         self.assertIn("int q_len, int pages_per_block) -> ()", text)
         self.assertIn("bt[logical / pages_per_block]", text)
@@ -87,13 +104,17 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(max_kernel_pages(131072, 1664, 64), 2048)
         self.assertEqual(max_kernel_pages(131072, 1664, None), 79 * 26)
         self.assertEqual(max_kernel_pages(131072, 1664, 1664), 79 * 26)
-        specs = region_view_specs(2)
-        self.assertEqual(element_byte(specs["k"], (1, 0, 0, 0)), PAGE_BYTES)
-        for name, (off, _length) in page_regions(0).items():
-            spec = specs[name]
-            index = (0, 0, 0, 0) if len(spec["shape"]) == 4 else (0, 0, 0)
-            self.assertEqual(element_byte(spec, index), off)
-        self.assertEqual(element_byte(specs["v_zero"], (0, 63, 1)), PAGE_BYTES - 4)
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                specs = region_view_specs(2, layout)
+                self.assertEqual(element_byte(specs["k"], (1, 0, 0, 0)), layout.page_bytes)
+                for name, (off, _length) in page_regions(0, layout).items():
+                    spec = specs[name]
+                    index = (0, 0, 0, 0) if len(spec["shape"]) == 4 else (0, 0, 0)
+                    self.assertEqual(element_byte(spec, index), off)
+                self.assertEqual(
+                    element_byte(specs["v_zero"], (0, 63, layout.hkv - 1)), layout.page_bytes - 4
+                )
 
     def test_slot_pages_and_partial_tail(self):
         self.assertEqual(kernel_page_and_offset(-1), (-1, -1))
@@ -120,24 +141,26 @@ class LayoutTest(unittest.TestCase):
 
     def test_prefix_copy_keeps_k_v_and_scales_together(self):
         block_size = 128
-        self.assertTrue(region_stays_inside_block(block_size))
-        self.assertTrue(region_stays_inside_block(1664))
-        blob = bytearray(3 * pages_per_block(block_size) * PAGE_BYTES)
-        src, nbytes = block_byte_span(1, block_size)
-        for i in range(nbytes):
-            blob[src + i] = (i * 17 + 3) & 0xFF
-        dst, _ = block_byte_span(0, block_size)
-        blob[dst : dst + nbytes] = blob[src : src + nbytes]
-        self.assertEqual(blob[dst : dst + nbytes], blob[src : src + nbytes])
-        # A region that started in another block would fail this equality after
-        # a single-block copy. Every region of page 0 (the copy) matches page
-        # `ratio` (the source) byte for byte.
-        ratio = pages_per_block(block_size)
-        for name in ("k", "v", "k_scale", "v_scale", "v_zero"):
-            off, length = page_regions(0)[name]
-            src_off, src_len = page_regions(ratio)[name]
-            self.assertEqual(length, src_len)
-            self.assertEqual(blob[off : off + length], blob[src_off : src_off + src_len])
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                self.assertTrue(region_stays_inside_block(block_size, layout))
+                self.assertTrue(region_stays_inside_block(1664, layout))
+                blob = bytearray(3 * pages_per_block(block_size) * layout.page_bytes)
+                src, nbytes = block_byte_span(1, block_size, layout)
+                for i in range(nbytes):
+                    blob[src + i] = (i * 17 + 3) & 0xFF
+                dst, _ = block_byte_span(0, block_size, layout)
+                blob[dst : dst + nbytes] = blob[src : src + nbytes]
+                self.assertEqual(blob[dst : dst + nbytes], blob[src : src + nbytes])
+                # A region that started in another block would fail this equality after
+                # a single-block copy. Every region of page 0 (the copy) matches page
+                # `ratio` (the source) byte for byte.
+                ratio = pages_per_block(block_size)
+                for name in ("k", "v", "k_scale", "v_scale", "v_zero"):
+                    off, length = page_regions(0, layout)[name]
+                    src_off, src_len = page_regions(ratio, layout)[name]
+                    self.assertEqual(length, src_len)
+                    self.assertEqual(blob[off : off + length], blob[src_off : src_off + src_len])
 
     def test_mtp7_visible_lens_at_59500_is_not_int16(self):
         q_len = 7
@@ -176,30 +199,32 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(len(vpack), D // 2)
         self.assertLess(max(abs(a - b) for a, b in zip(row, vrest)), vscale + 1e-5)
 
-        seq_len = 5
-        q_len = 2
-        key = deterministic_rows(seq_len, HKV, seed=1)
-        value = deterministic_rows(seq_len, HKV, seed=2)
-        query = [key[seq_len - q_len + j] for j in range(q_len)]
-        # Broadcast KV heads into Q heads so the fixture is a real GQA tensor.
-        query_gqa = []
-        for tok in query:
-            heads = []
-            for h in range(HQ):
-                heads.append(tok[h // GQA])
-            query_gqa.append(heads)
-        out = causal_gqa(query_gqa, key, value, seq_len, q_len)
-        self.assertEqual(len(out), q_len)
-        self.assertEqual(len(out[0]), HQ)
-        self.assertTrue(all(math_finite(x) for head in out[0] for x in head))
-        # Query 0 cannot see the last key. Zero that key and the first query
-        # output must stay put; the last query must move.
-        key_cut = [list(map(list, heads)) for heads in key]
-        for h in range(HKV):
-            key_cut[-1][h] = [0.0] * D
-        out_cut = causal_gqa(query_gqa, key_cut, value, seq_len, q_len)
-        self.assertEqual(out[0][0], out_cut[0][0])
-        self.assertNotEqual(out[1][0], out_cut[1][0])
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                seq_len = 5
+                q_len = 2
+                key = deterministic_rows(seq_len, layout.hkv, seed=1)
+                value = deterministic_rows(seq_len, layout.hkv, seed=2)
+                query = [key[seq_len - q_len + j] for j in range(q_len)]
+                # Broadcast KV heads into Q heads so the fixture is a real GQA tensor.
+                query_gqa = []
+                for tok in query:
+                    heads = []
+                    for h in range(layout.hq):
+                        heads.append(tok[h // GQA])
+                    query_gqa.append(heads)
+                out = causal_gqa(query_gqa, key, value, seq_len, q_len)
+                self.assertEqual(len(out), q_len)
+                self.assertEqual(len(out[0]), layout.hq)
+                self.assertTrue(all(math_finite(x) for head in out[0] for x in head))
+                # Query 0 cannot see the last key. Zero that key and the first query
+                # output must stay put; the last query must move.
+                key_cut = [list(map(list, heads)) for heads in key]
+                for h in range(layout.hkv):
+                    key_cut[-1][h] = [0.0] * D
+                out_cut = causal_gqa(query_gqa, key_cut, value, seq_len, q_len)
+                self.assertEqual(out[0][0], out_cut[0][0])
+                self.assertNotEqual(out[1][0], out_cut[1][0])
 
 
 def math_finite(value: float) -> bool:

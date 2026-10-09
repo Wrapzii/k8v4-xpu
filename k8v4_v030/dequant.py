@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import torch
 
-from k8v4_v030.layout import D, GQA, HKV, HQ, PAGE
+from k8v4_v030.layout import D, PAGE, PageLayout
 
 # fp32 bytes for one HQ * query_rows * key_tile score. 128 MiB is one tile.
 # The 96K fault gathered the whole suffix (about 82K tokens) on a full card.
@@ -55,6 +55,11 @@ def physical_pages(
     return block_row[logical // ratio].to(torch.long) * ratio + (logical % ratio)
 
 
+def _views_hkv(views: dict[str, torch.Tensor]) -> int:
+    """Per-GPU KV head count named by the bound region views, validated."""
+    return PageLayout(int(views["k"].shape[2])).hkv
+
+
 def gather_dequant_range(
     views: dict[str, torch.Tensor],
     block_row: torch.Tensor,
@@ -68,6 +73,7 @@ def gather_dequant_range(
     ``block_row`` is one request's block-table row. Entries are kernel pages
     when ``pages_per_block`` is 1, otherwise manager blocks.
     """
+    hkv = _views_hkv(views)
     start = int(start)
     end = int(end)
     if start < 0 or end < start:
@@ -75,7 +81,7 @@ def gather_dequant_range(
     n = end - start
     device = block_row.device
     if n <= 0:
-        empty = torch.empty((0, HKV, D), dtype=dtype, device=device)
+        empty = torch.empty((0, hkv, D), dtype=dtype, device=device)
         return empty, empty
     page0 = start // PAGE
     page1 = (end + PAGE - 1) // PAGE
@@ -84,14 +90,14 @@ def gather_dequant_range(
     local1 = local0 + n
     k = views["k"].index_select(0, phys).to(torch.float32)
     k = k * views["k_scale"].index_select(0, phys).to(torch.float32).unsqueeze(-1)
-    k = k.reshape(-1, HKV, D)[local0:local1].contiguous()
+    k = k.reshape(-1, hkv, D)[local0:local1].contiguous()
     packed = views["v"].index_select(0, phys).to(torch.int32)
     scale = views["v_scale"].index_select(0, phys).unsqueeze(-1)
     zero = views["v_zero"].index_select(0, phys).unsqueeze(-1)
     even = (packed & 15).to(torch.float32)
     odd = (packed >> 4).to(torch.float32)
     value = torch.stack(((even - zero) * scale, (odd - zero) * scale), dim=-1)
-    value = value.reshape(-1, HKV, D)[local0:local1].contiguous()
+    value = value.reshape(-1, hkv, D)[local0:local1].contiguous()
     return k.to(dtype), value.to(dtype)
 
 
@@ -116,7 +122,7 @@ def gather_dequant_head(
     global last_head_copy_shapes
     seq_len = int(seq_len)
     head = int(head)
-    if head < 0 or head >= HKV:
+    if head < 0 or head >= _views_hkv(views):
         raise RuntimeError("kv head %s" % head)
     if seq_len < 0:
         raise RuntimeError("bad token range")
@@ -146,7 +152,7 @@ def gather_dequant_head(
     return k.to(dtype), value.to(dtype)
 
 
-def attention_tiles(q_len: int, seq_len: int) -> tuple[int, int]:
+def attention_tiles(q_len: int, seq_len: int, hq: int) -> tuple[int, int]:
     """Query rows and key tokens whose fp32 score stays inside the budget."""
     q_len = int(q_len)
     seq_len = max(int(seq_len), 0)
@@ -154,9 +160,9 @@ def attention_tiles(q_len: int, seq_len: int) -> tuple[int, int]:
         return 0, 0
     key_tile = min(seq_len, max(int(KEY_TILE_MAX), 1))
     while True:
-        room = max(int(SCORE_TILE_BYTES) // max(key_tile * HQ * 4, 1), 1)
+        room = max(int(SCORE_TILE_BYTES) // max(key_tile * hq * 4, 1), 1)
         rows = min(SCORE_TILE_MAX_ROWS, q_len, room)
-        score_bytes = rows * key_tile * HQ * 4
+        score_bytes = rows * key_tile * hq * 4
         if score_bytes <= int(SCORE_TILE_BYTES) or key_tile <= PAGE:
             return max(rows, 1), key_tile
         nxt = max(PAGE, key_tile // 2)
@@ -179,17 +185,19 @@ def eager_gqa_attention(
     """
     if query.ndim != 3 or key.ndim != 3 or value.ndim != 3:
         raise RuntimeError("eager attention expects [tokens, heads, dim]")
-    if query.shape[-1] != D or key.shape[-1] != D or key.shape[1] != HKV:
+    if query.shape[-1] != D or key.shape[-1] != D:
         raise RuntimeError("eager attention head shape")
+    # Head layout comes from the tensors; an unsupported pair fails loudly.
+    layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
     if query.shape[0] > key.shape[0]:
         raise RuntimeError("query longer than the KV sequence")
-    rows, key_tile = attention_tiles(query.shape[0], key.shape[0])
+    rows, key_tile = attention_tiles(query.shape[0], key.shape[0], layout.hq)
     if key_tile < key.shape[0]:
-        return _online_dense(query, key, value, float(scale), rows, key_tile)
+        return _online_dense(query, key, value, float(scale), rows, key_tile, layout.hkv)
     try:
-        return _sdpa_gqa(query, key, value, scale, repeat_kv=False)
+        return _sdpa_gqa(query, key, value, scale, repeat_kv=False, gqa=layout.gqa)
     except TypeError:
-        return _sdpa_gqa(query, key, value, scale, repeat_kv=True)
+        return _sdpa_gqa(query, key, value, scale, repeat_kv=True, gqa=layout.gqa)
 
 
 def eager_prefill(
@@ -207,12 +215,13 @@ def eager_prefill(
         return query
     if q_len > seq_len:
         raise RuntimeError("query longer than the KV sequence")
-    rows, key_tile = attention_tiles(q_len, seq_len)
+    rows, key_tile = attention_tiles(q_len, seq_len, int(query.shape[1]))
     if key_tile >= seq_len:
         k_fp, v_fp = gather_dequant(views, block_row, seq_len, pages_per_block, query.dtype)
         return eager_gqa_attention(query, k_fp, v_fp, scale)
     return _online_paged(
-        query, views, block_row, seq_len, pages_per_block, float(scale), rows, key_tile
+        query, views, block_row, seq_len, pages_per_block, float(scale), rows, key_tile,
+        _views_hkv(views),
     )
 
 
@@ -265,19 +274,21 @@ def _sdpa_gqa(
     value: torch.Tensor,
     scale: float,
     repeat_kv: bool,
+    gqa: int,
 ) -> torch.Tensor:
     if repeat_kv:
-        key = key.repeat_interleave(GQA, dim=1)
-        value = value.repeat_interleave(GQA, dim=1)
+        key = key.repeat_interleave(gqa, dim=1)
+        value = value.repeat_interleave(gqa, dim=1)
     q_len = int(query.shape[0])
     if q_len == 0:
         return query
     # is_causal is top-left. A prefill query is the suffix of the KV sequence,
     # so each tile's mask is aligned to that row's position in the full query.
     seq_len = int(key.shape[0])
-    tile, key_tile = attention_tiles(q_len, seq_len)
+    tile, key_tile = attention_tiles(q_len, seq_len, int(query.shape[1]))
     if key_tile < seq_len:
-        return _online_dense(query, key, value, float(scale), tile, key_tile)
+        hkv = int(query.shape[1]) // gqa
+        return _online_dense(query, key, value, float(scale), tile, key_tile, hkv)
     if tile >= q_len:
         return _sdpa_rows(query, key, value, scale, repeat_kv, 0, q_len)
     parts = []
@@ -309,11 +320,13 @@ def _online_accumulate(
     acc: torch.Tensor | None,
     running_max: torch.Tensor | None,
     normalizer: torch.Tensor | None,
+    hkv: int,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """One key tile of online-softmax GQA. State is ``[HKV, GQA, rows, ...]``."""
     rows = int(query.shape[0])
     kt = int(key.shape[0])
-    qf = query.to(torch.float32).reshape(rows, HKV, GQA, D)
+    gqa = int(query.shape[1]) // hkv
+    qf = query.to(torch.float32).reshape(rows, hkv, gqa, D)
     kf = key.to(torch.float32)
     vf = value.to(torch.float32)
     scores = torch.einsum("rhgd,khd->hgrk", qf, kf) * float(scale)
@@ -326,7 +339,7 @@ def _online_accumulate(
     if acc is None:
         running_max = torch.full_like(tile_max, torch.finfo(torch.float32).min)
         normalizer = torch.zeros_like(tile_max)
-        acc = torch.zeros((HKV, GQA, rows, D), dtype=torch.float32, device=query.device)
+        acc = torch.zeros((hkv, gqa, rows, D), dtype=torch.float32, device=query.device)
     new_max = torch.maximum(running_max, tile_max)
     alpha = torch.exp(running_max - new_max)
     probs = torch.exp(scores - new_max.unsqueeze(-1))
@@ -344,6 +357,7 @@ def _online_query_tile(
     q_len: int,
     seq_len: int,
     key_tile: int,
+    hkv: int,
 ) -> torch.Tensor:
     acc = None
     running_max = None
@@ -362,9 +376,12 @@ def _online_query_tile(
             acc,
             running_max,
             normalizer,
+            hkv,
         )
     out = acc / normalizer.unsqueeze(-1)
-    return out.permute(2, 0, 1, 3).reshape(query.shape[0], HQ, D).contiguous().to(query.dtype)
+    return (
+        out.permute(2, 0, 1, 3).reshape(query.shape[0], query.shape[1], D).contiguous().to(query.dtype)
+    )
 
 
 def _online_dense(
@@ -374,11 +391,12 @@ def _online_dense(
     scale: float,
     rows: int,
     key_tile: int,
+    hkv: int,
 ) -> torch.Tensor:
     q_len = int(query.shape[0])
     seq_len = int(key.shape[0])
     if rows >= q_len:
-        return _online_query_tile(query, key, value, scale, 0, q_len, seq_len, key_tile)
+        return _online_query_tile(query, key, value, scale, 0, q_len, seq_len, key_tile, hkv)
     parts = []
     for row0 in range(0, q_len, rows):
         count = min(rows, q_len - row0)
@@ -392,6 +410,7 @@ def _online_dense(
                 q_len,
                 seq_len,
                 key_tile,
+                hkv,
             )
         )
     return torch.cat(parts, dim=0)
@@ -406,18 +425,20 @@ def _online_paged(
     scale: float,
     rows: int,
     key_tile: int,
+    hkv: int,
 ) -> torch.Tensor:
     """Stream key tiles once. Query rows are scored in budget-sized groups."""
     q_len = int(query.shape[0])
+    gqa = int(query.shape[1]) // hkv
     device = query.device
-    acc = torch.zeros((HKV, GQA, q_len, D), dtype=torch.float32, device=device)
+    acc = torch.zeros((hkv, gqa, q_len, D), dtype=torch.float32, device=device)
     running_max = torch.full(
-        (HKV, GQA, q_len),
+        (hkv, gqa, q_len),
         torch.finfo(torch.float32).min,
         dtype=torch.float32,
         device=device,
     )
-    normalizer = torch.zeros((HKV, GQA, q_len), dtype=torch.float32, device=device)
+    normalizer = torch.zeros((hkv, gqa, q_len), dtype=torch.float32, device=device)
     step = max(int(rows), 1)
     span = max(int(key_tile), 1)
     for k0 in range(0, seq_len, span):
@@ -439,10 +460,13 @@ def _online_paged(
                 acc[:, :, row0 : row0 + count, :],
                 running_max[:, :, row0 : row0 + count],
                 normalizer[:, :, row0 : row0 + count],
+                hkv,
             )
             acc[:, :, row0 : row0 + count, :] = acc_t
             running_max[:, :, row0 : row0 + count] = max_t
             normalizer[:, :, row0 : row0 + count] = norm_t
         del key, value
     out = acc / normalizer.unsqueeze(-1)
-    return out.permute(2, 0, 1, 3).reshape(q_len, HQ, D).contiguous().to(query.dtype)
+    return (
+        out.permute(2, 0, 1, 3).reshape(q_len, query.shape[1], D).contiguous().to(query.dtype)
+    )

@@ -1,4 +1,4 @@
-"""CPU quantization and causal GQA reference for the HKV=2 kernel.
+"""CPU quantization and causal GQA reference for the K8/V4 kernels.
 
 The store and the score path use the same rounding as xe2_kv_ops.cpp:
 K is symmetric int8 with scale amax/127 and rint; V is affine int4 with
@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 import random
 
-from k8v4_v030.layout import D, GQA, HKV, HQ, builtin_q_end
+from k8v4_v030.layout import D, GQA, PageLayout, builtin_q_end
 
 
 def _rint(value: float) -> int:
@@ -114,12 +114,14 @@ def causal_gqa(
         raise ValueError("query width")
     if len(key) < seq_len or len(value) < seq_len:
         raise ValueError("cache shorter than seq_len")
+    layout = PageLayout.for_heads(len(query[0]), len(key[0]))
+    hkv, hq = layout.hkv, layout.hq
     kq = []
     vq = []
     for t in range(seq_len):
         k_heads = []
         v_heads = []
-        for h in range(HKV):
+        for h in range(hkv):
             k_packed, k_scale = quant_k(key[t][h])
             v_packed, v_scale, v_zero = quant_v(value[t][h])
             k_heads.append((k_packed, k_scale))
@@ -132,7 +134,7 @@ def causal_gqa(
     for q_tok in range(q_len):
         end = builtin_q_end(seq_len, q_len, q_tok)
         heads: list[list[float]] = []
-        for h in range(HQ):
+        for h in range(hq):
             kv_head = h // GQA
             q_packed, q_scale = quant_k(query[q_tok][h])
             scores = []

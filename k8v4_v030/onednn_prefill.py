@@ -16,7 +16,7 @@ import os
 import torch
 
 from k8v4_v030.dequant import gather_dequant_head
-from k8v4_v030.layout import D, GQA, HKV, HQ
+from k8v4_v030.layout import D, PageLayout
 from k8v4_v030.stage_profile import profile_enabled, profile_range
 
 Q_BUCKET = 256
@@ -154,8 +154,12 @@ def head_major_attention(
     """Score already-dequantized K/V one KV head at a time.
 
     ``query`` is ``[q_len, HQ, D]`` and is the suffix of ``key``/``value``
-    ``[seq_len, HKV, D]``.
+    ``[seq_len, HKV, D]``. The head layout comes from those shapes.
     """
+    layout = PageLayout.for_heads(int(query.shape[1]), int(key.shape[1]))
+    gqa = layout.gqa
+    hq = layout.hq
+    hkv = layout.hkv
     q_len = int(query.shape[0])
     seq_len = int(key.shape[0])
     if q_len == 0:
@@ -164,13 +168,13 @@ def head_major_attention(
         raise RuntimeError("query longer than the KV sequence")
     q_pad = query_pad_rows(q_len, bucket)
     padded = pad_queries_top(query, q_pad)
-    out = torch.empty((q_pad, HQ, D), dtype=query.dtype, device=query.device)
-    for head in range(HKV):
-        qg = padded[:, head * GQA : (head + 1) * GQA, :]
+    out = torch.empty((q_pad, hq, D), dtype=query.dtype, device=query.device)
+    for head in range(hkv):
+        qg = padded[:, head * gqa : (head + 1) * gqa, :]
         scored = score_one_group(
             qg, key[:, head, :], value[:, head, :], scale, seq_len, q_pad
         )
-        out[:, head * GQA : (head + 1) * GQA, :] = scored
+        out[:, head * gqa : (head + 1) * gqa, :] = scored
     if q_pad == q_len:
         return out
     return out[q_pad - q_len :].contiguous()
@@ -186,6 +190,14 @@ def head_major_prefill(
     bucket: int = Q_BUCKET,
 ) -> torch.Tensor:
     """Paged prefill. Each KV head is gathered, scored, and then freed."""
+    # The bound views carry this rank's KV head count; the query must agree.
+    layout = PageLayout(int(views["k"].shape[2]))
+    if int(query.shape[1]) != layout.hq:
+        raise RuntimeError(
+            "query has %d heads, the K8/V4 cache holds %d"
+            % (int(query.shape[1]), layout.hq)
+        )
+    gqa = layout.gqa
     q_len = int(query.shape[0])
     seq_len = int(seq_len)
     if q_len == 0:
@@ -194,7 +206,7 @@ def head_major_prefill(
         raise RuntimeError("query longer than the KV sequence")
     q_pad = query_pad_rows(q_len, bucket)
     padded = pad_queries_top(query, q_pad)
-    out = torch.empty((q_pad, HQ, D), dtype=query.dtype, device=query.device)
+    out = torch.empty((q_pad, layout.hq, D), dtype=query.dtype, device=query.device)
     gather = gather_dequant_head
     gather_mode = os.environ.get("K8V4_PREFILL_GATHER", "torch")
     if gather_mode not in ("torch", "triton"):
@@ -202,22 +214,22 @@ def head_major_prefill(
     if gather_mode == "triton" and query.device.type == "xpu":
         from k8v4_v030.prefill_gather_triton import gather_dequant_head_fused
         gather = gather_dequant_head_fused
-    for head in range(HKV):
+    for head in range(layout.hkv):
         if profile_enabled():
             with profile_range("attn_gather", "gather_dequant_head"):
                 key, value = gather(
                     views, block_row, seq_len, head, pages_per_block, query.dtype
                 )
-            qg = padded[:, head * GQA : (head + 1) * GQA, :]
+            qg = padded[:, head * gqa : (head + 1) * gqa, :]
             with profile_range("attn_sdpa", "score_one_group"):
                 scored = score_one_group(qg, key, value, scale, seq_len, q_pad)
         else:
             key, value = gather(
                 views, block_row, seq_len, head, pages_per_block, query.dtype
             )
-            qg = padded[:, head * GQA : (head + 1) * GQA, :]
+            qg = padded[:, head * gqa : (head + 1) * gqa, :]
             scored = score_one_group(qg, key, value, scale, seq_len, q_pad)
-        out[:, head * GQA : (head + 1) * GQA, :] = scored
+        out[:, head * gqa : (head + 1) * gqa, :] = scored
         del key, value
     if q_pad == q_len:
         return out
