@@ -1,11 +1,14 @@
 #!/bin/bash
-# Build build/libxe2_kv.so. Does not use the GPU and does not define a stamp build.
-# On a 12 GB host, stop the model server first. The container is capped at 2200 MB.
+# Build build/libxe2_kv.so. One library serves both head layouts: 2 KV heads
+# on a TP2 rank and 4 on a single GPU; the ops dispatch at runtime.
+# Does not use the GPU and does not define a stamp build.
+# On a 12 GB host, stop the model server first. The two instantiations need
+# more compile memory than the single-layout build did.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 mkdir -p "$ROOT/build"
-docker run --rm --memory=2200m --memory-swap=7g --entrypoint bash \
+docker run --rm --memory=16g --entrypoint bash \
   -v "$ROOT/k8v4_v030/native:/src:ro" \
   -v "$ROOT/build:/out" \
   k8v4-compile-2026 -lc '

@@ -1,0 +1,22 @@
+# One Arc B70 (TP1): the full K8/V4 image. The single libxe2_kv.so serves both
+# head layouts (the ops pick 4 KV / 24 Q heads from the tensors at runtime;
+# no env var), plus MLP W4A8 prefill and the TP-aware INT8-embedding loader.
+FROM vllm/vllm-openai-xpu:v0.30.0@sha256:fc0e112afb64e3a06fe8daff34652435822a629412f38efce8f0f67a46636b8d
+COPY k8v4_v030 /opt/k8v4/k8v4_v030
+COPY build/libxe2_kv.so /opt/k8v4/libxe2_kv.so
+COPY build/libk8v4_sdpa.so /opt/k8v4/libk8v4_sdpa.so
+COPY build/libdnnl.so.3 /opt/k8v4/libdnnl.so.3
+COPY k8v4_v030/embed_int8_runtime.py /opt/venv/lib/python3.12/site-packages/swift_embed_int8_runtime.py
+COPY tools/patch_embed_int8_v030.py /tmp/patch_embed_int8_v030.py
+ENV PYTHONPATH=/opt/k8v4 \
+    XE2_KV_LIB=/opt/k8v4/libxe2_kv.so \
+    K8V4_SDPA_LIB=/opt/k8v4/libk8v4_sdpa.so \
+    K8V4_PREFILL=onednn \
+    K8V4_PREFILL_GEMM=w4a8 \
+    VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v2 \
+    XE2_KV_S2_NSG=32
+RUN python3 -m py_compile /opt/k8v4/k8v4_v030/backend.py /opt/k8v4/k8v4_v030/dequant.py /opt/k8v4/k8v4_v030/onednn_prefill.py \
+      /opt/k8v4/k8v4_v030/w4a8_prefill.py /opt/k8v4/k8v4_v030/layout.py \
+ && python3 /opt/k8v4/k8v4_v030/patch_installed_vllm.py \
+ && python3 /tmp/patch_embed_int8_v030.py && PYTHONPATH=/workspace/vllm python3 /tmp/patch_embed_int8_v030.py \
+ && python3 -c "from k8v4_v030.layout import PageLayout; tp1 = PageLayout(4); assert (tp1.hkv, tp1.hq, tp1.page_bytes) == (4, 24, 101376); print('layout check', tp1.hkv, tp1.hq, tp1.page_bytes)"
