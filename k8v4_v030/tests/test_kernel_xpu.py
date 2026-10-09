@@ -21,8 +21,10 @@ from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_gqa_attention, gather_dequant
 from k8v4_v030.layout import (
     D,
+    GQA,
     PAGE,
     PageLayout,
+    V4_COLS,
     as_int16,
     block_byte_span,
     element_byte,
@@ -174,6 +176,118 @@ class KernelXpuTest(unittest.TestCase):
         if os.environ.get("K8V4_REQUIRE_TP2") == "1":
             self.assertGreaterEqual(count, 2)
             self.assertNotEqual(os.environ.get("ZE_AFFINITY_MASK"), "0")
+
+    def test_unsupported_head_counts_raise(self):
+        """The native ops reject any per-GPU KV head count but 2 and 4."""
+        device = self.device
+        self.layout = TP2
+        views = self._cache(4)
+        slots = torch.arange(4, dtype=torch.int64, device=device)
+        table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+        seq = torch.tensor([4], dtype=torch.int32, device=device)
+        scratch = Scratch(
+            device, TP2, nprog_max=workspace_programs(4, 1, TP2),
+            max_store_tokens=1, max_out_tokens=1,
+        )
+        partials, m_state, l_state, merged = scratch.workspace(workspace_programs(4, 1, TP2))
+        for hkv in (3, 8, 1, 0):
+            with self.subTest(store_hkv=hkv):
+                k = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
+                v = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
+                with self.assertRaises(RuntimeError):
+                    self._store(views, k, v, slots)
+            with self.subTest(batch_hkv=hkv):
+                q = torch.randn(1, 6 * hkv, D, dtype=torch.float16, device=device)
+                out = torch.empty_like(q)
+                with self.assertRaises(RuntimeError):
+                    ops().int8k_int4v_attn_batch(
+                        q, scratch.q8, scratch.q_scale,
+                        views["k"], views["k_scale"], views["v"], views["v_scale"],
+                        views["v_zero"], table, seq, scratch.visible,
+                        partials, m_state, l_state, merged, out, 1, 1,
+                    )
+            with self.subTest(legacy_hkv=hkv):
+                k_cache = torch.zeros(4, PAGE, hkv, D, dtype=torch.int8, device=device)
+                scales = torch.zeros(4, PAGE, hkv, dtype=torch.float32, device=device)
+                v_cache = torch.zeros(4, PAGE, hkv, V4_COLS, dtype=torch.uint8, device=device)
+                out = torch.zeros(1, TP2.hq, D, dtype=torch.float16, device=device)
+                with self.assertRaises(RuntimeError):
+                    ops().int8k_int4v_s1_paged(
+                        scratch.q8, scratch.q_scale, k_cache, scales, v_cache,
+                        scales, scales, table, seq, out,
+                    )
+
+    def test_legacy_op_interleaves_both_layouts_in_one_process(self):
+        """The workspace-free legacy op mixes 2- and 4-head calls safely.
+
+        Its in-library workspace is a function-template static (one per HKV
+        instantiation); alternating layouts in one process must give the same
+        answer as the caller-workspace varlen path for each layout.
+        """
+        device = self.device
+        reference = {}
+        legacy = {}
+        for layout in LAYOUTS:
+            self.layout = layout
+            hkv, hq = layout.hkv, layout.hq
+            views = self._cache(4)
+            gen = torch.Generator(device="cpu").manual_seed(5)
+            key = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            value = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            slots = torch.arange(200, dtype=torch.int64, device=device)
+            self._store(views, key, value, slots)
+            query = torch.randn(1, hq, D, generator=gen, dtype=torch.float16).to(device)
+            table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+            seq = torch.tensor([200], dtype=torch.int32, device=device)
+            reference[hkv] = self._attend(views, query, table, seq, 1, 1)
+            scratch = Scratch(
+                device, layout, nprog_max=workspace_programs(4, 1, layout),
+                max_store_tokens=1, max_out_tokens=1,
+            )
+            # Q-once layout [HKV, 64, D]: row g of head h is query head h*GQA+g.
+            pad = torch.zeros(hkv, PAGE, D, dtype=torch.float16, device=device)
+            pad[:, :GQA] = query[0].view(hkv, GQA, D)
+            ops().q_quant_once(pad, scratch.q8, scratch.q_scale)
+            _, out_buf = scratch.attention_pair(1)
+            out_buf.zero_()
+            ops().int8k_int4v_s1_paged(
+                scratch.q8, scratch.q_scale,
+                views["k"], views["k_scale"], views["v"], views["v_scale"],
+                views["v_zero"], table, seq, out_buf,
+            )
+            torch.xpu.synchronize()
+            legacy[hkv] = out_buf.detach().clone()
+            self.assertLess(_max_abs(legacy[hkv], reference[hkv]), 1e-4)
+        # Re-run each legacy layout after the other has run in between.
+        for layout in LAYOUTS:
+            self.layout = layout
+            hkv = layout.hkv
+            views = self._cache(4)
+            gen = torch.Generator(device="cpu").manual_seed(5)
+            key = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            value = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            slots = torch.arange(200, dtype=torch.int64, device=device)
+            self._store(views, key, value, slots)
+            query = torch.randn(1, layout.hq, D, generator=gen, dtype=torch.float16).to(device)
+            table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+            seq = torch.tensor([200], dtype=torch.int32, device=device)
+            scratch = Scratch(
+                device, layout, nprog_max=workspace_programs(4, 1, layout),
+                max_store_tokens=1, max_out_tokens=1,
+            )
+            pad = torch.zeros(hkv, PAGE, D, dtype=torch.float16, device=device)
+            pad[:, :GQA] = query[0].view(hkv, GQA, D)
+            ops().q_quant_once(pad, scratch.q8, scratch.q_scale)
+            _, out_buf = scratch.attention_pair(1)
+            out_buf.zero_()
+            ops().int8k_int4v_s1_paged(
+                scratch.q8, scratch.q_scale,
+                views["k"], views["k_scale"], views["v"], views["v_scale"],
+                views["v_zero"], table, seq, out_buf,
+            )
+            torch.xpu.synchronize()
+            self.assertTrue(torch.equal(out_buf.detach().clone(), legacy[hkv]))
+        self._note("legacy_interleave", passed=True, layouts=[l.hkv for l in LAYOUTS])
 
     def test_partial_pages_negative_slots_and_dirty_tail(self):
         for layout in LAYOUTS:
