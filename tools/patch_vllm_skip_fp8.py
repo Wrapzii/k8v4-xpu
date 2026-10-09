@@ -4,6 +4,12 @@ Lets kv_cache_dtype_skip_layers fall back to a chosen dtype (VLLM_KV_SKIP_DTYPE,
 instead of always "auto", and gives skipped full-attention layers the padded shared page the
 sliding-window branch already has. Lets the 27B keep K8/V4 (int8_k_int4_v) while the DFlash2
 drafter's layers run the stock XPU backend on fp8. Default (unset) behaves as upstream.
+
+Each hunk is (old, new, marker): marker is a string that exists only in the patched text.
+A hunk is skipped when its marker is present and the new text matches, applied when the
+marker is absent and the old text occurs exactly once, and fails loudly otherwise (so a
+half-corrupted patched file is never silently re-patched — hunk 0's new text contains its
+old text, which would otherwise let it apply twice).
 """
 import importlib.util
 from pathlib import Path
@@ -12,14 +18,14 @@ spec = importlib.util.find_spec('vllm')
 root = Path(spec.origin).parent
 
 
-def patch(path, pairs):
-    """Apply each (old, new) hunk once. Already-applied hunks are skipped; a
-    hunk matching neither the original nor the patched text fails loudly.
-    `new` can contain `old` (hunk 0), so the patched text is tested first."""
+def patch(path, triples):
     s = path.read_text()
     changed = False
-    for old, new in pairs:
-        if new in s:
+    for old, new, marker in triples:
+        if marker in s:
+            if new not in s:
+                raise AssertionError(
+                    (path, 'marker present but the patched text differs', marker))
             continue
         assert s.count(old) == 1, (
             path, 'hunk matches neither original nor patched text', old[:70])
@@ -47,7 +53,8 @@ patch(att, [
         if _div or _fit:
             return max(_div or _fit)
     sizes = attn_backend.get_supported_kernel_block_sizes()
-    max_block_size = page_budget // per_token_bytes"""),
+    max_block_size = page_budget // per_token_bytes""",
+     '_fit = [n for n in range(64, page_budget // per_token_bytes + 1, 64)'),
     # 1. the skipped layers' dtype
     ("""            if skip:
                 kv_cache_dtype = "auto\"""",
@@ -55,7 +62,8 @@ patch(att, [
                 # local patch: VLLM_KV_SKIP_DTYPE picks the skipped layers' dtype (upstream: always auto)
                 import os as _os
 
-                kv_cache_dtype = _os.environ.get("VLLM_KV_SKIP_DTYPE", "auto")"""),
+                kv_cache_dtype = _os.environ.get("VLLM_KV_SKIP_DTYPE", "auto")""",
+     "VLLM_KV_SKIP_DTYPE picks the skipped layers' dtype"),
     # 2. skipped full-attention layers pad up to the shared page, like the sliding-window branch
     ("""        else:
             return FullAttentionSpec(
@@ -105,7 +113,8 @@ patch(att, [
                 head_size_v=self.head_size_v,
                 dtype=self.kv_cache_torch_dtype,
                 kv_quant_mode=quant_mode,
-            )"""),
+            )""",
+     'fa_per_token = self.attn_backend.customize_spec('),
 ])
 
 itf = root / 'platforms/interface.py'
@@ -127,7 +136,8 @@ patch(itf, [
                     dtype=_skip_dtype,
                     kv_quant_mode=get_kv_quant_mode(_skip),
                 ).page_size_bytes
-            )"""),
+            )""",
+     '_skip_dtype = model_config.dtype if _skip == "auto" else'),
 ])
 
 fa = root / 'v1/attention/backends/flash_attn.py'
@@ -141,7 +151,8 @@ patch(fa, [
 
         if _cp.is_xpu():  # local patch
             return [MultipleOf(64)]
-        return [MultipleOf(16)]"""),
+        return [MultipleOf(16)]""",
+     'if _cp.is_xpu():  # local patch'),
 ])
 
 kvi = root / 'v1/kv_cache_interface.py'
@@ -167,6 +178,7 @@ patch(kvi, [
             )
         strides = (strides[0], strides[1], strides[2], _pad // _n, strides[4])
 
-    view_5d = torch.as_strided("""),
+    view_5d = torch.as_strided(""",
+     'XPU padded KV page needs an NHD layout'),
 ])
 print('Verified skip-layer fp8 patch:', root)
