@@ -86,8 +86,18 @@ class LayoutTest(unittest.TestCase):
         self.assertNotIn("static constexpr int HKV = 4;", text)
         self.assertNotIn("K8V4_TP1", text)
         self.assertIn("int8k_int4v_attn_batch", text)
-        # ABI guard only: pages_per_block stays int64_t in every schema.
-        self.assertIn("int64_t pages_per_block", text)
+        # Stage-2 work-groups follow the head count (origin/main pinned a
+        # constant 16): HKV*BM/8 with BM=64 is 16 for HKV=2, 32 for HKV=4.
+        self.assertIn("static constexpr int BM = 64;", text)
+        self.assertIn("static constexpr int s2_nwg = HKV * BM / 8;", text)
+        self.assertIn('static_assert(s2_nwg * S2_SG_COUNT == HKV * BM, "Stage2 1 row/SG")', text)
+        self.assertEqual((2 * 64) // 8, 16)
+        self.assertEqual((4 * 64) // 8, 32)
+        # ABI guard: every paged entry keeps the 64-bit parameter, and exactly
+        # the three paged ops declare it in a schema (a new op must not add
+        # one silently, nor narrow the C++ side to int).
+        self.assertEqual(text.count("at::Tensor out, int64_t pages_per_block = 1)"), 3)
+        self.assertEqual(text.count("int pages_per_block) -> ()"), 3)
         self.assertNotIn("at::Tensor out, int pages_per_block", text)
         self.assertIn("int q_len, int pages_per_block) -> ()", text)
         self.assertIn("bt[logical / pages_per_block]", text)
