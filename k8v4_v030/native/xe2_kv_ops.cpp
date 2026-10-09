@@ -80,12 +80,18 @@ static int checked_hkv(int64_t hkv) {
 }
 
 template <class F>
-static void dispatch_hkv(int hkv, F &&run) {
-  if (hkv == 2) {
+static void dispatch_hkv(int64_t hkv, F &&run) {
+  // Validated here so no caller can reach the 4-head kernel with an
+  // unchecked count.
+  switch (checked_hkv(hkv)) {
+  case 2:
     run(std::integral_constant<int, 2>{});
     return;
+  case 4:
+    run(std::integral_constant<int, 4>{});
+    return;
   }
-  run(std::integral_constant<int, 4>{});
+  TORCH_CHECK(false, "unsupported per-GPU KV head count ", hkv, " (this library serves 2 or 4)");
 }
 
 static sycl::queue &current_xpu_queue() { return c10::xpu::getCurrentXPUStream().queue(); }
@@ -1248,7 +1254,7 @@ static void q_quant_once(const at::Tensor &q_fp16, at::Tensor q8, at::Tensor q_s
   TORCH_CHECK(q_scale.scalar_type() == at::kFloat, "q_scale must be float32");
   TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(1) == BM && q_fp16.size(2) == BK,
               "q_fp16 shape [HKV,64,256]");
-  dispatch_hkv(checked_hkv(q_fp16.size(0)), [&](auto hkv) {
+  dispatch_hkv(q_fp16.size(0), [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     TORCH_CHECK(q_fp16.numel() == static_cast<int64_t>(HKV) * BM * BK, "q_fp16 numel [HKV,64,256]");
     TORCH_CHECK(q8.numel() == q_fp16.numel(), "q8 numel");
@@ -1304,7 +1310,7 @@ static void int8k_int4v_s1(const at::Tensor &q8, const at::Tensor &q_scale, cons
   TORCH_CHECK(v4.scalar_type() == at::kByte, "v4 uint8");
   TORCH_CHECK(out.scalar_type() == at::kFloat, "out float32");
   TORCH_CHECK(q8.dim() == 3 && q8.size(1) == BM && q8.size(2) == BK, "q8 shape [HKV,64,256]");
-  dispatch_hkv(checked_hkv(q8.size(0)), [&](auto hkv) {
+  dispatch_hkv(q8.size(0), [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     TORCH_CHECK(q8.numel() == static_cast<int64_t>(HKV) * BM * BK, "q8 unique [HKV,64,256]");
     const int64_t k_rows = k8.numel() / BK;
@@ -1331,10 +1337,10 @@ static void check_paged_k(const at::Tensor &k_cache, const at::Tensor &k_scale) 
   TORCH_CHECK(k_scale.scalar_type() == at::kFloat, "k_scale float32");
   TORCH_CHECK(k_cache.dim() == 4 && k_cache.size(1) == PAGE && k_cache.size(2) == HKV &&
                   k_cache.size(3) == BK,
-              "k_cache [num_blocks,64,4,256] NHD");
+              "k_cache [num_blocks,64,", HKV, ",256] NHD");
   TORCH_CHECK(k_scale.dim() == 3 && k_scale.size(0) == k_cache.size(0) && k_scale.size(1) == PAGE &&
                   k_scale.size(2) == HKV,
-              "k_scale [num_blocks,64,4]");
+              "k_scale [num_blocks,64,", HKV, "]");
   TORCH_CHECK(k_cache.stride(3) == 1 && k_cache.stride(2) == BK &&
                   k_cache.stride(1) == HKV * BK,
               "k_cache within-page strides");
@@ -1351,11 +1357,11 @@ static void check_paged_v(const at::Tensor &v_cache, const at::Tensor &v_scale,
               "v scale/zero float32");
   TORCH_CHECK(v_cache.dim() == 4 && v_cache.size(1) == PAGE && v_cache.size(2) == HKV &&
                   v_cache.size(3) == V4_COLS,
-              "v_cache [num_blocks,64,4,128] NHD packed");
+              "v_cache [num_blocks,64,", HKV, ",128] NHD packed");
   TORCH_CHECK(v_scale.sizes() == v_zero.sizes(), "v_scale/v_zero shape");
   TORCH_CHECK(v_scale.dim() == 3 && v_scale.size(0) == v_cache.size(0) && v_scale.size(1) == PAGE &&
                   v_scale.size(2) == HKV,
-              "v_scale [num_blocks,64,4]");
+              "v_scale [num_blocks,64,", HKV, "]");
   TORCH_CHECK(v_cache.stride(3) == 1 && v_cache.stride(2) == V4_COLS &&
                   v_cache.stride(1) == HKV * V4_COLS,
               "v_cache within-page strides");
@@ -1370,7 +1376,7 @@ static void k_store_paged(const at::Tensor &k_fp16, const at::Tensor &slot_mappi
   TORCH_CHECK(k_fp16.dim() == 3 && k_fp16.size(2) == BK, "k_fp16 [T,HKV,256]");
   TORCH_CHECK(k_fp16.scalar_type() == at::kHalf, "k_fp16 float16");
   TORCH_CHECK(slot_mapping.scalar_type() == at::kLong, "slot_mapping int64");
-  dispatch_hkv(checked_hkv(k_fp16.size(1)), [&](auto hkv) {
+  dispatch_hkv(k_fp16.size(1), [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     check_paged_k<HKV>(k_cache, k_scale);
     TORCH_CHECK(slot_mapping.numel() == k_fp16.size(0), "slot_mapping [T]");
@@ -1389,7 +1395,7 @@ static void v_store_paged(const at::Tensor &v_fp16, const at::Tensor &slot_mappi
   TORCH_CHECK(v_fp16.dim() == 3 && v_fp16.size(2) == BK, "v_fp16 [T,HKV,256]");
   TORCH_CHECK(v_fp16.scalar_type() == at::kHalf, "v_fp16 float16");
   TORCH_CHECK(slot_mapping.scalar_type() == at::kLong, "slot_mapping int64");
-  dispatch_hkv(checked_hkv(v_fp16.size(1)), [&](auto hkv) {
+  dispatch_hkv(v_fp16.size(1), [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     check_paged_v<HKV>(v_cache, v_scale, v_zero);
     TORCH_CHECK(slot_mapping.numel() == v_fp16.size(0), "slot_mapping [T]");
@@ -1419,7 +1425,7 @@ static void kv_store_paged(const at::Tensor &k_fp16, const at::Tensor &v_fp16,
   const int64_t ntok = k_fp16.size(0);
   const int64_t nblocks = k_cache.size(0);
   const auto *slots = slot_mapping.data_ptr<int64_t>();
-  dispatch_hkv(checked_hkv(k_fp16.size(1)), [&](auto hkv) {
+  dispatch_hkv(k_fp16.size(1), [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     check_paged_k<HKV>(k_cache, k_scale);
     check_paged_v<HKV>(v_cache, v_scale, v_zero);
@@ -1538,6 +1544,8 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
       int n_splits = -1;
       c10::DeviceIndex dev = -1;
     };
+    // Function-template statics are per specialization, so the 2- and 4-head
+    // instantiations each own this cache; sizes depend on HKV by construction.
     static LegacyWs ws;
     if (ws.n_splits != n_splits || ws.dev != q8.device().index() || !ws.partials.defined() ||
         ws.partials.device() != q8.device()) {
@@ -1623,7 +1631,7 @@ static void int8k_int4v_s1_paged(const at::Tensor &q8, const at::Tensor &q_scale
                                  const at::Tensor &v_zero, const at::Tensor &block_table,
                                  const at::Tensor &seq_lens, at::Tensor out) {
   TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
-  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+  dispatch_hkv(k_cache.size(2), [&](auto hkv) {
     int8k_int4v_s1_paged_impl<decltype(hkv)::value>(
         q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens, out,
         at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor(), at::Tensor());
@@ -1640,7 +1648,7 @@ static void int8k_int4v_s1_varlen_paged(const at::Tensor &q8, const at::Tensor &
                                          const at::Tensor &l_ws, const at::Tensor &merged_ws,
                                          at::Tensor out, int64_t pages_per_block = 1) {
   TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
-  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+  dispatch_hkv(k_cache.size(2), [&](auto hkv) {
     int8k_int4v_s1_paged_impl<decltype(hkv)::value>(
         q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens, out,
         visible_lens, partials_ws, m_ws, l_ws, merged_ws, static_cast<int>(pages_per_block));
@@ -1694,7 +1702,7 @@ static void int8k_int4v_s1_varlen_from_q(const at::Tensor &q_fp16, at::Tensor q8
                                          const at::Tensor &l_ws, const at::Tensor &merged_ws,
                                          at::Tensor out, int64_t pages_per_block = 1) {
   TORCH_CHECK(k_cache.dim() == 4, "k_cache [num_blocks,64,HKV,256] NHD");
-  dispatch_hkv(checked_hkv(k_cache.size(2)), [&](auto hkv) {
+  dispatch_hkv(k_cache.size(2), [&](auto hkv) {
     int8k_int4v_s1_varlen_from_q_impl<decltype(hkv)::value>(
         q_fp16, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero, block_table, seq_lens,
         visible_lens, partials_ws, m_ws, l_ws, merged_ws, out, pages_per_block);
@@ -1734,7 +1742,7 @@ static void int8k_int4v_attn_batch(const at::Tensor &q_fp16, at::Tensor q8, at::
   TORCH_CHECK(q_len > 0 && q_len * GQA <= BM, "q_len*GQA exceeds BM");
   TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(2) == BK, "q_fp16 [T,HQ,D]");
   TORCH_CHECK(q_fp16.size(1) % GQA == 0, "q_fp16 heads must be a multiple of GQA=6");
-  dispatch_hkv(checked_hkv(q_fp16.size(1) / GQA), [&](auto hkv) {
+  dispatch_hkv(q_fp16.size(1) / GQA, [&](auto hkv) {
     constexpr int HKV = decltype(hkv)::value;
     constexpr int HQ = Heads<HKV>::hq;
     TORCH_CHECK(q_fp16.size(1) == HQ, "q_fp16 [T,HQ,D]");
