@@ -1,0 +1,9 @@
+# The docker context only needs the package, the build artifacts, and the
+# patch tools. Everything else is measurement history or working files.
+.git
+.gitattributes
+bench
+docs
+huggingface
+results
+*.md

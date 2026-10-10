@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import torch
 
-from k8v4_v030.layout import PAGE_BYTES, region_view_specs
+from k8v4_v030.layout import PageLayout, region_view_specs
 
 _FLOAT = "float32"
 _BYTE = (torch.uint8, torch.int8)
@@ -65,16 +65,24 @@ def memory_order_bytes(kv_cache: torch.Tensor) -> torch.Tensor:
     return flat.view(torch.int8)
 
 
-def bind_regions(kv_cache: torch.Tensor) -> dict[str, torch.Tensor]:
+def bind_regions(kv_cache: torch.Tensor, layout: PageLayout) -> dict[str, torch.Tensor]:
     """Five region views sharing ``kv_cache`` storage. No copy."""
+    # vLLM hands us [block, head, token, cell]; the head dim names the true
+    # KV head count. A 4-head cache bound with the 2-head layout would pass
+    # the byte-multiple check below and alias garbage.
+    if kv_cache.dim() == 4 and kv_cache.shape[1] > 1 and kv_cache.shape[1] != layout.hkv:
+        raise RuntimeError(
+            "K8/V4 cache has %d KV heads, layout serves %d"
+            % (int(kv_cache.shape[1]), layout.hkv)
+        )
     raw = memory_order_bytes(kv_cache)
-    if raw.numel() % PAGE_BYTES != 0:
+    if raw.numel() % layout.page_bytes != 0:
         raise RuntimeError(
             "K8/V4 cache has %d bytes, not a multiple of the %d-byte page"
-            % (raw.numel(), PAGE_BYTES)
+            % (raw.numel(), layout.page_bytes)
         )
-    num_pages = raw.numel() // PAGE_BYTES
-    specs = region_view_specs(num_pages)
+    num_pages = raw.numel() // layout.page_bytes
+    specs = region_view_specs(num_pages, layout)
     base = int(raw.storage_offset())
     uint8 = raw.view(torch.uint8)
     floats = raw.view(torch.float32)

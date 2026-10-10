@@ -1,18 +1,20 @@
-"""TP2 K8/V4 page geometry.
+"""K8/V4 page geometry for 2 or 4 local KV heads.
 
 One kernel page is 64 tokens and holds K, packed V, and the three fp32
 affine tensors together. vLLM copies a whole manager block; that copy stays
 correct only when every kernel page inside the block is self-contained.
-Head count is the TP2 local count (2 KV / 12 Q). The one-GPU 4-KV-head
-page is larger than FP8 on a rank and is not this layout.
-"""
 
+The head layout is per deployment, not a module constant: a TP2 rank holds
+2 KV / 12 Q heads, a single GPU holding the whole model holds 4 / 24.
+Byte-level code carries an explicit :class:`PageLayout`; nothing here reads
+the environment.
+"""
 from __future__ import annotations
 
+import dataclasses
+
 PAGE = 64
-HKV = 2
-HQ = 12
-GQA = HQ // HKV
+GQA = 6  # Qwen3.8-27B: 6 query heads share one KV head (baked into the kernel)
 D = 256
 V4_COLS = D // 2
 SCALE_BYTES = 4
@@ -20,18 +22,71 @@ SCALE_BYTES = 4
 SLOT_BYTES_PER_HEAD = D + V4_COLS + 3 * SCALE_BYTES
 DECODE_MAX_T = PAGE // GQA  # 10; MTP6 uses 7
 
-K_BYTES_PER_PAGE = PAGE * HKV * D
-V_BYTES_PER_PAGE = PAGE * HKV * V4_COLS
-SCALE_BYTES_PER_PAGE = PAGE * HKV * SCALE_BYTES
-PAGE_BYTES = K_BYTES_PER_PAGE + V_BYTES_PER_PAGE + 3 * SCALE_BYTES_PER_PAGE
-BYTES_PER_TOKEN = PAGE_BYTES // PAGE
-# fp8 K and V for the same local head count: 2 * 256 bytes per head.
-FP8_BYTES_PER_TOKEN = HKV * 2 * D
-# What a TP rank would pay if it padded 2 KV heads out to the one-GPU kernel.
-PADDED_HKV4_BYTES_PER_TOKEN = 4 * SLOT_BYTES_PER_HEAD
-
 CACHE_DTYPE = "int8_k_int4_v"
 HISTORIC_MTP_LEN = 59500
+
+
+@dataclasses.dataclass(frozen=True)
+class PageLayout:
+    """Frozen per-worker head layout and the page geometry it implies.
+
+    ``hkv`` is the per-GPU KV head count: 2 on a TP2 rank, 4 when one GPU
+    holds the whole model. Build it with :meth:`for_heads` so a mismatched
+    (num_heads, num_kv_heads) pair fails loudly instead of half-working.
+    """
+
+    hkv: int
+
+    def __post_init__(self) -> None:
+        if self.hkv not in (2, 4):
+            raise ValueError(
+                "unsupported per-GPU KV head count %r (K8/V4 serves 2 or 4)" % (self.hkv,)
+            )
+
+    @classmethod
+    def for_heads(cls, num_heads: int, num_kv_heads: int) -> "PageLayout":
+        """Layout for one rank's local heads. The pair must agree on GQA=6."""
+        num_heads = int(num_heads)
+        num_kv_heads = int(num_kv_heads)
+        if num_kv_heads not in (2, 4) or num_heads != GQA * num_kv_heads:
+            raise ValueError(
+                "K8/V4 serves 12/2 (TP2) or 24/4 (single GPU) local heads, got %d Q / %d KV"
+                % (num_heads, num_kv_heads)
+            )
+        return cls(num_kv_heads)
+
+    @property
+    def gqa(self) -> int:
+        return GQA
+
+    @property
+    def hq(self) -> int:
+        return GQA * self.hkv
+
+    @property
+    def k_bytes_per_page(self) -> int:
+        return PAGE * self.hkv * D
+
+    @property
+    def v_bytes_per_page(self) -> int:
+        return PAGE * self.hkv * V4_COLS
+
+    @property
+    def scale_bytes_per_page(self) -> int:
+        return PAGE * self.hkv * SCALE_BYTES
+
+    @property
+    def page_bytes(self) -> int:
+        return self.k_bytes_per_page + self.v_bytes_per_page + 3 * self.scale_bytes_per_page
+
+    @property
+    def bytes_per_token(self) -> int:
+        return self.page_bytes // PAGE
+
+    @property
+    def fp8_bytes_per_token(self) -> int:
+        """fp8 K and V for the same local heads: 2 * D bytes per head."""
+        return self.hkv * 2 * D
 
 
 def pages_per_block(block_size: int) -> int:
@@ -95,26 +150,26 @@ def as_int16(value: int) -> int:
     return masked - 0x10000 if masked >= 0x8000 else masked
 
 
-def page_regions(page_index: int) -> dict[str, tuple[int, int]]:
+def page_regions(page_index: int, layout: PageLayout) -> dict[str, tuple[int, int]]:
     """Byte offset and length of each region inside one kernel page."""
-    base = int(page_index) * PAGE_BYTES
+    base = int(page_index) * layout.page_bytes
     k0 = base
-    v0 = k0 + K_BYTES_PER_PAGE
-    s0 = v0 + V_BYTES_PER_PAGE
+    v0 = k0 + layout.k_bytes_per_page
+    s0 = v0 + layout.v_bytes_per_page
     return {
-        "k": (k0, K_BYTES_PER_PAGE),
-        "v": (v0, V_BYTES_PER_PAGE),
-        "k_scale": (s0, SCALE_BYTES_PER_PAGE),
-        "v_scale": (s0 + SCALE_BYTES_PER_PAGE, SCALE_BYTES_PER_PAGE),
-        "v_zero": (s0 + 2 * SCALE_BYTES_PER_PAGE, SCALE_BYTES_PER_PAGE),
+        "k": (k0, layout.k_bytes_per_page),
+        "v": (v0, layout.v_bytes_per_page),
+        "k_scale": (s0, layout.scale_bytes_per_page),
+        "v_scale": (s0 + layout.scale_bytes_per_page, layout.scale_bytes_per_page),
+        "v_zero": (s0 + 2 * layout.scale_bytes_per_page, layout.scale_bytes_per_page),
     }
 
 
-def block_byte_span(block_id: int, block_size: int) -> tuple[int, int]:
+def block_byte_span(block_id: int, block_size: int, layout: PageLayout) -> tuple[int, int]:
     """Start and length of one vLLM block in the packed blob."""
     ratio = pages_per_block(block_size)
-    start = int(block_id) * ratio * PAGE_BYTES
-    return start, ratio * PAGE_BYTES
+    start = int(block_id) * ratio * layout.page_bytes
+    return start, ratio * layout.page_bytes
 
 
 def attention_pages_per_block(manager_block: int, kernel_block: int | None) -> int:
@@ -155,7 +210,7 @@ def max_kernel_pages(max_model_len: int, manager_block: int, kernel_block: int |
     return width * ratio
 
 
-def region_view_specs(num_pages: int) -> dict[str, dict[str, object]]:
+def region_view_specs(num_pages: int, layout: PageLayout) -> dict[str, dict[str, object]]:
     """as_strided specs for one contiguous run of kernel pages.
 
     Stride is in elements of that region. Byte offset is from the start of
@@ -165,38 +220,38 @@ def region_view_specs(num_pages: int) -> dict[str, dict[str, object]]:
     num_pages = int(num_pages)
     if num_pages < 1:
         raise ValueError("num_pages")
-    scale0 = K_BYTES_PER_PAGE + V_BYTES_PER_PAGE
-    float_stride0 = PAGE_BYTES // SCALE_BYTES
+    scale0 = layout.k_bytes_per_page + layout.v_bytes_per_page
+    float_stride0 = layout.page_bytes // SCALE_BYTES
     return {
         "k": {
             "dtype": "int8",
-            "shape": (num_pages, PAGE, HKV, D),
-            "stride": (PAGE_BYTES, HKV * D, D, 1),
+            "shape": (num_pages, PAGE, layout.hkv, D),
+            "stride": (layout.page_bytes, layout.hkv * D, D, 1),
             "byte_offset": 0,
         },
         "v": {
             "dtype": "uint8",
-            "shape": (num_pages, PAGE, HKV, V4_COLS),
-            "stride": (PAGE_BYTES, HKV * V4_COLS, V4_COLS, 1),
-            "byte_offset": K_BYTES_PER_PAGE,
+            "shape": (num_pages, PAGE, layout.hkv, V4_COLS),
+            "stride": (layout.page_bytes, layout.hkv * V4_COLS, V4_COLS, 1),
+            "byte_offset": layout.k_bytes_per_page,
         },
         "k_scale": {
             "dtype": "float32",
-            "shape": (num_pages, PAGE, HKV),
-            "stride": (float_stride0, HKV, 1),
+            "shape": (num_pages, PAGE, layout.hkv),
+            "stride": (float_stride0, layout.hkv, 1),
             "byte_offset": scale0,
         },
         "v_scale": {
             "dtype": "float32",
-            "shape": (num_pages, PAGE, HKV),
-            "stride": (float_stride0, HKV, 1),
-            "byte_offset": scale0 + SCALE_BYTES_PER_PAGE,
+            "shape": (num_pages, PAGE, layout.hkv),
+            "stride": (float_stride0, layout.hkv, 1),
+            "byte_offset": scale0 + layout.scale_bytes_per_page,
         },
         "v_zero": {
             "dtype": "float32",
-            "shape": (num_pages, PAGE, HKV),
-            "stride": (float_stride0, HKV, 1),
-            "byte_offset": scale0 + 2 * SCALE_BYTES_PER_PAGE,
+            "shape": (num_pages, PAGE, layout.hkv),
+            "stride": (float_stride0, layout.hkv, 1),
+            "byte_offset": scale0 + 2 * layout.scale_bytes_per_page,
         },
     }
 
@@ -217,13 +272,13 @@ def element_byte(spec: dict[str, object], index: tuple[int, ...]) -> int:
     return off
 
 
-def region_stays_inside_block(block_size: int) -> bool:
+def region_stays_inside_block(block_size: int, layout: PageLayout) -> bool:
     """K, V, and scales of every kernel page sit inside that manager block."""
     ratio = pages_per_block(block_size)
-    start, length = block_byte_span(0, block_size)
+    start, length = block_byte_span(0, block_size, layout)
     end = start + length
     for page in range(ratio):
-        for off, nbytes in page_regions(page).values():
+        for off, nbytes in page_regions(page, layout).values():
             if off < start or off + nbytes > end:
                 return False
     return True

@@ -12,13 +12,16 @@ import torch
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import gather_dequant_head
 from k8v4_v030.prefill_gather_triton import gather_dequant_head_fused
-from k8v4_v030.layout import PAGE, PAGE_BYTES
+from k8v4_v030.layout import PAGE, PageLayout
 
 p = argparse.ArgumentParser()
 p.add_argument('--lengths', default='69,2115,8192,64000,128000,200000')
 p.add_argument('--devices', default='0,1')
 p.add_argument('--repeats', type=int, default=12)
+p.add_argument('--hkv', type=int, default=2,
+               help='per-GPU KV heads: 2 (a TP2 rank, the old default) or 4 (single GPU)')
 a = p.parse_args()
+layout = PageLayout(a.hkv)
 torch.manual_seed(73)
 
 def timed(f):
@@ -43,15 +46,15 @@ for device_id in map(int, a.devices.split(',')):
             blocks = (n + PAGE * ratio - 1) // (PAGE * ratio)
             physical = blocks + 3
             # The cache is a byte span, with per-page regions sharing storage.
-            raw = torch.empty(physical * ratio * PAGE_BYTES, dtype=torch.int8, device=device)
-            views = bind_regions(raw)
+            raw = torch.empty(physical * ratio * layout.page_bytes, dtype=torch.int8, device=device)
+            views = bind_regions(raw, layout)
             views['k'].copy_(torch.randint(-128, 128, views['k'].shape, device=device, dtype=torch.int8))
             views['v'].copy_(torch.randint(0, 256, views['v'].shape, device=device, dtype=torch.int32).to(torch.uint8))
             views['k_scale'].copy_(torch.rand(views['k_scale'].shape, device=device) * .1 + .001)
             views['v_scale'].copy_(torch.rand(views['v_scale'].shape, device=device) * .1 + .001)
             views['v_zero'].copy_(torch.rand(views['v_zero'].shape, device=device) * 15)
             table = torch.randperm(physical, device=device, dtype=torch.int32)[:blocks]
-            for head in (0, 1):
+            for head in range(layout.hkv):
                 for dtype in (torch.float32, torch.float16, torch.bfloat16):
                     ref = gather_dequant_head(views, table, n, head, ratio, dtype)
                     got = gather_dequant_head_fused(views, table, n, head, ratio, dtype)
@@ -75,6 +78,6 @@ for device_id in map(int, a.devices.split(',')):
                         'baseline_peak_extra_bytes': old_peak, 'fused_peak_extra_bytes': new_peak,
                         'baseline_samples_ms': old_samples, 'fused_samples_ms': new_samples}), flush=True)
             print(json.dumps({'kind': 'correctness', 'device': device_id, 'tokens': n,
-                              'ratio': ratio, 'heads': 2, 'dtypes': 3, 'bitwise_equal': True}), flush=True)
+                              'ratio': ratio, 'heads': layout.hkv, 'dtypes': 3, 'bitwise_equal': True}), flush=True)
             del raw, views, table
             torch.xpu.empty_cache()

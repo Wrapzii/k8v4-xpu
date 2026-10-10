@@ -1,0 +1,36 @@
+{
+  "observed_date": "2026-10-10",
+  "image": "sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742",
+  "state": "running",
+  "flags": [
+    "--gpu-memory-utilization=0.92",
+    "--max-model-len=133056",
+    "--kv-cache-dtype=int8_k_int4_v",
+    "--tensor-parallel-size=1",
+    "--max-num-seqs=1",
+    "--max-num-batched-tokens=4224",
+    "--limit-mm-per-prompt={\"image\":4,\"video\":0}",
+    "--mm-processor-kwargs={\"max_pixels\":1048576}",
+    "--mm-processor-cache-gb=0.125",
+    "--speculative-config={\"method\":\"mtp\",\"num_speculative_tokens\":6}",
+    "--compilation-config={\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":[7,14,21,28]}",
+    "--no-enable-prefix-caching",
+    "--mamba-cache-mode=none"
+  ],
+  "environment": {
+    "XE2_KV_S2_NSG_DRAFT": "32",
+    "K8V4_PREFILL_GATHER": "triton",
+    "NEOReadDebugKeys": "1",
+    "K8V4_PREFILL_GEMM": "w4a8",
+    "ForceZeDeviceCanAccessPerReturnValue": "0",
+    "ZE_AFFINITY_MASK": "0",
+    "ZE_FLAT_DEVICE_HIERARCHY": "COMPOSITE",
+    "K8V4_PREFILL": "onednn",
+    "XE2_KV_S2_NSG_VERIFY": "8"
+  },
+  "sha256": {
+    "kernel": "70773b1119e2be534e4fdef13c2c89343c68a4a1f3911a55347342b67a33af2a",
+    "library": "23bc4c95dd7fefb7f7fef3b8f2066ee0ece58f2b301b12f20675bf4db26b39e5",
+    "layout": "c7c33062e2eba59bd9d675c86995acf28bd150002053aff9fa4c3acbb8ffdc1c"
+  }
+}

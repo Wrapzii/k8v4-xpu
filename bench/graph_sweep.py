@@ -35,7 +35,10 @@ def main():
     parser.add_argument("--capacity", type=int, default=0)
     parser.add_argument("--pages-per-block", type=int, default=1)
     parser.add_argument("--modes", default="0")
-    parser.add_argument("--expected-sha", default="11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498")
+    parser.add_argument("--hkv", type=int, default=2,
+                        help="per-GPU KV heads: 2 (a TP2 rank, the old default) or 4 (single GPU)")
+    parser.add_argument("--expected-sha", default="",
+                        help="sha256 of the library; empty pins nothing (the digest is always emitted)")
     args = parser.parse_args()
     # Sweep the fallback explicitly even when invoked in a serving environment.
     # Role-specific settings otherwise override every NSG variant below.
@@ -43,7 +46,7 @@ def main():
     os.environ.pop("XE2_KV_S2_NSG_VERIFY", None)
     import torch
     from k8v4_v030.cache_views import bind_regions
-    from k8v4_v030.layout import D, HKV, HQ, PAGE, PAGE_BYTES
+    from k8v4_v030.layout import D, PAGE, PageLayout
     from k8v4_v030.ops_api import library_path, ops
     from k8v4_v030.plan import workspace_programs
     from k8v4_v030.scratch import Scratch
@@ -51,11 +54,14 @@ def main():
     torch.set_num_threads(1)
     torch.xpu.set_device(args.device)
     device = torch.device("xpu", args.device)
+    # One library serves both head layouts; the cache geometry follows --hkv.
+    layout = PageLayout(args.hkv)
+    hkv, hq = layout.hkv, layout.hq
     lib = library_path()
     digest = hashlib.sha256(Path(lib).read_bytes()).hexdigest()
-    if digest != args.expected_sha:
+    if args.expected_sha and digest != args.expected_sha:
         raise SystemExit("Unexpected library: " + digest)
-    emit(kind="begin", library_sha256=digest, device=args.device,
+    emit(kind="begin", library_sha256=digest, device=args.device, hkv=hkv,
          basis="host elapsed time for batched XPUGraph replay; standalone synthetic attention",
          lengths=args.lengths, queries=args.queries, capacity=args.capacity,
          pages_per_block=args.pages_per_block, modes=args.modes)
@@ -65,24 +71,24 @@ def main():
         ppb = args.pages_per_block
         manager_blocks = (max(length, args.capacity) + PAGE*ppb - 1) // (PAGE*ppb)
         pages = manager_blocks * ppb
-        raw = torch.zeros(pages * PAGE_BYTES, dtype=torch.int8, device=device)
-        views = bind_regions(raw)
+        raw = torch.zeros(pages * layout.page_bytes, dtype=torch.int8, device=device)
+        views = bind_regions(raw, layout)
         gen = torch.Generator(device="cpu").manual_seed(length)
         # Never allocate a full long-context K/V tensor in host RAM.
         for start in range(0, length, 2048):
             count = min(2048, length-start)
-            k = torch.randn(count, HKV, D, generator=gen, dtype=torch.float16).to(device)
-            v = torch.randn(count, HKV, D, generator=gen, dtype=torch.float16).to(device)
+            k = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            v = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
             slots = torch.arange(start, start+count, dtype=torch.int64, device=device)
             ops().kv_store_paged(k, v, slots, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"])
         del k, v, slots
         table = torch.arange(manager_blocks, dtype=torch.int32, device=device).reshape(1, manager_blocks)
         seq = torch.tensor([length], dtype=torch.int32, device=device)
         for qlen in map(int, args.queries.split(",")):
-            scratch = Scratch(device, workspace_programs(pages, 1), 1, qlen)
+            scratch = Scratch(device, layout, workspace_programs(pages, 1, layout), 1, qlen)
             query, out = scratch.attention_pair(qlen)
-            query.copy_(torch.randn(qlen, HQ, D, generator=gen, dtype=torch.float16).to(device))
-            ws = scratch.workspace(workspace_programs(pages, 1))
+            query.copy_(torch.randn(qlen, hq, D, generator=gen, dtype=torch.float16).to(device))
+            ws = scratch.workspace(workspace_programs(pages, 1, layout))
 
             def run():
                 ops().int8k_int4v_attn_batch(query, scratch.q8, scratch.q_scale,

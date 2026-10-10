@@ -17,7 +17,7 @@ from pathlib import Path
 import torch
 
 from k8v4_v030.cache_views import bind_regions
-from k8v4_v030.layout import D, HKV, HQ, PAGE
+from k8v4_v030.layout import D, PAGE, PageLayout
 from k8v4_v030.onednn_prefill import head_major_prefill
 from k8v4_v030.oracle import deterministic_rows
 from k8v4_v030.stage_profile import (
@@ -341,13 +341,14 @@ class StageHookTest(unittest.TestCase):
                         del sys.modules[name]
 
     def test_head_major_ranges_match_the_unprofiled_prefill(self):
+        layout = PageLayout(2)
         ratio = 33
         seq_len = PAGE + 5
-        keys = deterministic_rows(seq_len, HKV, seed=41)
-        values = deterministic_rows(seq_len, HKV, seed=42)
-        raw, block_row = _pack([4], ratio, keys, values)
-        views = bind_regions(raw)
-        query = torch.randn(3, HQ, D)
+        keys = deterministic_rows(seq_len, layout.hkv, seed=41)
+        values = deterministic_rows(seq_len, layout.hkv, seed=42)
+        raw, block_row = _pack([4], ratio, keys, values, layout)
+        views = bind_regions(raw, layout)
+        query = torch.randn(3, layout.hq, D)
         os.environ.pop("K8V4_PROFILE", None)
         plain = head_major_prefill(query, views, block_row, seq_len, ratio, 0.125)
         os.environ["K8V4_PROFILE"] = "1"

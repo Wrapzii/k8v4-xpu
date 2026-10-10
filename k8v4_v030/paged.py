@@ -10,8 +10,7 @@ import struct
 
 from k8v4_v030.layout import (
     D,
-    HKV,
-    PAGE_BYTES,
+    PageLayout,
     element_byte,
     kernel_page_and_offset,
     region_view_specs,
@@ -42,13 +41,14 @@ def write_token(
     page, off = kernel_page_and_offset(slot)
     if page < 0:
         return
-    if len(keys) != HKV or len(values) != HKV:
-        raise ValueError("expected %d KV heads" % HKV)
-    need = (page + 1) * PAGE_BYTES
+    layout = PageLayout(len(keys))
+    if len(values) != layout.hkv:
+        raise ValueError("expected %d KV heads" % layout.hkv)
+    need = (page + 1) * layout.page_bytes
     if len(blob) < need:
         raise ValueError("blob shorter than page %d" % page)
-    specs = region_view_specs(page + 1)
-    for head in range(HKV):
+    specs = region_view_specs(page + 1, layout)
+    for head in range(layout.hkv):
         packed, scale = quant_k(keys[head])
         base = element_byte(specs["k"], (page, off, head, 0))
         for dim, q in enumerate(packed):
@@ -65,15 +65,17 @@ def write_token(
         blob[vz_at : vz_at + 4] = struct.pack("<f", vzero)
 
 
-def read_token(blob: bytearray, slot: int) -> tuple[list[list[float]], list[list[float]]]:
+def read_token(
+    blob: bytearray, slot: int, layout: PageLayout
+) -> tuple[list[list[float]], list[list[float]]]:
     """Dequantize one stored token. Inverse of ``write_token`` up to rounding."""
     page, off = kernel_page_and_offset(slot)
     if page < 0:
         raise ValueError("negative slot")
-    specs = region_view_specs(page + 1)
+    specs = region_view_specs(page + 1, layout)
     keys: list[list[float]] = []
     values: list[list[float]] = []
-    for head in range(HKV):
+    for head in range(layout.hkv):
         base = element_byte(specs["k"], (page, off, head, 0))
         packed = [_get_i8(blob, base + dim) for dim in range(D)]
         scale_at = element_byte(specs["k_scale"], (page, off, head))

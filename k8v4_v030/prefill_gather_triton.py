@@ -9,7 +9,7 @@ import torch
 import triton
 import triton.language as tl
 
-from k8v4_v030.layout import D, HKV, PAGE
+from k8v4_v030.layout import D, PAGE
 
 
 @triton.jit
@@ -42,7 +42,8 @@ def _gather(K, V, KS, VS, VZ, TABLE, OUT_K, OUT_V,
 
 def gather_dequant_head_fused(views, block_row, seq_len, head, pages_per_block, dtype):
     seq_len, head, pages_per_block = int(seq_len), int(head), int(pages_per_block)
-    if seq_len < 0 or not 0 <= head < HKV or pages_per_block < 1:
+    hkv = int(views["k"].shape[2])
+    if seq_len < 0 or not 0 <= head < hkv or pages_per_block < 1:
         raise ValueError('Invalid paged gather geometry')
     if block_row.ndim != 1:
         raise ValueError('Block-table row must be one-dimensional')
