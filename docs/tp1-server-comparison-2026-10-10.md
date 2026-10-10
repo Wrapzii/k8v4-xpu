@@ -90,10 +90,10 @@ K8V4_TP=1 K8V4_DEVICES=0 K8V4_MAX_MODEL_LEN=133056 \
 bash k8v4_v030/launch.sh
 ```
 
-Defaults for TP1: image `vllm-openai-xpu:v0.30.0-k8v4-tp1`, container
+Defaults for TP1: image `vllm-openai-xpu:v0.30.0-k8v4-unified`, container
 `vllm-k8v4-tp1`, localhost port 8201, one sequence, GPU memory fraction 0.92,
 prefix caching off, and a separate cache namespace. `K8V4_DEVICES=1` chooses
-the second card instead. TP2 keeps its existing image/name/8200 port, four
+the second card instead. TP2 uses the same unified image and keeps its name/8200 port, four
 sequences, prefix caching and collectives. The launcher only configures the
 selected GPU indices. The other card can run the editor if host RAM permits;
 device affinity does not isolate system RAM.
@@ -118,7 +118,7 @@ disabled in Studio, so this integration does not claim it is validated there.
 For argv inspection, `K8V4_DRY_RUN=1` emits NUL-separated Docker arguments
 without starting containers, creating caches or configuring GPUs.
 
-## Validation for this integration
+## Initial CPU comparison (before hardware deployment)
 
 The PR's original 87-test suite passed on Windows CPU (seven skipped: six XPU
 tests and one test requiring vLLM). The complete integration suite has 96 tests,
@@ -127,3 +127,45 @@ construction checks for TP1/TP2 and capacity retry tests. These exercise default
 GPU selection, graph sizes, optional overrides, invalid device lists, fault
 classification, saved logs and refusal to restart a running container. No live service was restarted and
 no new TP1/TP2 generation performance benchmark was run during this comparison.
+
+
+## Unified runtime validation on two B60s
+
+The new two-layout native library was built with oneAPI 2026 against the installed
+vLLM 0.30 XPU runtime on October 10. SHA256:
+
+```text
+3ee9898ba4bba063da6311a435e56d8d386343431f627116ed7f49b14290a7ee
+```
+
+The full 96-test suite passed in 110.083 seconds with **zero skips**, using
+`K8V4_REQUIRE_TP2=1` and both B60 devices. The
+[raw native receipt](../results/unified-b60-2026-10-10/kernel-xpu.json) records
+45 passing cases plus the environment: both head layouts on both GPUs,
+long-context MTP7, partial pages, dirty-tail masking, prefix-block copy-on-write,
+and interleaved two/four-head legacy calls in one process. This is the new
+unified binary; the earlier 11-check receipt above belongs to the old static
+TP1 build.
+
+Build `Dockerfile.unified` once and select `K8V4_TP=1` or `2` at launch. Both
+profiles now default to `vllm-openai-xpu:v0.30.0-k8v4-unified`. The older
+`Dockerfile.tp1` still builds the same dual-layout code for compatibility.
+The revised common-image launcher passed its nine launcher/package checks.
+
+To reproduce the full hardware suite, mount the checkout and built library into
+the installed runtime image, expose `/dev/dri`, set `PYTHONPATH` to the checkout,
+set `XE2_KV_LIB` to the mounted `build/libxe2_kv.so`, set `K8V4_REQUIRE_TP2=1`,
+and run `python -m unittest discover -s k8v4_v030/tests -v`. Set
+`K8V4_CORRECTNESS_DIR` to a writable directory to save the native receipt.
+
+Live serving then passed on the same library and Python package:
+
+- [TP2 receipt](../results/unified-b60-2026-10-10/tp2-serve.json): full 262,144-token window, four configured sequences, two concurrent text requests and an image request.
+- [TP1 receipt](../results/unified-b60-2026-10-10/tp1-serve.json): fitted 133,056-token window, one sequence, text and image requests.
+
+Both returned correct text and recognized a solid red test image. These short
+requests are functional smoke tests, not prefill/decode performance benchmarks.
+The deployed Swift image and weights were retained; both server launch profiles
+now mount one shared package and one shared native library instead of separate
+hardcoded builds. Studio TP1 and the paired editor were restored after testing.
+Old artifacts and launch files were retained for rollback.

@@ -1,0 +1,702 @@
+[
+  {
+    "name": "legacy_interleave",
+    "passed": true,
+    "layouts": [
+      2,
+      4
+    ]
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": 0.00020599365234375,
+    "fp_sdpa": 0.0031986236572265625,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2978515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2470703125,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.09478759765625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2978515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.2470703125,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.09478759765625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.99853515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": 0.0002090930938720703,
+    "fp_sdpa": 0.00328826904296875,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0498046875,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.083984375,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.1014404296875,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 59500,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.99853515625,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6036,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 59527,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.0498046875,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -6009,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 63932,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 1.083984375,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": -1604,
+    "passed": true
+  },
+  {
+    "name": "mtp",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 70000,
+    "q_len": 7,
+    "parallel_vs_serial": 0.0,
+    "builtin_vs_explicit": 0.0,
+    "int16_gap": 0.1014404296875,
+    "ratio_gap": 0.0,
+    "pad_gap": 0.0,
+    "row_gaps": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "dequant_sdpa": null,
+    "fp_sdpa": null,
+    "as_int16": 4464,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 63,
+    "max_abs": 2.76171875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 64,
+    "max_abs": 4.2890625,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 65,
+    "max_abs": 3.892578125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 127,
+    "max_abs": 3.046875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 2,
+    "seq_len": 129,
+    "max_abs": 3.126953125,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 0,
+    "hkv": 2,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 63,
+    "max_abs": 2.76171875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 64,
+    "max_abs": 4.2890625,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 65,
+    "max_abs": 3.892578125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 127,
+    "max_abs": 3.046875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 2,
+    "seq_len": 129,
+    "max_abs": 3.126953125,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 1,
+    "hkv": 2,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 63,
+    "max_abs": 3.546875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 64,
+    "max_abs": 3.185546875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 65,
+    "max_abs": 2.8984375,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 127,
+    "max_abs": 2.830078125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 0,
+    "hkv": 4,
+    "seq_len": 129,
+    "max_abs": 3.5546875,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 0,
+    "hkv": 4,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 63,
+    "max_abs": 3.546875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 64,
+    "max_abs": 3.185546875,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 65,
+    "max_abs": 2.8984375,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 127,
+    "max_abs": 2.830078125,
+    "passed": true
+  },
+  {
+    "name": "partial",
+    "device": 1,
+    "hkv": 4,
+    "seq_len": 129,
+    "max_abs": 3.5546875,
+    "passed": true
+  },
+  {
+    "name": "dirty_tail",
+    "device": 1,
+    "hkv": 4,
+    "masked_vs_clean": 0.0,
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 0,
+    "hkv": 2,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.404296875,
+    "scale_before": [
+      0.4255208671092987,
+      0.33515626192092896
+    ],
+    "scale_after": [
+      0.8510417342185974,
+      0.6703125238418579
+    ],
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 1,
+    "hkv": 2,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.001953125,
+    "scale_before": [
+      0.3622395992279053,
+      0.37513023614883423
+    ],
+    "scale_after": [
+      0.7244791984558105,
+      0.7502604722976685
+    ],
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 0,
+    "hkv": 4,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.423828125,
+    "scale_before": [
+      0.3643229305744171,
+      0.3804687559604645,
+      0.35299479961395264,
+      0.3798177242279053
+    ],
+    "scale_after": [
+      0.7286458611488342,
+      0.760937511920929,
+      0.7059895992279053,
+      0.7596354484558105
+    ],
+    "passed": true
+  },
+  {
+    "name": "prefix_cow",
+    "device": 1,
+    "hkv": 4,
+    "block_size": 2112,
+    "seq_len": 60,
+    "copied_gap": 0.0,
+    "mutated_gap": 3.400390625,
+    "scale_before": [
+      0.38424479961395264,
+      0.36250001192092896,
+      0.4251302182674408,
+      0.4032552242279053
+    ],
+    "scale_after": [
+      0.7684895992279053,
+      0.7250000238418579,
+      0.8502604365348816,
+      0.8065104484558105
+    ],
+    "passed": true
+  },
+  {
+    "name": "environment",
+    "sha256": "3ee9898ba4bba063da6311a435e56d8d386343431f627116ed7f49b14290a7ee",
+    "device_count": 2,
+    "affinity": null,
+    "image": null,
+    "require_tp2": true
+  }
+]

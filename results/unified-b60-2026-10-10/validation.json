@@ -1,0 +1,23 @@
+{
+  "date": "2026-10-10",
+  "hardware": "2x Intel Arc Pro B60",
+  "runtime": "vLLM 0.30 XPU, existing Swift bake v2 image",
+  "compiler": "oneAPI 2026",
+  "source_sha256": "2d3ecfd133e49d2cd528214589d1c7d1b32fb8fa573e75323eac4020a1087c00",
+  "library_sha256": "3ee9898ba4bba063da6311a435e56d8d386343431f627116ed7f49b14290a7ee",
+  "suite": {
+    "tests": 96,
+    "failures": 0,
+    "skips": 0,
+    "seconds": 110.083
+  },
+  "common_image_launcher_checks": {
+    "tests": 9,
+    "failures": 0
+  },
+  "serving": [
+    "tp2-serve.json",
+    "tp1-serve.json"
+  ],
+  "performance_benchmark": false
+}

@@ -116,7 +116,22 @@ Call `python3 -m k8v4_v030.patch_installed_vllm` against the vLLM package you im
 - `K8V4_PREFILL_GEMM=w4a8` turns on the MLP GEMM. Unset, linears stay w4a16
 - `XE2_KV_S2_PARALLEL=0` forces the serial decode kernel, which did not beat FP8 at 128K
 
-One `libxe2_kv.so` serves both head layouts: 2 KV / 12 Q heads on a TP2 rank and 4 KV / 24 Q on a single GPU holding the whole model (see `Dockerfile.tp1` and `TP1-B70.md`). The ops pick the layout from the tensors they receive — `layout.PageLayout` on the Python side carries the same count from the attention spec — and any other head count raises.
+One `libxe2_kv.so` serves both head layouts: 2 KV / 12 Q heads on a TP2 rank and 4 KV / 24 Q on a single GPU holding the whole model (see `Dockerfile.unified` and `TP1-B70.md`). The ops pick the layout from the tensors they receive — `layout.PageLayout` on the Python side carries the same count from the attention spec — and any other head count raises.
+
+Build one image for both modes after compiling the libraries into `build/`:
+
+```bash
+docker build -f Dockerfile.unified -t vllm-openai-xpu:v0.30.0-k8v4-unified .
+MODEL_DIR=/path/to/weights K8V4_TP=1 bash k8v4_v030/launch.sh
+MODEL_DIR=/path/to/weights K8V4_TP=2 bash k8v4_v030/launch.sh
+```
+
+Both launch modes default to that same image. `K8V4_TP` selects the server profile;
+the native kernels dispatch from each tensor's head count without rebuilding.
+Stop the current model service before switching profiles. The weights, quantization,
+and oneDNN prefill library remain shared. `IMAGE` can explicitly select an existing
+image; `Dockerfile.tp1` remains a compatible build recipe for the same runtime.
+
 
 Keep capture sizes as multiples of `1 + num_speculative_tokens` (7 when MTP is 6). Keep the manager block a multiple of the 64-token page. The served block is 2112 tokens, 33 pages. Partial pages and prefix caching go through that block table. Query lengths inside the graph are 1 and 7.
 

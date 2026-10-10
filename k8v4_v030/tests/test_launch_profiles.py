@@ -35,7 +35,7 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         for arg in ('--tensor-parallel-size=2', '--max-num-seqs=4', '--max-num-batched-tokens=4224',
                     '--gpu-memory-utilization=0.95', '--enable-prefix-caching', 'ZE_AFFINITY_MASK=0,1',
-                    'CCL_SYCL_ALLREDUCE_LL=twoshots', '127.0.0.1:8200:8000', 'vllm-openai-xpu:v0.30.0-k8v4'):
+                    'CCL_SYCL_ALLREDUCE_LL=twoshots', '127.0.0.1:8200:8000', 'vllm-openai-xpu:v0.30.0-k8v4-unified'):
             self.assertIn(arg, args)
         graph = next(arg for arg in args if arg.startswith('--compilation-config='))
         self.assertEqual(json.loads(graph.split('=', 1)[1])['cudagraph_capture_sizes'], [7, 14, 21, 28])
@@ -47,7 +47,7 @@ class LaunchProfileTest(unittest.TestCase):
         for arg in ('--tensor-parallel-size=1', '--max-num-seqs=1', '--gpu-memory-utilization=0.92',
                     '--no-enable-prefix-caching', '--mamba-cache-mode=none', 'ZE_AFFINITY_MASK=1',
                     'NEOReadDebugKeys=1', 'ForceZeDeviceCanAccessPerReturnValue=0',
-                    '127.0.0.1:8201:8000', 'vllm-openai-xpu:v0.30.0-k8v4-tp1'):
+                    '127.0.0.1:8201:8000', 'vllm-openai-xpu:v0.30.0-k8v4-unified'):
             self.assertIn(arg, args)
         self.assertFalse(any(arg.startswith('CCL_') for arg in args))
         self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1', args)

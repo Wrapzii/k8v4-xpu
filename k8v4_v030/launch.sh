@@ -5,10 +5,10 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
+IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-unified}
 TP=${K8V4_TP:-2}
 case "$TP" in
   1)
-    IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-tp1}
     NAME=${NAME:-vllm-k8v4-tp1}
     PORT=${PORT:-8201}
     CACHE=${K8V4_CACHE:-$ROOT/.cache/vllm-k8v4-tp1}
@@ -19,7 +19,6 @@ case "$TP" in
     CACHE_NAMESPACE=w4a8-tp1-v1
     ;;
   2)
-    IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4}
     NAME=${NAME:-vllm-k8v4-tp2}
     PORT=${PORT:-8200}
     CACHE=${K8V4_CACHE:-$ROOT/.cache/vllm-k8v4}
