@@ -5,7 +5,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-from k8v4_v030.layout import BYTES_PER_TOKEN, FP8_BYTES_PER_TOKEN, PAGE_BYTES
+from k8v4_v030.layout import PageLayout
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -22,13 +22,14 @@ NEEDLES = (
 
 class PublicPackageTest(unittest.TestCase):
     def test_attention_payload_is_smaller_than_fp8(self):
-        self.assertEqual(FP8_BYTES_PER_TOKEN, 1024)
-        self.assertEqual(BYTES_PER_TOKEN, 792)
-        self.assertEqual(PAGE_BYTES, 50688)
-        saved_per_token = (FP8_BYTES_PER_TOKEN - BYTES_PER_TOKEN) * 16 * 2
+        tp2 = PageLayout(2)
+        self.assertEqual(tp2.fp8_bytes_per_token, 1024)
+        self.assertEqual(tp2.bytes_per_token, 792)
+        self.assertEqual(tp2.page_bytes, 50688)
+        saved_per_token = (tp2.fp8_bytes_per_token - tp2.bytes_per_token) * 16 * 2
         self.assertEqual(saved_per_token, 7424)
         self.assertEqual(saved_per_token * 131072, 973078528)
-        self.assertEqual(FP8_BYTES_PER_TOKEN * 16 * 2 * 131072, 4 * 1024 ** 3)
+        self.assertEqual(tp2.fp8_bytes_per_token * 16 * 2 * 131072, 4 * 1024 ** 3)
 
     def test_launch_defaults_match_the_measured_server(self):
         launch = (ROOT / "k8v4_v030" / "launch.sh").read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-"""Native vLLM 0.30 attention backend for the TP2 K8/V4 kernel.
+"""Native vLLM 0.30 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
 
 vLLM owns the block table and the slot map. Decode is one C++ op per
 uniform batch. Prefill stays on the eager path unless K8V4_PREFILL=onednn,
@@ -21,12 +21,12 @@ from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
 from k8v4_v030.stage_profile import profile_enabled, profile_range
-from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD
+from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD, PageLayout
 from k8v4_v030.ops_api import ops
 from k8v4_v030.plan import (
+    layout_for_heads,
     query_segments,
     require_decoder,
-    require_tp2_heads,
     scratch_capacity,
     token_span,
     uniform_packed_q_len,
@@ -90,6 +90,7 @@ class Xe2K8V4Metadata(AttentionMetadata):
         max_seq_len: int,
         pages_per_block: int,
         packed_q_len: int,
+        layout: PageLayout,
     ):
         self.seq_lens = seq_lens
         self.slot_mapping = slot_mapping
@@ -102,6 +103,7 @@ class Xe2K8V4Metadata(AttentionMetadata):
         self.max_seq_len = max_seq_len
         self.pages_per_block = pages_per_block
         self.packed_q_len = packed_q_len
+        self.layout = layout
 
 
 class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
@@ -109,6 +111,12 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
 
     def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        # The spec carries this rank's KV head count (2 on a TP2 rank, 4 on
+        # one GPU); scratch geometry follows it instead of a module constant.
+        self.layout = PageLayout(kv_cache_spec.num_kv_heads)
+        logger.info_once(
+            "K8/V4 local heads: %d KV / %d Q", self.layout.hkv, self.layout.hq
+        )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
         self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
 
@@ -140,8 +148,9 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             int(sched.max_num_batched_tokens),
             int(sched.max_num_seqs),
             capture,
+            self.layout,
         )
-        ensure_scratch(self.device, nprog, store_tokens, out_tokens)
+        ensure_scratch(self.device, self.layout, nprog, store_tokens, out_tokens)
 
     def build(
         self,
@@ -150,7 +159,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         fast_build: bool = False,
     ) -> Xe2K8V4Metadata:
         del common_prefix_len, fast_build
-        if not scratch_ready(self.device):
+        if not scratch_ready(self.device, self.layout):
             self._ensure_scratch()
         cam = common_attn_metadata
         starts_cpu = cam.query_start_loc_cpu
@@ -168,6 +177,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             max_seq_len=int(cam.max_seq_len),
             pages_per_block=attention_pages(spec.block_size, self.kernel_block_size),
             packed_q_len=uniform_packed_q_len(starts),
+            layout=self.layout,
         )
 
 
@@ -195,7 +205,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             raise RuntimeError("K8/V4 impl got kv dtype %s" % kv_cache_dtype)
         if num_kv_heads is None:
             num_kv_heads = num_heads
-        require_tp2_heads(num_heads, num_kv_heads, head_size)
+        self.layout = layout_for_heads(num_heads, num_kv_heads, head_size)
         require_decoder(attn_type, sliding_window, alibi_slopes, logits_soft_cap, scale)
         self.num_heads = num_heads
         self.num_kv_heads = num_kv_heads
@@ -230,9 +240,9 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             raise RuntimeError("key/value shorter than slot_mapping")
         if profile_enabled():
             with profile_range("kv_store", "kv_store_paged"):
-                _store_kv(key, value, cache, slot_mapping, ntok)
+                _store_kv(key, value, cache, slot_mapping, ntok, self.layout)
             return
-        _store_kv(key, value, cache, slot_mapping, ntok)
+        _store_kv(key, value, cache, slot_mapping, ntok, self.layout)
 
     def forward(
         self,
@@ -252,6 +262,19 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         cache = _one_cache(kv_cache)
         if cache.numel() == 0 or query.shape[0] == 0:
             return output
+        # The builder reads the KV cache spec, the impl reads the attention
+        # module; a mismatch would otherwise surface as a scratch error.
+        if attn_metadata.layout != self.layout:
+            raise RuntimeError(
+                "K8/V4 KV cache was built for %d KV / %d Q heads but the "
+                "attention impl derived %d KV / %d Q"
+                % (
+                    attn_metadata.layout.hkv,
+                    attn_metadata.layout.hq,
+                    self.layout.hkv,
+                    self.layout.hq,
+                )
+            )
         if attn_metadata.packed_q_len:
             self._packed(query, cache, attn_metadata, output)
             return output
@@ -306,12 +329,12 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                 % (seq_lens.dtype, tuple(seq_lens.stride()))
             )
         seq_lens = seq_lens.reshape(-1).narrow(0, first, count)
-        scratch = get_scratch(query.device)
+        scratch = get_scratch(query.device, self.layout)
         q_buf, out_buf = scratch.attention_pair(width)
         q_buf.copy_(query.narrow(0, tok0, width))
-        nprog = workspace_programs(int(block_table.shape[1]), meta.pages_per_block)
+        nprog = workspace_programs(int(block_table.shape[1]), meta.pages_per_block, self.layout)
         partials, m_state, l_state, merged = scratch.workspace(nprog)
-        views = bind_regions(cache)
+        views = bind_regions(cache, self.layout)
 
         def _decode_attn() -> None:
             ops().int8k_int4v_attn_batch(
@@ -345,7 +368,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         meta: Xe2K8V4Metadata,
         output: torch.Tensor,
     ) -> None:
-        views = bind_regions(cache)
+        views = bind_regions(cache, self.layout)
         _require_page_ratio(cache, meta.pages_per_block)
         cpu_lens = meta.seq_lens_cpu
         if cpu_lens is None:
@@ -379,12 +402,12 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                 del q_fp, attn
 
 
-def _store_kv(key, value, cache, slot_mapping, ntok: int) -> None:
-    scratch = get_scratch(key.device)
+def _store_kv(key, value, cache, slot_mapping, ntok: int, layout) -> None:
+    scratch = get_scratch(key.device, layout)
     k_buf, v_buf = scratch.store_pair(ntok)
     k_buf.copy_(key.narrow(0, 0, ntok))
     v_buf.copy_(value.narrow(0, 0, ntok))
-    views = bind_regions(cache)
+    views = bind_regions(cache, layout)
     ops().kv_store_paged(
         k_buf,
         v_buf,

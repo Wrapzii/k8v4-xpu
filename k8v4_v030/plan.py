@@ -13,8 +13,7 @@ from collections.abc import Sequence
 from k8v4_v030.layout import (
     DECODE_MAX_T,
     D,
-    HKV,
-    HQ,
+    PageLayout,
     attention_pages_per_block,
     max_kernel_pages,
 )
@@ -86,6 +85,7 @@ def scratch_capacity(
     max_batched_tokens: int,
     max_seqs: int,
     capture_sizes: Sequence[int],
+    layout: PageLayout,
 ) -> tuple[int, int, int]:
     """``(nprog_max, max_store_tokens, max_out_tokens)`` for one worker.
 
@@ -94,7 +94,7 @@ def scratch_capacity(
     """
     ratio = attention_pages_per_block(manager_block, kernel_block)
     pages = max_kernel_pages(max_model_len, manager_block, kernel_block) + ratio
-    nprog = pages * HKV
+    nprog = pages * layout.hkv
     widest = 0
     for size in capture_sizes:
         widest = max(widest, int(size))
@@ -104,21 +104,25 @@ def scratch_capacity(
     return nprog, int(max_batched_tokens), max_out
 
 
-def workspace_programs(table_width: int, pages_per_block: int) -> int:
+def workspace_programs(table_width: int, pages_per_block: int, layout: PageLayout) -> int:
     """Split programs for one request. The C++ check wants this exact count."""
     table_width = int(table_width)
     pages_per_block = int(pages_per_block)
     if table_width < 1 or pages_per_block < 1:
         raise ValueError("workspace shape")
-    return table_width * pages_per_block * HKV
+    return table_width * pages_per_block * layout.hkv
 
 
-def require_tp2_heads(num_heads: int, num_kv_heads: int, head_size: int) -> None:
-    if int(num_heads) != HQ or int(num_kv_heads) != HKV or int(head_size) != D:
+def layout_for_heads(num_heads: int, num_kv_heads: int, head_size: int) -> PageLayout:
+    """Validated page layout for one rank, or a loud RuntimeError."""
+    if int(head_size) != D:
         raise RuntimeError(
-            "K8/V4 kernel is compiled for TP2 local heads %d/%d dim %d, got %s/%s dim %s"
-            % (HQ, HKV, D, num_heads, num_kv_heads, head_size)
+            "K8/V4 kernel head dim is %d, got %s" % (D, head_size)
         )
+    try:
+        return PageLayout.for_heads(num_heads, num_kv_heads)
+    except ValueError as error:
+        raise RuntimeError(str(error)) from error
 
 
 def require_decoder(

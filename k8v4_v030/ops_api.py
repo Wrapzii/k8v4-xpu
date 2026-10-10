@@ -1,4 +1,4 @@
-"""Load the TP2 K8/V4 SYCL library once per process."""
+"""Load the K8/V4 SYCL library once per process."""
 
 from __future__ import annotations
 

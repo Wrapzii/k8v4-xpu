@@ -1,0 +1,50 @@
+{
+  "mode": "tp1",
+  "max_model_len": 133056,
+  "library_sha256": "3ee9898ba4bba063da6311a435e56d8d386343431f627116ed7f49b14290a7ee",
+  "requests": [
+    {
+      "kind": "text",
+      "response": "READY",
+      "elapsed_seconds": 2.904,
+      "usage": {
+        "prompt_tokens": 18,
+        "total_tokens": 20,
+        "completion_tokens": 2,
+        "prompt_tokens_details": null,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "kind": "text",
+      "response": "READY",
+      "elapsed_seconds": 0.224,
+      "usage": {
+        "prompt_tokens": 18,
+        "total_tokens": 20,
+        "completion_tokens": 2,
+        "prompt_tokens_details": null,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    },
+    {
+      "kind": "image",
+      "response": " Red",
+      "elapsed_seconds": 1.365,
+      "usage": {
+        "prompt_tokens": 89,
+        "total_tokens": 91,
+        "completion_tokens": 2,
+        "prompt_tokens_details": null,
+        "completion_tokens_details": {
+          "reasoning_tokens": 0
+        }
+      }
+    }
+  ],
+  "passed": true
+}

@@ -1,7 +1,9 @@
 """XPU regression for the packed K8/V4 op, including the ~59.5K MTP case.
 
 Skipped unless this process has an Intel GPU and XE2_KV_LIB points at a
-built libxe2_kv.so. CPU layout tests cover the same lengths without the device.
+built libxe2_kv.so. CPU layout tests cover the same lengths without the
+device. Every case runs for both layouts the one library serves: 2 KV
+heads (a TP2 rank) and 4 (a single GPU holding the whole model).
 """
 
 from __future__ import annotations
@@ -19,10 +21,10 @@ from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_gqa_attention, gather_dequant
 from k8v4_v030.layout import (
     D,
-    HKV,
-    HQ,
+    GQA,
     PAGE,
-    PAGE_BYTES,
+    PageLayout,
+    V4_COLS,
     as_int16,
     block_byte_span,
     element_byte,
@@ -33,6 +35,10 @@ from k8v4_v030.layout import (
 from k8v4_v030.ops_api import library_path, ops
 from k8v4_v030.plan import workspace_programs
 from k8v4_v030.scratch import Scratch
+
+TP2 = PageLayout(2)
+TP1 = PageLayout(4)
+LAYOUTS = (TP2, TP1)
 
 
 def _xpu_ready() -> bool:
@@ -59,6 +65,7 @@ class KernelXpuTest(unittest.TestCase):
             self.fail("TP2 corpus requires 2 XPU devices, found %d" % count)
         self.device = torch.device("xpu", torch.xpu.current_device())
         self.records: list[dict] = []
+        self.layout = TP2
 
     def _device_indices(self) -> list[int]:
         count = int(torch.xpu.device_count())
@@ -85,8 +92,8 @@ class KernelXpuTest(unittest.TestCase):
         dest.write_text(json.dumps(previous, indent=2), encoding="utf-8")
 
     def _cache(self, num_pages: int) -> dict[str, torch.Tensor]:
-        raw = torch.zeros(num_pages * PAGE_BYTES, dtype=torch.int8, device=self.device)
-        return bind_regions(raw)
+        raw = torch.zeros(num_pages * self.layout.page_bytes, dtype=torch.int8, device=self.device)
+        return bind_regions(raw, self.layout)
 
     def _store(self, views, key: torch.Tensor, value: torch.Tensor, slots: torch.Tensor) -> None:
         ops().kv_store_paged(
@@ -110,9 +117,10 @@ class KernelXpuTest(unittest.TestCase):
         pages_per_block: int,
         visible: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        nprog = workspace_programs(int(block_table.shape[1]), pages_per_block)
+        nprog = workspace_programs(int(block_table.shape[1]), pages_per_block, self.layout)
         scratch = Scratch(
             self.device,
+            self.layout,
             nprog_max=nprog,
             max_store_tokens=1,
             max_out_tokens=int(query.shape[0]),
@@ -169,18 +177,137 @@ class KernelXpuTest(unittest.TestCase):
             self.assertGreaterEqual(count, 2)
             self.assertNotEqual(os.environ.get("ZE_AFFINITY_MASK"), "0")
 
+    def test_unsupported_head_counts_raise(self):
+        """The native ops reject any per-GPU KV head count but 2 and 4."""
+        device = self.device
+        self.layout = TP2
+        views = self._cache(4)
+        slots = torch.arange(4, dtype=torch.int64, device=device)
+        table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+        seq = torch.tensor([4], dtype=torch.int32, device=device)
+        scratch = Scratch(
+            device, TP2, nprog_max=workspace_programs(4, 1, TP2),
+            max_store_tokens=1, max_out_tokens=1,
+        )
+        partials, m_state, l_state, merged = scratch.workspace(workspace_programs(4, 1, TP2))
+        # Every case is shaped to pass the earlier TORCH_CHECKs (dims, dtypes,
+        # head-multiple), so the raise is checked_hkv's own message.
+        message = r"unsupported per-GPU KV head count %d \(this library serves 2 or 4\)"
+        for hkv in (3, 8, 1, 0):
+            with self.subTest(store_hkv=hkv):
+                k = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
+                v = torch.randn(4, hkv, D, dtype=torch.float16, device=device)
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
+                    self._store(views, k, v, slots)
+            with self.subTest(batch_hkv=hkv):
+                q = torch.randn(1, 6 * hkv, D, dtype=torch.float16, device=device)
+                out = torch.empty_like(q)
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
+                    ops().int8k_int4v_attn_batch(
+                        q, scratch.q8, scratch.q_scale,
+                        views["k"], views["k_scale"], views["v"], views["v_scale"],
+                        views["v_zero"], table, seq, scratch.visible,
+                        partials, m_state, l_state, merged, out, 1, 1,
+                    )
+            with self.subTest(legacy_hkv=hkv):
+                k_cache = torch.zeros(4, PAGE, hkv, D, dtype=torch.int8, device=device)
+                scales = torch.zeros(4, PAGE, hkv, dtype=torch.float32, device=device)
+                v_cache = torch.zeros(4, PAGE, hkv, V4_COLS, dtype=torch.uint8, device=device)
+                out = torch.zeros(1, TP2.hq, D, dtype=torch.float16, device=device)
+                with self.assertRaisesRegex(RuntimeError, message % hkv):
+                    ops().int8k_int4v_s1_paged(
+                        scratch.q8, scratch.q_scale, k_cache, scales, v_cache,
+                        scales, scales, table, seq, out,
+                    )
+
+    def test_legacy_op_interleaves_both_layouts_in_one_process(self):
+        """The workspace-free legacy op mixes 2- and 4-head calls safely.
+
+        Its in-library workspace is a function-template static (one per HKV
+        instantiation); alternating layouts in one process must give the same
+        answer as the caller-workspace varlen path for each layout.
+        """
+        device = self.device
+        reference = {}
+        legacy = {}
+        for layout in LAYOUTS:
+            self.layout = layout
+            hkv, hq = layout.hkv, layout.hq
+            views = self._cache(4)
+            gen = torch.Generator(device="cpu").manual_seed(5)
+            key = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            value = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            slots = torch.arange(200, dtype=torch.int64, device=device)
+            self._store(views, key, value, slots)
+            query = torch.randn(1, hq, D, generator=gen, dtype=torch.float16).to(device)
+            table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+            seq = torch.tensor([200], dtype=torch.int32, device=device)
+            reference[hkv] = self._attend(views, query, table, seq, 1, 1)
+            scratch = Scratch(
+                device, layout, nprog_max=workspace_programs(4, 1, layout),
+                max_store_tokens=1, max_out_tokens=1,
+            )
+            # Q-once layout [HKV, 64, D]: row g of head h is query head h*GQA+g.
+            pad = torch.zeros(hkv, PAGE, D, dtype=torch.float16, device=device)
+            pad[:, :GQA] = query[0].view(hkv, GQA, D)
+            ops().q_quant_once(pad, scratch.q8, scratch.q_scale)
+            _, out_buf = scratch.attention_pair(1)
+            out_buf.zero_()
+            ops().int8k_int4v_s1_paged(
+                scratch.q8, scratch.q_scale,
+                views["k"], views["k_scale"], views["v"], views["v_scale"],
+                views["v_zero"], table, seq, out_buf,
+            )
+            torch.xpu.synchronize()
+            legacy[hkv] = out_buf.detach().clone()
+            self.assertLess(_max_abs(legacy[hkv], reference[hkv]), 1e-4)
+        # Re-run each legacy layout after the other has run in between.
+        for layout in LAYOUTS:
+            self.layout = layout
+            hkv = layout.hkv
+            views = self._cache(4)
+            gen = torch.Generator(device="cpu").manual_seed(5)
+            key = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            value = torch.randn(200, hkv, D, generator=gen, dtype=torch.float16).to(device)
+            slots = torch.arange(200, dtype=torch.int64, device=device)
+            self._store(views, key, value, slots)
+            query = torch.randn(1, layout.hq, D, generator=gen, dtype=torch.float16).to(device)
+            table = torch.arange(4, dtype=torch.int32, device=device).view(1, 4)
+            seq = torch.tensor([200], dtype=torch.int32, device=device)
+            scratch = Scratch(
+                device, layout, nprog_max=workspace_programs(4, 1, layout),
+                max_store_tokens=1, max_out_tokens=1,
+            )
+            pad = torch.zeros(hkv, PAGE, D, dtype=torch.float16, device=device)
+            pad[:, :GQA] = query[0].view(hkv, GQA, D)
+            ops().q_quant_once(pad, scratch.q8, scratch.q_scale)
+            _, out_buf = scratch.attention_pair(1)
+            out_buf.zero_()
+            ops().int8k_int4v_s1_paged(
+                scratch.q8, scratch.q_scale,
+                views["k"], views["k_scale"], views["v"], views["v_scale"],
+                views["v_zero"], table, seq, out_buf,
+            )
+            torch.xpu.synchronize()
+            self.assertTrue(torch.equal(out_buf.detach().clone(), legacy[hkv]))
+        self._note("legacy_interleave", passed=True, layouts=[l.hkv for l in LAYOUTS])
+
     def test_partial_pages_negative_slots_and_dirty_tail(self):
-        for index in self._device_indices():
-            self._use_device(index)
-            self._partial_pages(index)
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                self.layout = layout
+                for index in self._device_indices():
+                    self._use_device(index)
+                    self._partial_pages(index)
 
     def _partial_pages(self, device_index: int):
         device = self.device
+        hkv, hq = self.layout.hkv, self.layout.hq
         views = self._cache(4)
         gen = torch.Generator(device="cpu")
         gen.manual_seed(7)
-        key = torch.randn(130, HKV, D, generator=gen, dtype=torch.float16, device="cpu").to(device)
-        value = torch.randn(130, HKV, D, generator=gen, dtype=torch.float16, device="cpu").to(device)
+        key = torch.randn(130, hkv, D, generator=gen, dtype=torch.float16, device="cpu").to(device)
+        value = torch.randn(130, hkv, D, generator=gen, dtype=torch.float16, device="cpu").to(device)
         slots = torch.arange(130, dtype=torch.int64, device=device)
         slots[1] = -1
         self._store(views, key, value, slots)
@@ -191,7 +318,7 @@ class KernelXpuTest(unittest.TestCase):
             pages = (seq_len + PAGE - 1) // PAGE
             table = torch.arange(pages, dtype=torch.int32, device=device).view(1, pages)
             query = key[seq_len - 1 : seq_len].to(torch.float16)
-            query = query.repeat_interleave(HQ // HKV, dim=1)
+            query = query.repeat_interleave(hq // hkv, dim=1)
             seq = torch.tensor([seq_len], dtype=torch.int32, device=device)
             return self._attend(views, query, table, seq, 1, 1)
 
@@ -202,6 +329,7 @@ class KernelXpuTest(unittest.TestCase):
             self._note(
                 "partial",
                 device=device_index,
+                hkv=hkv,
                 seq_len=seq_len,
                 max_abs=float(out.abs().max().item()),
                 passed=True,
@@ -209,7 +337,7 @@ class KernelXpuTest(unittest.TestCase):
 
         before = run(108)
         seen = run(109)
-        huge = torch.full((1, HKV, D), 50.0, dtype=torch.float16, device=device)
+        huge = torch.full((1, hkv, D), 50.0, dtype=torch.float16, device=device)
         self._store(views, huge, huge, torch.tensor([108], dtype=torch.int64, device=device))
         masked = run(108)
         included = run(109)
@@ -219,38 +347,43 @@ class KernelXpuTest(unittest.TestCase):
         self._note(
             "dirty_tail",
             device=device_index,
+            hkv=hkv,
             masked_vs_clean=masked_gap,
             passed=masked_gap < 1e-4,
         )
 
     def test_prefix_cow_matches_source_and_mutation_diverges(self):
-        for index in self._device_indices():
-            self._use_device(index)
-            self._prefix_cow(index)
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                self.layout = layout
+                for index in self._device_indices():
+                    self._use_device(index)
+                    self._prefix_cow(index)
 
     def _prefix_cow(self, device_index: int) -> None:
         """Copy one manager block on device and attend from the copy."""
         device = self.device
+        hkv, hq = self.layout.hkv, self.layout.hq
         block_size = 2112
         ratio = pages_per_block(block_size)
-        raw = torch.zeros(2 * ratio * PAGE_BYTES, dtype=torch.int8, device=device)
-        views = bind_regions(raw)
+        raw = torch.zeros(2 * ratio * self.layout.page_bytes, dtype=torch.int8, device=device)
+        views = bind_regions(raw, self.layout)
         ntok = 60
         gen = torch.Generator(device="cpu")
         gen.manual_seed(2112 + device_index)
-        key = torch.randn(ntok, HKV, D, generator=gen, dtype=torch.float16).to(device)
-        value = torch.randn(ntok, HKV, D, generator=gen, dtype=torch.float16).to(device)
+        key = torch.randn(ntok, hkv, D, generator=gen, dtype=torch.float16).to(device)
+        value = torch.randn(ntok, hkv, D, generator=gen, dtype=torch.float16).to(device)
         slots = torch.arange(ratio * PAGE, ratio * PAGE + ntok, dtype=torch.int64, device=device)
         self._store(views, key, value, slots)
-        query = key[-1:].repeat_interleave(HQ // HKV, dim=1)
+        query = key[-1:].repeat_interleave(hq // hkv, dim=1)
         seq = torch.tensor([ntok], dtype=torch.int32, device=device)
         table_src = torch.tensor([[1]], dtype=torch.int32, device=device)
         table_dst = torch.tensor([[0]], dtype=torch.int32, device=device)
         src_out = self._attend(views, query, table_src, seq, 1, ratio)
         before = self._attend(views, query, table_dst, seq, 1, ratio)
         self.assertGreater(_max_abs(src_out, before), 1e-3)
-        src, nbytes = block_byte_span(1, block_size)
-        dst, _ = block_byte_span(0, block_size)
+        src, nbytes = block_byte_span(1, block_size, self.layout)
+        dst, _ = block_byte_span(0, block_size, self.layout)
         raw[dst : dst + nbytes].copy_(raw[src : src + nbytes])
         torch.xpu.synchronize()
         copied = self._attend(views, query, table_dst, seq, 1, ratio)
@@ -260,11 +393,11 @@ class KernelXpuTest(unittest.TestCase):
         # token 0's first K byte rounds away. Doubling the last token's V
         # scale changes the value the kernel actually returns.
         last = ntok - 1
-        specs = region_view_specs(1)
+        specs = region_view_specs(1, self.layout)
         blob = raw.view(torch.uint8)
         scale_before: list[float] = []
         scale_after: list[float] = []
-        for head in range(HKV):
+        for head in range(hkv):
             byte = element_byte(specs["v_scale"], (0, last, head))
             word = bytes(int(blob[byte + i].item()) for i in range(4))
             (value,) = struct.unpack("<f", word)
@@ -285,6 +418,7 @@ class KernelXpuTest(unittest.TestCase):
         self._note(
             "prefix_cow",
             device=device_index,
+            hkv=hkv,
             block_size=block_size,
             seq_len=ntok,
             copied_gap=copied_gap,
@@ -295,34 +429,38 @@ class KernelXpuTest(unittest.TestCase):
         )
 
     def test_mtp7_59500_matches_serial_and_not_int16(self):
-        for index in self._device_indices():
-            self._use_device(index)
-            # The fp16 reference is large. One device is enough for that gap.
-            self._long_case(59500, sdpa=(index == self._device_indices()[0]), device_index=index)
-            self._long_case(59527, sdpa=False, device_index=index)
-            self._long_case(63932, sdpa=False, device_index=index)
-            self._long_case(70000, sdpa=False, device_index=index)
+        for layout in LAYOUTS:
+            with self.subTest(hkv=layout.hkv):
+                self.layout = layout
+                for index in self._device_indices():
+                    self._use_device(index)
+                    # The fp16 reference is large. One device is enough for that gap.
+                    self._long_case(59500, sdpa=(index == self._device_indices()[0]), device_index=index)
+                    self._long_case(59527, sdpa=False, device_index=index)
+                    self._long_case(63932, sdpa=False, device_index=index)
+                    self._long_case(70000, sdpa=False, device_index=index)
 
     def _long_case(self, seq_len: int, sdpa: bool, device_index: int = 0) -> None:
         device = self.device
+        hkv, hq = self.layout.hkv, self.layout.hq
         q_len = 7
         n_pages = (seq_len + PAGE - 1) // PAGE
         views = self._cache(n_pages)
         gen = torch.Generator(device="cpu")
         gen.manual_seed(seq_len)
-        key = torch.empty(seq_len, HKV, D, dtype=torch.float16, device="cpu")
-        value = torch.empty(seq_len, HKV, D, dtype=torch.float16, device="cpu")
+        key = torch.empty(seq_len, hkv, D, dtype=torch.float16, device="cpu")
+        value = torch.empty(seq_len, hkv, D, dtype=torch.float16, device="cpu")
         # Chunked fill keeps the CPU allocation from becoming one giant randn call.
         chunk = 4096
         for start in range(0, seq_len, chunk):
             stop = min(seq_len, start + chunk)
-            key[start:stop] = torch.randn(stop - start, HKV, D, generator=gen, dtype=torch.float16)
-            value[start:stop] = torch.randn(stop - start, HKV, D, generator=gen, dtype=torch.float16)
+            key[start:stop] = torch.randn(stop - start, hkv, D, generator=gen, dtype=torch.float16)
+            value[start:stop] = torch.randn(stop - start, hkv, D, generator=gen, dtype=torch.float16)
         key = key.to(device)
         value = value.to(device)
         slots = torch.arange(seq_len, dtype=torch.int64, device=device)
         self._store(views, key, value, slots)
-        query = torch.randn(q_len, HQ, D, generator=gen, dtype=torch.float16).to(device)
+        query = torch.randn(q_len, hq, D, generator=gen, dtype=torch.float16).to(device)
         identity = torch.arange(n_pages, dtype=torch.int32, device=device).view(1, n_pages)
         seq = torch.tensor([seq_len], dtype=torch.int32, device=device)
         parallel = self._attend(views, query, identity, seq, q_len, 1)
@@ -382,6 +520,7 @@ class KernelXpuTest(unittest.TestCase):
         self._note(
             "mtp",
             device=device_index,
+            hkv=hkv,
             seq_len=seq_len,
             q_len=q_len,
             parallel_vs_serial=parallel_vs_serial,
@@ -399,6 +538,7 @@ class KernelXpuTest(unittest.TestCase):
     def _concurrent_oracles(self, seq_len: int, q_len: int, gen: torch.Generator) -> list[float]:
         """Eight sequences, each with its own pages, query, and oracle."""
         device = self.device
+        hkv, hq = self.layout.hkv, self.layout.hq
         lengths = [seq_len, 128, 512, 4096, 20000, 40000, max(seq_len // 2, 128), max(seq_len // 3, 128)]
         # Row 0 is not the long sequence. A kernel that ignores the row index fails.
         order = [1, 2, 4, 0, 6, 3, 7, 5]
@@ -408,19 +548,19 @@ class KernelXpuTest(unittest.TestCase):
         for count in page_counts:
             offsets.append(cursor)
             cursor += count
-        raw = torch.zeros(cursor * PAGE_BYTES, dtype=torch.int8, device=device)
-        views = bind_regions(raw)
+        raw = torch.zeros(cursor * self.layout.page_bytes, dtype=torch.int8, device=device)
+        views = bind_regions(raw, self.layout)
         queries = []
         oracles = []
         tables = []
         for index, length in enumerate(lengths):
-            key = torch.empty(length, HKV, D, dtype=torch.float16, device="cpu")
-            value = torch.empty(length, HKV, D, dtype=torch.float16, device="cpu")
+            key = torch.empty(length, hkv, D, dtype=torch.float16, device="cpu")
+            value = torch.empty(length, hkv, D, dtype=torch.float16, device="cpu")
             chunk = 4096
             for start in range(0, length, chunk):
                 stop = min(length, start + chunk)
-                key[start:stop] = torch.randn(stop - start, HKV, D, generator=gen, dtype=torch.float16)
-                value[start:stop] = torch.randn(stop - start, HKV, D, generator=gen, dtype=torch.float16)
+                key[start:stop] = torch.randn(stop - start, hkv, D, generator=gen, dtype=torch.float16)
+                value[start:stop] = torch.randn(stop - start, hkv, D, generator=gen, dtype=torch.float16)
             key = key.to(device)
             value = value.to(device)
             slots = torch.arange(
@@ -431,7 +571,7 @@ class KernelXpuTest(unittest.TestCase):
             )
             self._store(views, key, value, slots)
             del key, value
-            query_i = torch.randn(q_len, HQ, D, generator=gen, dtype=torch.float16).to(device)
+            query_i = torch.randn(q_len, hq, D, generator=gen, dtype=torch.float16).to(device)
             table = torch.arange(
                 offsets[index],
                 offsets[index] + page_counts[index],
@@ -444,7 +584,7 @@ class KernelXpuTest(unittest.TestCase):
             tables.append(table.view(-1))
         width = max(page_counts)
         batch_table = torch.zeros((8, width), dtype=torch.int32, device=device)
-        batch_q = torch.empty((8 * q_len, HQ, D), dtype=torch.float16, device=device)
+        batch_q = torch.empty((8 * q_len, hq, D), dtype=torch.float16, device=device)
         batch_lengths = []
         ordered_oracles = []
         for row, src in enumerate(order):
