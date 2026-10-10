@@ -8,6 +8,12 @@ The historical Qwen results below were measured on the previous local Qwen GPTQ 
 
 The earlier unbaked [October 1 Swift speed check](docs/swift-1.5-speed.md) records cold prefill and warmed decode under overlapping live traffic. It does not provide an isolated comparison against these results.
 
+## Single-GPU support and Studio profile
+
+The shared library now supports both 2 KV / 12 Q heads per TP2 rank and 4 KV / 24 Q heads on one GPU, preserving [davetha's runtime-layout contribution](https://github.com/Wrapzii/k8v4-xpu/pull/1). Our Studio server already used an isolated four-head build; the [comparison and B60 receipts](docs/tp1-server-comparison-2026-10-10.md) show the overlap and deployment differences.
+
+Set `K8V4_TP=1` to use the portable one-GPU launch profile (one sequence, separate cache and port, prefix caching off). `K8V4_DEVICES=0` selects the first card; use `1` for the second. [Build instructions](TP1-B70.md) and the comparison document explain image selection and optional capacity fitting. The measured B60 vision-enabled Studio deployment currently fits 133,056 tokens; the TP2 262K results below do not establish 262K on one B60. The unified library is not yet deployed or GPU-validated on our two-card server.
+
 ## October 2: active MLP W4A8 prefill
 
 A runtime audit found that the vLLM 0.30 image requested W4A8 but never installed its MLP hook. The corrected path measured **1,255 tok/s fresh prefill at 128,197 tokens**, versus 1,157 before the fix (102.15 versus 110.81 seconds to first token). Long-context decode measured 78–81 tok/s in the new checks. The scheduler cap stays at 4,224; shared KV capacity is now 860,324 tokens, about 1% lower. These targeted concurrency-one checks do not establish unchanged multi-agent latency or general quality equivalence. See the [implementation, raw data, validation, and rejected attention candidate](docs/w4a8-wiring-2026-10-02.md).
@@ -68,7 +74,7 @@ Across 16 layers and both GPUs that is 7,424 bytes saved per token.
 | 131,072 tokens | 4.00 GiB | 3.09 GiB | 928 MiB |
 | 262,144 tokens | 8.00 GiB | 6.19 GiB | 1,856 MiB |
 
-A 4-KV-head page padded out to the one-GPU layout is larger than FP8 on a rank. This build does not use it.
+The TP2 layout does not pad its two local KV heads to four. TP1 uses all four local heads: 1,584 bytes/token versus 2,048 for FP8, the same 22.7% attention-cache saving.
 
 ## Serving path
 
