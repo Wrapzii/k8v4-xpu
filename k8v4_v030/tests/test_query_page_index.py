@@ -1,6 +1,6 @@
 import unittest
 import torch
-from k8v4_v030.query_page_index import QueryPageIndex
+from k8v4_v030.query_page_index import QueryPageIndex, dimension_page_scores
 
 
 class QueryPageIndexTest(unittest.TestCase):
@@ -71,6 +71,20 @@ class QueryPageIndexTest(unittest.TestCase):
         a = logits.masked_fill(original_mask[:, None, :], -float('inf')).softmax(-1)
         b = logits.masked_fill(compact_mask[:, None, :], -float('inf')).softmax(-1)
         self.assertTrue(torch.equal(a, b))
+
+    def test_dimension_scan_full_dimension_matches_actual_page_max(self):
+        k = (self.k.float()*self.s[..., None]).repeat_interleave(6, dim=2)
+        expected = torch.einsum('qhd,pshd->qhps', self.q, k).amax(-1)/4
+        actual = dimension_page_scores(self.q, self.k, self.s, 576, 16)
+        torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-5)
+
+    def test_dimension_scan_partial_tail_and_invalid_dimension_count(self):
+        self.s[-1, 3:] = float('nan')
+        scores = dimension_page_scores(self.q, self.k, self.s, 515, 8)
+        self.assertTrue(bool(torch.isfinite(scores).all()))
+        for count in (0, 17):
+            with self.assertRaises(ValueError):
+                dimension_page_scores(self.q, self.k, self.s, 515, count)
 
 
 if __name__ == '__main__':
