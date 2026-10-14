@@ -11,6 +11,40 @@ import math
 import torch
 
 
+def dimension_page_scores(query: torch.Tensor, keys: torch.Tensor, scales: torch.Tensor,
+                          length: int, dimensions: int = 32) -> torch.Tensor:
+    """SparQ-inspired GQA dimension scan, returning [Q,QH,P] page estimates.
+
+    Select channels by summed query magnitude within a KV group, then score
+    actual keys in those channels. No V data is read. This eager reference
+    implementation does not claim coalesced memory transactions or SparQ's
+    published throughput; our packed K is not a transposed key index.
+    """
+    if keys.ndim != 4 or scales.shape != keys.shape[:3]:
+        raise ValueError('keys/scales shape')
+    pages, size, heads, dims = keys.shape
+    if not 0 < length <= pages*size or math.ceil(length/size) != pages:
+        raise ValueError('active logical pages')
+    if query.ndim != 3 or query.shape[1] % heads or query.shape[-1] != dims:
+        raise ValueError('GQA query shape')
+    if not 1 <= dimensions <= dims:
+        raise ValueError('dimensions')
+    q = query.float().reshape(query.shape[0], heads, -1, dims)
+    important = q.abs().sum(dim=(0, 2)).topk(dimensions, -1).indices
+    valid = torch.arange(pages*size, device=keys.device).reshape(pages, size) < length
+    result = []
+    for head in range(heads):
+        qsmall = q[:, head].index_select(-1, important[head])
+        ksmall = keys[:, :, head].index_select(-1, important[head]).float()
+        ksmall = ksmall * scales[:, :, head, None]
+        # Mask dirty padded metadata before dot products (0 * NaN is NaN).
+        ksmall = ksmall.masked_fill(~valid[:, :, None], 0)
+        scores = torch.einsum('qgd,psd->qgps', qsmall, ksmall) / math.sqrt(dims)
+        scores = scores.masked_fill(~valid[None, None, :, :], -float('inf')).amax(-1)
+        result.append(scores)
+    return torch.stack(result, dim=1).reshape(query.shape[0], query.shape[1], pages)
+
+
 @dataclasses.dataclass(frozen=True)
 class QueryPageIndex:
     minimum: torch.Tensor  # [pages, KV heads, dimensions], fp32
