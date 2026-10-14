@@ -177,6 +177,49 @@ class KernelXpuTest(unittest.TestCase):
             self.assertGreaterEqual(count, 2)
             self.assertNotEqual(os.environ.get("ZE_AFFINITY_MASK"), "0")
 
+    def test_compact_slm_matches_baseline_with_partial_and_shuffled_pages(self):
+        """The opt-in changes storage and tiling, not attention arithmetic."""
+        previous = os.environ.get("XE2_KV_COMPACT_SLM")
+        try:
+            for layout in LAYOUTS:
+                self.layout = layout
+                for length in (8001, 70000):
+                    pages = (length + PAGE - 1) // PAGE + 1
+                    views = self._cache(pages)
+                    # Poison unused metadata so incorrect padding reads cannot
+                    # silently look correct because a fresh cache was zeroed.
+                    for name in ("k_scale", "v_scale", "v_zero"):
+                        views[name].fill_(float("nan"))
+                    mapping = torch.randperm(pages, dtype=torch.int32, device=self.device)
+                    logical = torch.arange(length, dtype=torch.int64, device=self.device)
+                    slots = mapping[logical // PAGE].long() * PAGE + logical % PAGE
+                    key = torch.randn(length, layout.hkv, D, dtype=torch.float16, device=self.device)
+                    value = torch.randn_like(key)
+                    self._store(views, key, value, slots)
+                    del key, value, slots, logical
+                    table = mapping.view(1, pages)
+                    seq = torch.tensor([length], dtype=torch.int32, device=self.device)
+                    reference = candidate = None
+                    for q_len in (1, 2, 7):
+                        with self.subTest(hkv=layout.hkv, length=length, q_len=q_len):
+                            query = torch.randn(q_len, layout.hq, D, dtype=torch.float16, device=self.device)
+                            vis = torch.tensor([length] + [length-q_len+i+1 for i in range(q_len)],
+                                               dtype=torch.int32, device=self.device).view(1, -1)
+                            os.environ["XE2_KV_COMPACT_SLM"] = "0"
+                            reference = self._attend(views, query, table, seq, q_len, 1, vis)
+                            os.environ["XE2_KV_COMPACT_SLM"] = "1"
+                            candidate = self._attend(views, query, table, seq, q_len, 1, vis)
+                            self.assertTrue(_finite(candidate))
+                            self.assertTrue(torch.equal(reference, candidate),
+                                            "compact SLM changed attention output")
+                    del views, mapping, table, seq, query, reference, candidate, vis
+                    torch.xpu.empty_cache()
+        finally:
+            if previous is None:
+                os.environ.pop("XE2_KV_COMPACT_SLM", None)
+            else:
+                os.environ["XE2_KV_COMPACT_SLM"] = previous
+
     def test_unsupported_head_counts_raise(self):
         """The native ops reject any per-GPU KV head count but 2 and 4."""
         device = self.device

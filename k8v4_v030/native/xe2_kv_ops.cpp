@@ -166,6 +166,7 @@ template <int HKV> class Xe2KvTorchAbiS1Kernel;
 template <int HKV> class Xe2KvTorchAbiKstorePagedKernel;
 template <int HKV> class Xe2KvTorchAbiVstorePagedKernel;
 template <int HKV, bool PF16> class Xe2KvTorchAbiS1PagedKernel;
+template <int HKV, bool PF16, int COLS> class Xe2KvTorchAbiS1PagedReuseKernel;
 template <int HKV, bool PF16> class Xe2KvTorchAbiS1PagedSmallKernel;
 static bool s1_small_enabled() {
   const char *v = std::getenv("XE2_KV_SMALL_S1");
@@ -1071,6 +1072,303 @@ static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, c
   });
 }
 
+// Opt-in MTP6 verifier: 8-KiB SLM, original dot products and softmax order.
+template<int COLS>
+static inline void decode_v_int4_reuse(int lid,const std::uint8_t *v4_head,int v_tok_stride,
+ const float *vs_head,const float *vz_head,int sc_stride,int nbase,int n_valid,sycl::half *kv_tile){
+ const int tok=lid>>1,part=lid&1;
+ auto dst=kv_tile+tok*COLS+part*(COLS/2);
+ if(tok>=n_valid){
+   #pragma unroll
+   for(int j=0;j<COLS/2;++j) dst[j]=sycl::half(0.f);
+   return;
+ }
+ const float scale=vs_head[tok*sc_stride],zero=vz_head[tok*sc_stride];
+ const auto src=v4_head+static_cast<size_t>(tok)*v_tok_stride+(nbase>>1)+part*(COLS/4);
+ #pragma unroll
+ for(int offset=0;offset<COLS/4;offset+=8){
+   std::uint64_t raw;std::memcpy(&raw,src+offset,sizeof(raw));
+   #pragma unroll
+   for(int j=0;j<8;++j){
+     const std::uint8_t b=static_cast<std::uint8_t>(raw>>(8*j));
+     dst[2*(offset+j)]=sycl::half((static_cast<float>(b&0xfu)-zero)*scale);
+     dst[2*(offset+j)+1]=sycl::half((static_cast<float>(b>>4)-zero)*scale);
+   }
+ }
+}
+template <int HKV, bool PF16, int COLS>
+static void launch_int8k_int4v_s1_paged_reuse(sycl::queue &q, const std::int8_t *Q8, const float *Qsc,
+                                        const std::int8_t *K8, const float *Ksc, const std::uint8_t *V4,
+                                        const float *VS, const float *VZ, const std::int32_t *bt,
+                                        const std::int32_t *seq_lens, float *Part, float *M, float *L,
+                                        int n_splits, int q_len,
+                                        size_t k_page_stride, size_t v_page_stride, size_t sc_page_stride,
+                                        const std::int32_t *visible_lens = nullptr,
+                                        int pages_per_block = 1) {
+  constexpr int GQA = Heads<HKV>::gqa;
+  if (q_len * GQA <= TM && s2_parallel_enabled() && s1_small_enabled()) {
+    launch_int8k_int4v_s1_paged_small<HKV, PF16>(q, Q8, Qsc, K8, Ksc, V4, VS, VZ, bt, seq_lens, Part, M, L,
+                                                 n_splits, q_len, k_page_stride, v_page_stride,
+                                                 sc_page_stride, visible_lens, pages_per_block);
+    return;
+  }
+  const int nprog = n_splits * HKV;
+  const int k_tok_stride = HKV * BK;
+  const int v_tok_stride = HKV * V4_COLS;
+  const int sc_tok_stride = HKV;
+  sycl::range<1> g(static_cast<size_t>(nprog) * WG_SIZE);
+  sycl::range<1> l(WG_SIZE);
+  q.submit([&](sycl::handler &h) {
+    sycl::local_accessor<float, 1> slm(sycl::range<1>(8192 / sizeof(float)), h);
+    h.parallel_for<Xe2KvTorchAbiS1PagedReuseKernel<HKV, PF16, COLS>>(
+        sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
+          const int lid = static_cast<int>(item.get_local_id(0));
+          const int prog = static_cast<int>(item.get_group(0));
+          auto sg = item.get_sub_group();
+          const int sg_id = static_cast<int>(sg.get_group_id());
+          const int row0 = sg_id * TM;
+          const int lane = static_cast<int>(sg.get_local_id());
+          // Live-row gating (perf): BM=64 pads the query tile, but a decode step has only
+          // q_len*GQA real rows (6 for a draft, 42 for MTP6 verify). A sub-group whose
+          // 8 rows are all padding has nothing to compute or store. The flag is uniform
+          // per sub-group, so joint_matrix collectives stay legal; every barrier below is
+          // still taken by the whole work-group.
+          const bool sg_live = row0 < q_len * GQA;
+          const int kv_head = prog / n_splits;
+          const int logical = prog - kv_head * n_splits;
+          // Legacy path uses one final count. Varlen path reserves element 0
+          // for max visible length and elements [1..q_len] for each query
+          // row, matching Intel's speculative verifier contract.
+          const std::int32_t seq_len32 = visible_lens ? visible_lens[0] : seq_lens[0];
+          const std::int64_t seq_len = static_cast<std::int64_t>(seq_len32);
+          const std::int64_t n_valid64 = sycl::max(
+              static_cast<std::int64_t>(0),
+              sycl::min(static_cast<std::int64_t>(BM),
+                        seq_len - static_cast<std::int64_t>(logical) * BM));
+          const int n_valid = static_cast<int>(n_valid64);
+          // Graph-static n_splits pads past seq_len. S2 only merges n_live
+          // splits, so empty groups can return without touching SLM/DPAS.
+          if (n_valid <= 0) return;
+          // pages_per_block==1: block_table entries are already 64-token pages.
+          // Larger vLLM blocks expand as block_id * ratio + page_in_block, which
+          // matches slot/64 used by the store. No host-side table is built.
+          const int phys = (pages_per_block <= 1)
+                               ? static_cast<int>(bt[logical])
+                               : static_cast<int>(bt[logical / pages_per_block]) * pages_per_block +
+                                     (logical % pages_per_block);
+
+          float *base_f = &slm[0];
+          auto *base = reinterpret_cast<std::uint8_t *>(base_f);
+          std::int32_t *s_i32 = reinterpret_cast<std::int32_t *>(base);
+          sycl::half *p_raw = reinterpret_cast<sycl::half *>(base);
+          sycl::half *kv_tile = reinterpret_cast<sycl::half *>(base);
+
+          auto s_slm_i = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                                  sycl::access::decorated::no>(s_i32);
+          auto p_slm = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                                sycl::access::decorated::no>(p_raw);
+          auto pKV = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                              sycl::access::decorated::no>(kv_tile);
+
+          const size_t q_off = static_cast<size_t>(kv_head) * BM * BK;
+          const size_t qsc_off = static_cast<size_t>(kv_head) * BM;
+          const size_t o_off = static_cast<size_t>(prog) * BM * BV;
+          const size_t ml_off = static_cast<size_t>(prog) * BM;
+          const size_t k_head_off =
+              static_cast<size_t>(phys) * k_page_stride + static_cast<size_t>(kv_head) * BK;
+          const size_t v_head_off =
+              static_cast<size_t>(phys) * v_page_stride + static_cast<size_t>(kv_head) * V4_COLS;
+          const size_t sc_head_off =
+              static_cast<size_t>(phys) * sc_page_stride + static_cast<size_t>(kv_head);
+
+          auto pQ8 = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                              sycl::access::decorated::no>(
+              const_cast<std::int8_t *>(Q8 + q_off));
+          auto pK8 = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                              sycl::access::decorated::no>(
+              const_cast<std::int8_t *>(K8 + k_head_off));
+          auto pO = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                             sycl::access::decorated::no>(Part + o_off);
+          auto pOh = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                              sycl::access::decorated::no>(
+              reinterpret_cast<sycl::half *>(Part) + o_off);
+
+          float qsc[TM];
+#pragma unroll
+          for (int r = 0; r < TM; ++r) qsc[r] = Qsc[qsc_off + row0 + r];
+          float ksc[NTN];
+#pragma unroll
+          for (int t = 0; t < NTN; ++t)
+            ksc[t] = Ksc[sc_head_off + static_cast<size_t>(t * SG_SIZE + lane) * sc_tok_stride];
+
+          float first_scores[TM][2];
+          for(int half=0;half<2;++half){
+            if(sg_live){
+              jm::joint_matrix<sycl::sub_group,std::int8_t,jm::use::a,TM,TK_I8,jm::layout::row_major> a;
+              jm::joint_matrix<sycl::sub_group,std::int8_t,jm::use::b,TK_I8,TN,jm::layout::col_major> b;
+              jm::joint_matrix<sycl::sub_group,std::int32_t,jm::use::accumulator,TM,TN> c0,c1;
+              jm::joint_matrix_fill(sg,c0,0);jm::joint_matrix_fill(sg,c1,0);
+              for(int k=0;k<BK;k+=TK_I8){
+                jm::joint_matrix_load(sg,a,pQ8+row0*BK+k,BK);
+                jm::joint_matrix_load(sg,b,pK8+(half*32)*k_tok_stride+k,k_tok_stride);
+                jm::joint_matrix_mad(sg,c0,a,b,c0);
+                jm::joint_matrix_load(sg,b,pK8+(half*32+16)*k_tok_stride+k,k_tok_stride);
+                jm::joint_matrix_mad(sg,c1,a,b,c1);
+              }
+              jm::joint_matrix_store(sg,c0,s_slm_i+row0*32,32,jm::layout::row_major);
+              jm::joint_matrix_store(sg,c1,s_slm_i+row0*32+16,32,jm::layout::row_major);
+            }
+            sycl::group_barrier(sg);
+            if(half==0 && sg_live){
+              #pragma unroll
+              for(int r=0;r<TM;++r){
+                #pragma unroll
+                for(int t=0;t<2;++t)
+                  first_scores[r][t]=static_cast<float>(s_i32[(row0+r)*32+t*16+lane])*qsc[r]*ksc[t]*INV_SQRT_D;
+              }
+            }
+            // Each subgroup owns its score rows; all first-half reads must
+            // finish before it overwrites those rows with the second half.
+            sycl::group_barrier(sg);
+          }
+
+          sycl::half saved_p[TM][NTN];
+          if (!sg_live) {
+            // Padding-only sub-group: publish an empty softmax state so any S2 variant
+            // that touches these rows sees M=-inf, L=0 instead of stale workspace.
+            if (lane < TM) {
+              M[ml_off + row0 + lane] = -INFINITY;
+              L[ml_off + row0 + lane] = 0.f;
+            }
+          } else {
+            #pragma unroll
+            for (int r = 0; r < TM; ++r) {
+              const int row = row0 + r;
+              const float qs = qsc[r];
+              float m = -INFINITY;
+              float vals[NTN];
+              const int q_tok = row / GQA;
+              // BM=64 pads the packed query tile.  Only live query rows have
+              // a visible-lens entry; never read past [1+q_len].
+              const bool live_q = row < q_len * GQA;
+              const std::int64_t q_end = live_q
+                  ? (visible_lens
+                         ? static_cast<std::int64_t>(visible_lens[1 + q_tok])
+                         : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1)
+                  : 0;
+              for (int t = 0; t < NTN; ++t) {
+                const int tok = t * SG_SIZE + lane;
+                float s;
+                if(t<2) s=first_scores[r][t];
+                else {
+                  const std::int32_t si=s_i32[row*32+(t-2)*SG_SIZE+lane];
+                  s=static_cast<float>(si)*qs*ksc[t]*INV_SQRT_D;
+                }
+                // n_valid = tokens in this page; q_end = causal end for this spec Q token.
+                // t=1 → q_end==seq_len (same as tok>=n_valid on the last page).
+                // t>1 MTP → query i cannot see keys at/after seq_len-t+i+1.
+                const std::int64_t k_abs =
+                    static_cast<std::int64_t>(logical) * BM + tok;
+                if (tok >= n_valid || row >= q_len * GQA || k_abs >= q_end) s = -INFINITY;
+                vals[t] = s;
+                m = sycl::max(m, s);
+              }
+              m = sycl::reduce_over_group(sg, m, sycl::maximum<float>());
+              float sum = 0.f;
+              float e[NTN];
+              if (m == -INFINITY) {
+                for (int t = 0; t < NTN; ++t) e[t] = 0.f;
+              } else {
+                for (int t = 0; t < NTN; ++t) {
+                  e[t] = sycl::exp(vals[t] - m);
+                  sum += e[t];
+                }
+                sum = sycl::reduce_over_group(sg, sum, sycl::plus<float>());
+              }
+              float inv = (sum == 0.f) ? 0.f : 1.f / sum;
+              for (int t = 0; t < NTN; ++t) {
+                saved_p[r][t] = sycl::half(e[t] * inv);
+              }
+              if (lane == 0) {
+                M[ml_off + row] = m;
+                L[ml_off + row] = sum;
+              }
+            }
+          }
+
+          // In-place score -> probability packing changes ownership across
+          // sub-groups. Every score read must finish before the first store.
+          item.barrier(sycl::access::fence_space::local_space);
+          if (sg_live) {
+            #pragma unroll
+            for (int r=0; r<TM; ++r) {
+              #pragma unroll
+              for (int t=0; t<NTN; ++t)
+                p_slm[(row0+r)*BN + t*SG_SIZE+lane] = saved_p[r][t];
+            }
+          }
+          item.barrier(sycl::access::fence_space::local_space);
+
+          {
+            // Four named matrices avoid the known joint_matrix-array issue.
+            jm::joint_matrix<sycl::sub_group,sycl::half,jm::use::a,TM,TK,jm::layout::row_major> a0,a1,a2,a3;
+            jm::joint_matrix<sycl::sub_group,sycl::half,jm::use::b,TK,TN,jm::layout::row_major> b;
+            if(sg_live){
+              jm::joint_matrix_load(sg,a0,p_slm+row0*BN,BN);
+              jm::joint_matrix_load(sg,a1,p_slm+row0*BN+16,BN);
+              jm::joint_matrix_load(sg,a2,p_slm+row0*BN+32,BN);
+              jm::joint_matrix_load(sg,a3,p_slm+row0*BN+48,BN);
+            }
+            // All subgroups finish loading P into registers before V
+            // decoding reuses that same shared-memory address range.
+            item.barrier(sycl::access::fence_space::local_space);
+            for(int nbase=0;nbase<BV;nbase+=COLS){
+              decode_v_int4_reuse<COLS>(lid,V4+v_head_off,v_tok_stride,VS+sc_head_off,VZ+sc_head_off,
+                                       sc_tok_stride,nbase,n_valid,kv_tile);
+              item.barrier(sycl::access::fence_space::local_space);
+              if(sg_live){
+                jm::joint_matrix<sycl::sub_group,float,jm::use::accumulator,TM,TN> c0,c1,c2,c3;
+                jm::joint_matrix_fill(sg,c0,0.f);jm::joint_matrix_fill(sg,c1,0.f);
+                if constexpr(COLS==64){jm::joint_matrix_fill(sg,c2,0.f);jm::joint_matrix_fill(sg,c3,0.f);}
+                #define REUSE_MAD(A,K) \
+                  jm::joint_matrix_load(sg,b,pKV+K*COLS,COLS); \
+                  jm::joint_matrix_mad(sg,c0,A,b,c0); \
+                  jm::joint_matrix_load(sg,b,pKV+K*COLS+16,COLS); \
+                  jm::joint_matrix_mad(sg,c1,A,b,c1); \
+                  if constexpr(COLS==64){ \
+                    jm::joint_matrix_load(sg,b,pKV+K*COLS+32,COLS); \
+                    jm::joint_matrix_mad(sg,c2,A,b,c2); \
+                    jm::joint_matrix_load(sg,b,pKV+K*COLS+48,COLS); \
+                    jm::joint_matrix_mad(sg,c3,A,b,c3); \
+                  }
+                REUSE_MAD(a0,0);REUSE_MAD(a1,16);REUSE_MAD(a2,32);REUSE_MAD(a3,48);
+                #undef REUSE_MAD
+                if constexpr(PF16){
+                  jm::joint_matrix<sycl::sub_group,sycl::half,jm::use::accumulator,TM,TN> h0,h1,h2,h3;
+                  jm::joint_matrix_copy(sg,c0,h0);jm::joint_matrix_copy(sg,c1,h1);
+                  jm::joint_matrix_store(sg,h0,pOh+row0*BV+nbase,BV,jm::layout::row_major);
+                  jm::joint_matrix_store(sg,h1,pOh+row0*BV+nbase+16,BV,jm::layout::row_major);
+                  if constexpr(COLS==64){
+                    jm::joint_matrix_copy(sg,c2,h2);jm::joint_matrix_copy(sg,c3,h3);
+                    jm::joint_matrix_store(sg,h2,pOh+row0*BV+nbase+32,BV,jm::layout::row_major);
+                    jm::joint_matrix_store(sg,h3,pOh+row0*BV+nbase+48,BV,jm::layout::row_major);
+                  }
+                } else {
+                  jm::joint_matrix_store(sg,c0,pO+row0*BV+nbase,BV,jm::layout::row_major);
+                  jm::joint_matrix_store(sg,c1,pO+row0*BV+nbase+16,BV,jm::layout::row_major);
+                  if constexpr(COLS==64){
+                    jm::joint_matrix_store(sg,c2,pO+row0*BV+nbase+32,BV,jm::layout::row_major);
+                    jm::joint_matrix_store(sg,c3,pO+row0*BV+nbase+48,BV,jm::layout::row_major);
+                  }
+                }
+              }
+              if(nbase+COLS<BV) item.barrier(sycl::access::fence_space::local_space);
+            }
+          }
+        });
+  });
+}
+
 template <int HKV>
 static void launch_s2_merge(sycl::queue &q, const float *M, const float *L, const float *Acc,
                             float *Merged, const std::int32_t *seq_lens, int n_splits) {
@@ -1823,6 +2121,19 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
   const bool pf16 = half_out && s2_parallel_enabled() && env_is_1("XE2_KV_PARTIAL_FP16");
   auto launch_s1 = [&]() {
     auto run = [&](auto pf) {
+    if (tq == 7 && env_is_1("XE2_KV_COMPACT_SLM")) {
+    launch_int8k_int4v_s1_paged_reuse<HKV, decltype(pf)::value, 64>(current_xpu_queue(), q8.data_ptr<int8_t>(),
+                                q_scale.data_ptr<float>(),
+                                k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
+                                v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(),
+                                v_zero.data_ptr<float>(), bt.data_ptr<int32_t>(),
+                                seq_lens.data_ptr<int32_t>(), partials.data_ptr<float>(),
+                                m.data_ptr<float>(), l.data_ptr<float>(), n_splits, tq,
+                                static_cast<size_t>(k_cache.stride(0)),
+                                static_cast<size_t>(v_cache.stride(0)),
+                                static_cast<size_t>(k_scale.stride(0)),
+                                visible_ptr, ratio);
+    } else {
     launch_int8k_int4v_s1_paged<HKV, decltype(pf)::value>(current_xpu_queue(), q8.data_ptr<int8_t>(),
                                 q_scale.data_ptr<float>(),
                                 k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
@@ -1834,6 +2145,7 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
                                 static_cast<size_t>(v_cache.stride(0)),
                                 static_cast<size_t>(k_scale.stride(0)),
                                 visible_ptr, ratio);
+    }
     };
     if (pf16) run(std::true_type{}); else run(std::false_type{});
   };
