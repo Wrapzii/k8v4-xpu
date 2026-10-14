@@ -331,6 +331,10 @@ if [ "$GDN_HEADS" = 1 ]; then
   [ -f "$GDN_LIB" ] || { echo "K8V4_GDN_HEADS=1 needs $GDN_LIB (run k8v4_v030/compile_gdn.sh)" >&2; exit 2; }
   extra+=(-v "$(cd "$(dirname "$GDN_LIB")" && pwd)/$(basename "$GDN_LIB"):/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so:ro")
 fi
+# Optional fp16 S1 partial outputs (about -18% on the q7 verify attention op at 128K). Off unless set.
+if [ -n "${XE2_KV_PARTIAL_FP16:-}" ]; then
+  extra+=(-e "XE2_KV_PARTIAL_FP16=${XE2_KV_PARTIAL_FP16}")
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
