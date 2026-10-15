@@ -1,6 +1,6 @@
 # Current handoff: learned sparse selection, B60 execution, exact prefix reuse
 
-Updated **2026-10-15 01:30 UTC / October14 Eastern**. Read this before restarting any experiment. Branch `codex/compact-slm-concurrency`; previous results commit `7dca598`. This is the active decode/concurrency task; old Anime Studio/DFlash/MTP controllers are unrelated and must not be restarted.
+Updated **2026-10-15 03:40 UTC / October14 Eastern**. Analysis pack: `docs/concurrency-dossier-2026-10-15/INDEX.md` plus `results/`. Branch `codex/compact-slm-concurrency`. This is the active decode/concurrency task; old Anime Studio/DFlash/MTP controllers are unrelated and must not be restarted.
 
 ## Objectives and acceptance gates
 
@@ -53,25 +53,21 @@ Installed vLLM `0.30.0+xpu`; source kernel SHA256 `d98d17110577c2b7b4d05e07bfdae
 -Earlier v1/v2 launch receipts are preserved. They failed before GPU execution: nested read-only child mount, then missing staged query-page module. The corrected driver performs import preflight before stopping serving. Do not rerun the failed roots or overwrite their receipts.
 -Original `vllm-k8v4-tp2` restored; health200 confirmed01:30 UTC. The driver session1610 was waiting to finalize its restoration receipt; read actual receipt/session before claiming it exited. No sparse backend/model was installed in production.
 
-## Expanded frozen experiment: prepared, not yet submitted at this update
+## Expanded frozen experiment: complete on B60; fails quality; not fused
 
-Server root: `/mnt/hdd-500gb/model-validation/launch80-20261013/perf-indexer-scale-20261015`.
-PC storage: **`D:/k8v4-attention-audit/indexer-scale-20261015`**. C: has only~0.9GiB free; do not copy multi-GB capture bases there. D: had~11GiB free before this experiment. Original captures remain immutable on server and C:.
+Capture root: `/mnt/hdd-500gb/model-validation/launch80-20261013/perf-indexer-scale-20261015` (384 q7 snapshots + 24 bases; `capture_passed`, 8100 restored). Packed receipts: `docs/concurrency-dossier-2026-10-15/results/frozen-*.json*`.
 
-Prepared plan/script/source texts are staged on server and PC. Four source-grounded synthetic requests: CODE128K(training), CODE200K(length holdout), TOOLS128K/200K(held out),128 output tokens each, **512 generated tokens maximum**, zero retries. Up to **384 q7 snapshots**: six FA layers3/7/11/15/31/63 ×16 buckets every8 positions ×four requests. Source texts contain45 real repository modules/tests/C++ sources in diagnostic wrappers; there are only four additional contexts, not a broad real-agent corpus or semantic evaluation.
+XPU isolator (`xpu:0` B60, reuse `teacher-dataset.pt`, production restored): 12 models, 256 steps, 528 valid / 160 train / 368 held-out CODE200K+TOOLS. Training ~1 min; full held-out ~5 min. Losses drop (~3.8 → ~0.7–1.1). **Learned linear16 and mlp64-rank16 lose to SparQ64.** No learned budget all-passes <1% global-union L2. Dense-mass teacher needs ~50% nominal / ~83% physical pages to all-pass. CODE200K and TOOLS fail the same way. Do not fuse. Do not remount sparse serving.
 
-`scaled_indexer_capture_hook.py` binds request ownership during actual final layer3 **prefill**, using the full physical prefix-block signature and frozen prompt-token SHA. Decode never reads the changing HTTP active tag to choose its owner. This avoids the previous late-upper-layer tagging race. Prefix bases are saved once per tag/layer; all new samples must pass full CPU/native calibration before teaching or evaluation. Regression covers tag changes and differing full prefix signatures. Single-request eager diagnostic only; no general serving identity guarantee.
+## Exact prefix + context parallel (2026-10-15 night): complete; not mounted
 
-`prepare_scaled_indexer_capture.py` produces `run_indexer_scale_capture.py`. It preflights port8353, clones only an isolated instrumentation overlay, preserves original library/weights, and restores original serving in `finally`. Do not start it until the upstream probe has fully ended, original health is200, and no production requests are running/waiting.
+Packed receipts: `docs/concurrency-dossier-2026-10-15/results/{split-cp,cp-two-worker,cp-vs-tp}-*`.
 
-After capture closes, sync/hash-check to D:, preserving receipts. `frozen_indexer_scale.py <D capture root>` is staged and syntax-checked. It:
+- Native compact T(L) q7 is linear plus ~200 µs launch (200K = 1623 µs, matches 1.62 ms). Hermes-like 2K/200K cascade is **0.96×** vs two full walks. 90% share traffic bound is **1.54×** only if prefix is loaded once (native cannot do that without fuse-KV). XPU `merge_attention_states` vs dense L2 ~1.2e-6.
+- Two affinity-pinned workers, hkv=2 × 100K: 874/875 µs solo; concurrent 875/1039 µs; host 86 KB merge 1.52 ms eats the win.
+- **CP instead of TP** (hkv=4 × 100K vs hkv=2 × 200K): q7 **1742 vs 1659 µs**. Same bytes per GPU; slightly slower. Concurrent CP2 1744/1747 µs.
 
--Recalibrates each new frame, rejects mismatches, preserves all raw data.
--Compares normalized rank16 linear projections versus small hidden64 MLP projections, separate per FA layer/KV group, same rank16 side cache, fixed256 steps/model, LR0.0003, seed61142; no holdout hyperparameter sweep.
--Uses dense mean/max-head mass importance, KL plus weighted hard-negative ranking, not heuristic score labels.
--Evaluates **every valid held-out frame**, not only20 endpoints, across5/10/20/30/40/50/60/70% per-row budgets. Includes Quest, SparQ64 and dense-mass teacher rankings. Dense-mass ranking is not an L2-optimal oracle and cannot prove an impossibility bound.
--Saves per-layer/per-KV output errors, actual physical global union, both per-query/group and global-union L2 paths. Do not combine their metrics.
--Does not call or update Qwen, submit generation, enable a backend, or benchmark new model timings. The new study has not run yet. Additional B60 timings should be conditional on an actual quality/page-frontier improvement; no fusion work for failed models.
+Do not stack CP on TP2. Do not replace TP2 with CP on these two B60s. Production stays dense.
 
 ## IndexCache and exact work
 
@@ -87,4 +83,4 @@ Existing widely separated FA3→15→31→63 teacher-set overlap at20% has media
 -No subagents, goals, automations or PRs created. No push requested. Do not restart old DFlash/MTP test controllers.
 -Unrelated dirty docs pre-exist: `2026-10-14-compact-verifier-slm.md`, `HANDOFF-2026-10-14-decode-performance.md`, untracked evening-concurrency doc. Do not blanket-add/reset them. Parent workspace contains unrelated Anime work.
 -Use script files/SCP, not complicated PowerShell→SSH quoting. Preserve failed receipts and finite budgets. Native/CPU timing, full-reference calibration, sparse-output approximation and model/task fidelity are distinct claims.
--Focused tests: **20passed** (indexer/cached projections, high-mass loss, causal indices, query-page rules, actual-prefill ownership, exact q7 merge). GPU numerical probe passed separately. New expanded capture/training results are pending.
+-Focused tests: **20passed** (indexer/cached projections, high-mass loss, causal indices, query-page rules, actual-prefill ownership, exact q7 merge). GPU numerical probe passed separately. Expanded frozen study and CP probes completed; none qualify for mount. Full catalog: `docs/concurrency-dossier-2026-10-15/INDEX.md`.

@@ -16,15 +16,19 @@ Details and tables: `docs/2026-10-14-decode-attention-partials.md`.
 
 `launch.sh` passes `XE2_KV_PARTIAL_FP16` through when set.
 
-## Production state (ai01, `vllm-k8v4-tp2`, port 8100) at the time of writing
+## Production state (ai01, `vllm-k8v4-tp2`, port 8100)
 
-TP2, FP16, MTP6, `--max-num-seqs=4`, `--max-num-batched-tokens=4224`, FULL_DECODE_ONLY graphs, 262144 context.
-Native library built from this source with `XE2_KV_PARTIAL_FP16=1` in the container environment. The weights are
-read from an SSD copy of the Launch80 target (`/srv/launch80-target-fast`, SHA-256 identical to the HDD original);
-a TP2 load takes about 7 minutes (13 to 18 minutes from the HDD at about 57 MB/s). Every previous container is kept
-stopped under `vllm-k8v4-tp2-before-<tag>-<timestamp>`. Working files, receipts and scripts are under
-`/mnt/hdd-500gb/model-validation/launch80-20261013/perf-20261014/` (`switch_lib.py`, `restore_backup.py`,
-`prod_from_ssd.py`, `bench_matrix.py`, `ab_attention.py`, receipts `switch-*.json`).
+**Current server and evening work:** `docs/2026-10-14-evening-concurrency.md` and
+`audit/model-validation/launch80-20261013/HANDOFF_CONCURRENCY_2026-10-14_CURRENT.md`.
+This page is the afternoon kernel-change handoff (live-row gating, fp16 partials, small-S1).
+
+Serving at 23:11 UTC 2026-10-14: compact 8-KiB verifier `libxe2_kv_final.so` SHA256
+`ffe0e5a1a2a2930efb6578b78b8e6b9b9405299c1ad72c8ce550385f1f738632`, `XE2_KV_PARTIAL_FP16=1`,
+`XE2_KV_COMPACT_SLM=1`. Health 200, idle. Live Cmd still has `use_local_argmax_reduction=true` (wash).
+TP2, FP16, MTP6, `--max-num-seqs=4`, `--max-num-batched-tokens=4224`, FULL_DECODE_ONLY graphs, 262144
+context. Weights `/srv/launch80-target-fast`. Rollbacks
+`vllm-k8v4-tp2-before-argmax-20261014204535` and `vllm-k8v4-tp2-before-compact8win-20261014191618`.
+Working files also under `/mnt/hdd-500gb/model-validation/launch80-20261013/perf-continue-20261014/`.
 
 ## Results (128K per rank kernel; end to end on TP2)
 
@@ -45,8 +49,11 @@ Acceptance-normalised decode cycle (`(1 + 6 * acceptance) / per-stream rate`, fi
 ## Targets versus reality (user goal: 3-4K prefill, 200K at ~65 tok/s, <=15% loss at concurrency > 1)
 
 - **200K single stream at ~65 tok/s: met** (60 to 73 tok/s depending on draft acceptance).
-- **<=15% loss with 2 streams: not met.** Rate-equivalent loss at equal acceptance is about 17% at 8K, 22% at
-  32K, 33% at 128K, 37% at 200K. At 128K and above attention is a per-request cost served serially; even a
+- **<=15% loss with 2 streams: not met.** Compact serving, 256-token window, 2026-10-14 22:44–23:11 UTC:
+  200K C1 **70.9** tok/s, C2 **48.4** (−31.7%), C4 **28.2** (−60.2%). Shared prefix (98.2% sibling-warm hits)
+  does not change those decode rates; it cuts sibling prefill 182 s → 5.8 s. Historical 384-token 200K C2 was
+  33.2 vs 64.9 (−49%). Rate-equivalent loss at equal acceptance in the afternoon matrix was about 17% at 8K,
+  22% at 32K, 33% at 128K, 37% at 200K. At 128K and above attention is a per-request cost served serially; even a
   memory-bound kernel cannot reach 15% there. At 8K the extra ~7 ms per request is spread across weight GEMMs
   (about 3), attention (about 1.9), the GDN verify kernel (about 1.2) and small kernels (about 0.9).
 - **Prefill 3-4K for one prompt: not met.** About 2.15K tok/s at short and mid context, about 1.2K at 128K.
@@ -63,13 +70,21 @@ slower), indexed arrays of joint_matrix accumulators (miscompiled: wrong results
 than draft 32 / verify 8 (all slower, re-swept with fp16 partials), `--max-num-batched-tokens=8448` (+1% to +3%
 prefill, doubles the decode stall), oneCCL `CCL_SYCL_*` variations (no change).
 
+Evening of the same day (see `docs/2026-10-14-evening-concurrency.md`): local MTP argmax reduction (wash),
+compact-verifier workgroup-barrier cut (bit-exact, 1.00× at 200K C4), extra XPU streams for the serial
+`attn_batch` loop (graph-illegal and slower), shared-walk L1 hope, prefix-once fuse-KV (128K C2 q7 p90 1.16×,
+not bit-exact, not mounted), live 8100 prefix-share C2/C4 (decode unchanged). None deployed as a concurrency
+fix. The live Cmd still carries `use_local_argmax_reduction=true`; that is not a measured win.
+
 ## Open items, in order of expected value
 
-1. Quality evaluation of fp16 partials against the fp32 path and against the full-precision model (user's plan).
-2. Fused quantize-and-exchange all-reduce plus a real overlap mechanism (separate engine) for prefill; needs numerics
+1. Hot window + cold page index so each 200K token walks ~10–20% of pages (the remaining concurrency lever).
+   Real-Q page mass is not done; randn mass needed ~98% of pages for 99% coverage.
+2. Quality evaluation of fp16 partials against the fp32 path and against the full-precision model (user's plan).
+3. Fused quantize-and-exchange all-reduce plus a real overlap mechanism (separate engine) for prefill; needs numerics
    evaluation.
-3. int8-QK flash prefill kernel for long context (at most 1.3x on attention, which is about 58% of a 128K chunk).
-4. GDN verify kernel and the small per-request kernels (about 1.2 ms and 0.9 ms per request at 8K).
+4. int8-QK flash prefill kernel for long context (at most 1.3x on attention, which is about 58% of a 128K chunk).
+5. GDN verify kernel and the small per-request kernels (about 1.2 ms and 0.9 ms per request at 8K). Does not move 200K C4.
 
 ## Caveats
 

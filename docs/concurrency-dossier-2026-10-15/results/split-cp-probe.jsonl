@@ -1,0 +1,22 @@
+{"kind": "begin", "lib": "/opt/lib/libxe2_kv_final.so", "xpu_count": 2, "names": ["Intel(R) Arc(TM) Pro B60 Graphics", "Intel(R) Arc(TM) Pro B60 Graphics"], "note": "compact production lib; exact cascade cost model + 2-GPU CP; no SHARED_WALK"}
+{"kind": "filled", "device": 0, "tokens": 200000, "pages": 3125, "nprog_max": 6250}
+{"kind": "length", "device": 0, "q": 7, "tokens": 2048, "us": 201.3, "samples": [201.3, 206.4, 203.7, 199.9, 186.7]}
+{"kind": "length", "device": 0, "q": 7, "tokens": 19968, "us": 310.3, "samples": [304.6, 309.0, 312.5, 311.2, 310.3]}
+{"kind": "length", "device": 0, "q": 7, "tokens": 99968, "us": 875.4, "samples": [884.7, 883.3, 875.4, 871.8, 874.3]}
+{"kind": "length", "device": 0, "q": 7, "tokens": 179968, "us": 1484.8, "samples": [1484.8, 1483.6, 1501.4, 1551.7, 1481.9]}
+{"kind": "length", "device": 0, "q": 7, "tokens": 196416, "us": 1593.9, "samples": [1588.5, 1593.9, 1594.2, 1615.7, 1580.3]}
+{"kind": "length", "device": 0, "q": 7, "tokens": 200000, "us": 1622.5, "samples": [1622.6, 1616.7, 1622.5, 1624.8, 1622.0]}
+{"kind": "cascade_model", "label": "hermes_2k", "prefix": 2048, "tail": 197952, "tail_timed_as": 196416, "t_prefix_us": 201.3, "t_tail_us": 1593.9, "cascade_once_prefix_two_tails_us": 3389.1, "serial_two_full_us": 3245.0, "ratio_if_prefix_loaded_once": 0.957, "note": "native kernel still walks prefix per Q unless a bit-exact fused prefix exists; this is the traffic bound"}
+{"kind": "cascade_model", "label": "p10", "prefix": 19968, "tail": 180032, "tail_timed_as": 179968, "t_prefix_us": 310.3, "t_tail_us": 1484.8, "cascade_once_prefix_two_tails_us": 3279.9, "serial_two_full_us": 3245.0, "ratio_if_prefix_loaded_once": 0.989, "note": "native kernel still walks prefix per Q unless a bit-exact fused prefix exists; this is the traffic bound"}
+{"kind": "cascade_model", "label": "p50", "prefix": 99968, "tail": 100032, "tail_timed_as": 99968, "t_prefix_us": 875.4, "t_tail_us": 875.4, "cascade_once_prefix_two_tails_us": 2626.2, "serial_two_full_us": 3245.0, "ratio_if_prefix_loaded_once": 1.236, "note": "native kernel still walks prefix per Q unless a bit-exact fused prefix exists; this is the traffic bound"}
+{"kind": "cascade_model", "label": "p90", "prefix": 179968, "tail": 20032, "tail_timed_as": 19968, "t_prefix_us": 1484.8, "t_tail_us": 310.3, "cascade_once_prefix_two_tails_us": 2105.4, "serial_two_full_us": 3245.0, "ratio_if_prefix_loaded_once": 1.541, "note": "native kernel still walks prefix per Q unless a bit-exact fused prefix exists; this is the traffic bound"}
+{"kind": "cascade_model", "label": "p982", "prefix": 196416, "tail": 3584, "tail_timed_as": 2048, "t_prefix_us": 1593.9, "t_tail_us": 201.3, "cascade_once_prefix_two_tails_us": 1996.5, "serial_two_full_us": 3245.0, "ratio_if_prefix_loaded_once": 1.625, "note": "native kernel still walks prefix per Q unless a bit-exact fused prefix exists; this is the traffic bound"}
+{"kind": "dense_merge", "tokens": 19968, "prefix": 17968, "merge_vs_dense_L2": 1.2493321719375672e-06, "cp_half_vs_dense_L2": 1.1573106348805595e-06, "shared_prefix_rows": 84, "shared_prefix_ok": true}
+{"kind": "cp_solo", "gpu0_half_us": 874.2, "gpu1_half_us": 90921.0, "gpu0_full_us": 1622.5}
+{"kind": "cp_parallel_sample", "wall_us": 146962.5, "gpu0_us": 91643.7, "gpu1_us": 90775.2}
+{"kind": "cp_parallel_sample", "wall_us": 137813.4, "gpu0_us": 870.4, "gpu1_us": 91171.2}
+{"kind": "cp_parallel_sample", "wall_us": 137818.5, "gpu0_us": 875.0, "gpu1_us": 91098.1}
+{"kind": "cp_parallel_sample", "wall_us": 137949.9, "gpu0_us": 91804.6, "gpu1_us": 90918.3}
+{"kind": "cp_parallel_sample", "wall_us": 137824.3, "gpu0_us": 91772.0, "gpu1_us": 90892.7}
+{"kind": "cp_parallel", "wall_us": 137824.3, "samples": [146962.5, 137813.4, 137818.5, 137949.9, 137824.3], "vs_full": 0.012, "vs_slow_half": 0.66, "merge_bytes": 86016}
+{"kind": "end"}
