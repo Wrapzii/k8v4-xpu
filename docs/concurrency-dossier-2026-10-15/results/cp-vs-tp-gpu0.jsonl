@@ -1,0 +1,14 @@
+{"kind": "hello", "role": 0, "lib": "/opt/lib/libxe2_kv_final.so", "xpu_count": 1, "name": "Intel(R) Arc(TM) Pro B60 Graphics", "affinity": "0"}
+{"kind": "filled", "role": 0, "hkv": 2, "tokens": 200000, "pages": 3125}
+{"kind": "tp_rank", "hkv": 2, "hq": 12, "q": 1, "tokens": 200000, "us": 841.6, "samples": [835.4, 856.4, 841.6, 837.9, 847.7], "head_tokens": 400000}
+{"kind": "tp_rank_half", "hkv": 2, "hq": 12, "q": 1, "tokens": 99968, "us": 503.5, "samples": [503.5, 500.4, 498.6, 508.3, 510.2], "head_tokens": 199936}
+{"kind": "tp_rank", "hkv": 2, "hq": 12, "q": 7, "tokens": 200000, "us": 1658.7, "samples": [1658.7, 1653.5, 1653.0, 1661.1, 1665.9], "head_tokens": 400000}
+{"kind": "tp_rank_half", "hkv": 2, "hq": 12, "q": 7, "tokens": 99968, "us": 889.0, "samples": [878.0, 881.1, 895.6, 889.0, 893.0], "head_tokens": 199936}
+{"kind": "filled", "role": 0, "hkv": 4, "tokens": 200000, "pages": 3125}
+{"kind": "tp1_full", "hkv": 4, "hq": 24, "q": 1, "tokens": 200000, "us": 1547.2, "samples": [1557.6, 1545.4, 1547.2, 1555.3, 1543.2], "head_tokens": 800000}
+{"kind": "cp_rank", "hkv": 4, "hq": 24, "q": 1, "tokens": 99968, "us": 821.9, "samples": [830.1, 817.4, 836.1, 821.9, 820.4], "head_tokens": 399872}
+{"kind": "tp1_full", "hkv": 4, "hq": 24, "q": 7, "tokens": 200000, "us": 3365.2, "samples": [3355.6, 3365.2, 3365.2, 3354.6, 3368.9], "head_tokens": 800000}
+{"kind": "cp_rank", "hkv": 4, "hq": 24, "q": 7, "tokens": 99968, "us": 1742.3, "samples": [1740.2, 1742.3, 1745.2, 1741.6, 1752.5], "head_tokens": 399872}
+{"kind": "solo_cp", "role": 0, "hkv": 4, "q": 7, "tokens": 99968, "us": 1747.7, "samples": [1748.7, 1747.7, 1745.5, 1752.7, 1734.1]}
+{"kind": "parallel_cp", "role": 0, "hkv": 4, "q": 7, "tokens": 99968, "us": 1744.2, "samples": [1799.6, 1738.8, 1744.2, 1734.2, 1754.0], "t0": 1792034710.4283638, "t1": 1792034710.5034318}
+{"kind": "end", "role": 0}

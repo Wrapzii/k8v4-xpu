@@ -1,0 +1,7 @@
+{"kind": "hello", "role": 1, "lib": "/opt/lib/libxe2_kv_final.so", "xpu_count": 1, "name": "Intel(R) Arc(TM) Pro B60 Graphics", "affinity": "1"}
+{"kind": "filled", "role": 1, "hkv": 4, "tokens": 99968, "pages": 1562}
+{"kind": "cp_rank", "hkv": 4, "hq": 24, "q": 1, "tokens": 99968, "us": 847.1, "samples": [855.9, 854.8, 832.9, 847.1, 824.7], "head_tokens": 399872}
+{"kind": "cp_rank", "hkv": 4, "hq": 24, "q": 7, "tokens": 99968, "us": 1736.0, "samples": [1746.4, 1746.4, 1733.0, 1736.0, 1727.4], "head_tokens": 399872}
+{"kind": "solo_cp", "role": 1, "hkv": 4, "q": 7, "tokens": 99968, "us": 1742.7, "samples": [1744.3, 1744.7, 1742.7, 1729.1, 1733.2]}
+{"kind": "parallel_cp", "role": 1, "hkv": 4, "q": 7, "tokens": 99968, "us": 1747.4, "samples": [1805.1, 1756.9, 1747.4, 1743.8, 1729.0], "t0": 1792034710.4300802, "t1": 1792034710.505562}
+{"kind": "end", "role": 1}

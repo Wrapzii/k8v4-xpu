@@ -1,0 +1,8 @@
+{
+  "production_changed": false,
+  "library": "/mnt/hdd-500gb/model-validation/launch80-20261013/perf-continue-20261014/libxe2_kv_parbatch.so",
+  "mode": "eager-no-graph",
+  "returncode": 0,
+  "restoration_started": true,
+  "restored_healthy": true
+}

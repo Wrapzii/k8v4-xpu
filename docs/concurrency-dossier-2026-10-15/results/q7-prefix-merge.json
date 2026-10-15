@@ -1,0 +1,162 @@
+{
+  "scope": "real q7 captures, two positions of the SAME continuation emulating distinct queries/private tails; not two independent user requests",
+  "precision": "float64 decomposition control; source Q/K scales and affine V still retain original quantization",
+  "initial_float32_probe": {
+    "context": 131072,
+    "layer": 15,
+    "position": 0,
+    "merge_L2": 3.7910292576270876e-06,
+    "native_calibration": 0.0003069122030865401,
+    "stopped_at_strict_rounding_screen_3e-6": true,
+    "note": "not a pruning error; retained as evidence that real FP32 merge is not bit-identical"
+  },
+  "algorithm": "combined-query shared-prefix state plus per-query causal private states; all KV retained, no approximation/pruning",
+  "GPU_shared_load_kernel": false,
+  "GPU_speedup_claimed": false,
+  "rows": [
+    {
+      "context": 131072,
+      "layer": 3,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 5.335564566688352e-15,
+      "full_reference_vs_native_L2": 0.0003968144118579906,
+      "prefix_base_sha256": "7edd4efb57ac820359f5d8ba0fd1a7261d14573aeff4f4768da0674a82b998ed"
+    },
+    {
+      "context": 131072,
+      "layer": 3,
+      "saved_position": 1,
+      "tail_tokens": 17,
+      "merge_vs_dense_L2": 4.172549712096326e-15,
+      "full_reference_vs_native_L2": 0.0002868360709808975,
+      "prefix_base_sha256": "7edd4efb57ac820359f5d8ba0fd1a7261d14573aeff4f4768da0674a82b998ed"
+    },
+    {
+      "context": 131072,
+      "layer": 15,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 9.495786791108378e-15,
+      "full_reference_vs_native_L2": 0.0003070932387798244,
+      "prefix_base_sha256": "1e6b7f07bea188f214ef443b58f7837d678dfde3bac063c4da845bb33e083ecd"
+    },
+    {
+      "context": 131072,
+      "layer": 15,
+      "saved_position": 1,
+      "tail_tokens": 17,
+      "merge_vs_dense_L2": 6.2364497490429175e-15,
+      "full_reference_vs_native_L2": 0.0003154700439739265,
+      "prefix_base_sha256": "1e6b7f07bea188f214ef443b58f7837d678dfde3bac063c4da845bb33e083ecd"
+    },
+    {
+      "context": 131072,
+      "layer": 31,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 8.539312487278504e-15,
+      "full_reference_vs_native_L2": 0.000326876174378629,
+      "prefix_base_sha256": "d2c7f56c64e969228b99f7ddcb005babf4292e53fb420bd8f7265b1ec365e3ed"
+    },
+    {
+      "context": 131072,
+      "layer": 31,
+      "saved_position": 1,
+      "tail_tokens": 17,
+      "merge_vs_dense_L2": 1.0268525574487775e-14,
+      "full_reference_vs_native_L2": 0.0003006244863007368,
+      "prefix_base_sha256": "d2c7f56c64e969228b99f7ddcb005babf4292e53fb420bd8f7265b1ec365e3ed"
+    },
+    {
+      "context": 131072,
+      "layer": 63,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 6.934851434117017e-15,
+      "full_reference_vs_native_L2": 0.0002469925251854152,
+      "prefix_base_sha256": "14451344d8e35366adac8009fa7f278cdceb1430632f2cc7254eac62791914c9"
+    },
+    {
+      "context": 131072,
+      "layer": 63,
+      "saved_position": 1,
+      "tail_tokens": 17,
+      "merge_vs_dense_L2": 8.98926958560246e-15,
+      "full_reference_vs_native_L2": 0.00023692547196336642,
+      "prefix_base_sha256": "14451344d8e35366adac8009fa7f278cdceb1430632f2cc7254eac62791914c9"
+    },
+    {
+      "context": 200000,
+      "layer": 3,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 1.0382278968092092e-14,
+      "full_reference_vs_native_L2": 0.00027819731595466103,
+      "prefix_base_sha256": "5e7fa6f7b43484e88f214d36b4fb02752af76bfe2690fb8a6dafe993edb3f72a"
+    },
+    {
+      "context": 200000,
+      "layer": 3,
+      "saved_position": 1,
+      "tail_tokens": 18,
+      "merge_vs_dense_L2": 1.0831591367672627e-14,
+      "full_reference_vs_native_L2": 0.0002623480648792336,
+      "prefix_base_sha256": "5e7fa6f7b43484e88f214d36b4fb02752af76bfe2690fb8a6dafe993edb3f72a"
+    },
+    {
+      "context": 200000,
+      "layer": 15,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 6.664878753407009e-15,
+      "full_reference_vs_native_L2": 0.00031554737333777596,
+      "prefix_base_sha256": "abc860e13594e0775e6c429a57c58440949bef8fc4d5c529967312d8ab81e2f9"
+    },
+    {
+      "context": 200000,
+      "layer": 15,
+      "saved_position": 1,
+      "tail_tokens": 18,
+      "merge_vs_dense_L2": 8.12660386834469e-15,
+      "full_reference_vs_native_L2": 0.000321971487816474,
+      "prefix_base_sha256": "abc860e13594e0775e6c429a57c58440949bef8fc4d5c529967312d8ab81e2f9"
+    },
+    {
+      "context": 200000,
+      "layer": 31,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 1.0737549703305956e-14,
+      "full_reference_vs_native_L2": 0.0002792621928325888,
+      "prefix_base_sha256": "40b7da400877edc823c8b05277985f84bc5d85d3b9d5675176c0acde9585dbe7"
+    },
+    {
+      "context": 200000,
+      "layer": 31,
+      "saved_position": 1,
+      "tail_tokens": 18,
+      "merge_vs_dense_L2": 1.3818697733737848e-14,
+      "full_reference_vs_native_L2": 0.0006528309417008938,
+      "prefix_base_sha256": "40b7da400877edc823c8b05277985f84bc5d85d3b9d5675176c0acde9585dbe7"
+    },
+    {
+      "context": 200000,
+      "layer": 63,
+      "saved_position": 0,
+      "tail_tokens": 7,
+      "merge_vs_dense_L2": 7.728739026480016e-15,
+      "full_reference_vs_native_L2": 0.0002656723522692486,
+      "prefix_base_sha256": "a71b184c655ba99bdb68aff456a59d420ce56cb038eec20c5b30fb90eb9d7ac0"
+    },
+    {
+      "context": 200000,
+      "layer": 63,
+      "saved_position": 1,
+      "tail_tokens": 18,
+      "merge_vs_dense_L2": 1.086104598486698e-14,
+      "full_reference_vs_native_L2": 0.0002310900899780421,
+      "prefix_base_sha256": "a71b184c655ba99bdb68aff456a59d420ce56cb038eec20c5b30fb90eb9d7ac0"
+    }
+  ]
+}

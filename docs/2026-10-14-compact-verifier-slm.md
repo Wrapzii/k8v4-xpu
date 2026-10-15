@@ -28,4 +28,6 @@ The compact library is left serving because its native operation cost is lower, 
 
 Receipts, compiler hashes, profiler source pin, raw counters, native parity/timing rows and the guarded switch are under `audit/model-validation/launch80-20261013/perf-resources-20261014` in the working workspace and the corresponding server audit directory. The previous q1/FP16-partial build is retained as the rollback baseline.
 
+Evening of the same day did not replace this library. Live 8100 is still compact `ffe0e5a1…`. 200K C1/C2/C4 prefix-share serving numbers and rejected concurrency candidates: `docs/2026-10-14-evening-concurrency.md` and `audit/model-validation/launch80-20261013/HANDOFF_CONCURRENCY_2026-10-14_CURRENT.md`.
+
 Intel's [unitrace documentation](https://github.com/intel/pti-gpu/blob/pti-1.0.0/tools/unitrace/README.md) describes the resource and hardware-counter diagnostics used here. Hardware-counter collection used a separate diagnostic container with profiling capabilities; the host's observation policy was not changed. The profiler's static SLM property excludes this kernel's dynamic local accessor, so its zero static-SLM field must not be read as zero shared-memory use.
