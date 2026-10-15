@@ -11,6 +11,32 @@ import math
 import torch
 
 
+def group_page_scores(scores: torch.Tensor, gqa: int = 6, mode: str = 'max',
+                      weights: torch.Tensor | None = None,
+                      normalize: bool = False) -> torch.Tensor:
+    """One ranking per query/KV group, [Q,KVH,P]; not a union of six lists."""
+    if scores.ndim != 3 or gqa < 1 or scores.shape[1] % gqa:
+        raise ValueError('scores [Q,QH,P] and GQA ratio')
+    if normalize:
+        # Avoid letting a head's additive logit offset dominate shared ranking.
+        # This is an estimated page distribution, not certified true page mass.
+        scores = scores.softmax(-1)
+    grouped = scores.reshape(scores.shape[0], -1, gqa, scores.shape[-1])
+    if mode == 'max':
+        return grouped.amax(2)
+    if mode == 'top2':
+        return grouped.topk(min(2, gqa), dim=2).values.mean(2)
+    if mode == 'weighted':
+        if weights is None or weights.shape != scores.shape[:2]:
+            raise ValueError('weights [Q,QH] required')
+        if not bool(torch.isfinite(weights).all()) or bool((weights < 0).any()):
+            raise ValueError('finite nonnegative weights')
+        w = weights.reshape(scores.shape[0], -1, gqa, 1)
+        w = w / w.sum(2, keepdim=True).clamp_min(1e-12)
+        return (grouped*w).sum(2)
+    raise ValueError('unknown group ranking')
+
+
 def dimension_page_scores(query: torch.Tensor, keys: torch.Tensor, scales: torch.Tensor,
                           length: int, dimensions: int = 32) -> torch.Tensor:
     """SparQ-inspired GQA dimension scan, returning [Q,QH,P] page estimates.
