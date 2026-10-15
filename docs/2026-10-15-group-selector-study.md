@@ -39,4 +39,43 @@ Keep this distinct from pruning. [Hydragen](https://arxiv.org/abs/2402.05099) an
 
 Our older fuse-KV prototype was about 1.16x on its 90%-shared native experiment, with max absolute differences around 0.02. It is not a validated exact deployment and is not mounted. Next evidence should verify actual physical prefix sharing, unchanged K/V bytes, different private tails/causal endpoints, then output/logit fidelity and matched throughput. Physical page IDs from different times may be recycled: equal IDs alone are not proof of unchanged shared contents. Prefix caching remains enabled; no native-prefix speedup is claimed here.
 
-The long-context study is active. Its final per-context findings and restored-server receipt must be added before claiming completion or a deployable sparse path.
+## Completed long-context screen
+
+The finite capture and component tests have ended. No sparse path is deployed. Production was restored to the same original container/backend and compact library `ffe0e5a1…`, FP16, TP2, MTP6, max sequences four. At 2026-10-15 00:39 UTC its health check returned 200 and a real smoke request returned `ready`. Receipt: `audit/model-validation/launch80-20261013/perf-sparse-repair-20261015/final-server.json` in the parent workspace.
+
+The initial 192-snapshot capture exposed an instrumentation race: the next HTTP request's global tag could label the previous request's late upper-layer forward. Six TOOLS bases at 32K/128K were byte-identical to the preceding CODE bases; six last-position snapshots belonged to that preceding request and were excluded. A request-bound capture hook was implemented and twelve fresh controls were collected from the exact frozen TOOLS prompt tokens, at most sixteen output tokens per context, without retries. All twelve full native replays were **bit-identical** to their captured outputs.
+
+Replacing the six wrong bases with fresh captures did **not** reconstruct the original queries accurately enough. The original and new prefix states differ, and 42 old snapshots still failed the CPU/native calibration limit. Those snapshots are excluded, not counted as failed selectors. The mismatch's precise numerical origin is unresolved; do not describe the new bases as a successful recovery of old evidence. All raw captures and the exclusion/replacement manifest are preserved on the server. Redundant local copies of the repair captures were removed after local disk space interrupted one analysis; the partial output remains preserved and the 200K TOOLS analysis completed in a separate file.
+
+Final usable original evidence: **144 q7 snapshots / 1008 correlated query positions** across rank-zero layers 3/15/31/63. At 32K and 128K each context has 32 CODE snapshots and eight TOOLS layer-3 snapshots; 200K has all 64 CODE/TOOLS snapshots. Maximum valid full-output CPU/native relative L2 discrepancy is 0.000653. Do not claim balanced upper-layer TOOLS coverage at 32K/128K, independent tasks, semantic fidelity, or complete-model coverage.
+
+All Quest, SparQ-inspired 32/64-dimension, seven aggregation modes and 5/10/20/30/50% budgets were screened. For illustration, the matched **20% SparQ64** rows are:
+
+| Context | Ranking | Actual global physical pages, median | Worst retained mass, group path | Max group output relative L2 | Max global-union output relative L2 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 32K | independent lists, then union | 77.1% | 72.1% | 2.73% | 1.58% |
+| 32K | probability-normalized weighted group | 27.8% | 32.6% | 11.55% | 8.70% |
+| 128K | independent lists, then union | 79.8% | 77.2% | 3.37% | 1.69% |
+| 128K | probability-normalized weighted group | 30.2% | 36.4% | 14.90% | 10.94% |
+| 200K | independent lists, then union | 77.6% | 78.2% | 2.83% | 1.51% |
+| 200K | probability-normalized weighted group | 29.0% | 30.2% | 15.57% | 11.21% |
+
+The group path reads about 20% per KV group; its global union is larger. These output columns are distinct algorithms. At 200K/20%, the six-head pairwise page overlap median was 0.479. Adjacent MTP-position overlap was 0.687 for independent-list unions and 0.635 for normalized weighted groups; overlap between sampled positions was 0.809 and 0.534, respectively. Selection has temporal reuse potential, but sets are not constant. Other modes and all budgets remain in `perf-sparse-long-20261014/validated-selector-summary.json` and the source JSONL rows.
+
+None of the context-wide selector configurations passed the exploratory minimum-mass 0.999 / aggregate-output-L2 0.01 screen on every usable sample. This is a conservative screen of **ungated attention**, not measured task loss or proof that useful sparse attention is impossible. The implementation is a page-max-pooled SparQ-inspired selector, not a full reproduction of the published token algorithm, its layouts, or interpolation.
+
+## GPU component measurements
+
+The fresh request-bound controls also supplied one layer-31 q7 snapshot per context for 315 GPU timing cases (three selectors, seven modes, five budgets). Eight rotating cache addresses reduce small-subset cache reuse bias. Full native replay was exact on all twelve controls. Timings below are eager components for the **existing global-union native ABI**, without a live serving model, not graph-replayed endpoint throughput or a per-KV sparse kernel.
+
+For SparQ64 normalized weighted groups at 20%:
+
+| Context | Full attention | Selected attention | Selector scores | Ranking | Host compaction | Component sum |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 32K | 0.308 ms | 0.116 ms | 1.512 ms | 1.340 ms | 0.099 ms | 3.066 ms |
+| 128K | 1.086 ms | 0.319 ms | 3.209 ms | 1.382 ms | 0.125 ms | 5.035 ms |
+| 200K | 1.600 ms | 0.466 ms | 4.899 ms | 1.450 ms | 0.221 ms | 7.035 ms |
+
+The 200K attention-only improvement is 3.44x on this one sample, but output relative L2 is 3.07%, and the selector erases the speed gain. The fastest component sum of any tested 200K case was still 1.885 ms versus 1.600 ms full attention, with 8.59% output L2 error. Component sums additionally exclude table allocation, scheduler/model work and live index maintenance. Metadata build time is recorded separately. These eager costs do not predict the floor of a future fused selector.
+
+The bottleneck remains repeated long-history attention: previous matched native 200K q7 C1/C2/C4 costs were 1.620/3.193/6.346 ms. This identifies the growth in attention cost, not a complete endpoint time breakdown. The next serving candidate needs accurate cheap selection or shared-prefix reuse, followed by logits/task validation and matched C1/C2/C4 endpoint testing. No further generation or benchmark loop is running. Twelve query-index unit tests pass. Detailed GPU evidence is `perf-sparse-repair-20261015/native-gpu-probe.jsonl` and its summary in the parent workspace.
