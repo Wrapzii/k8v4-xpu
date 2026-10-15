@@ -1,6 +1,6 @@
 import unittest
 import torch
-from k8v4_v030.query_page_index import QueryPageIndex, dimension_page_scores
+from k8v4_v030.query_page_index import QueryPageIndex, dimension_page_scores, group_page_scores
 
 
 class QueryPageIndexTest(unittest.TestCase):
@@ -85,6 +85,36 @@ class QueryPageIndexTest(unittest.TestCase):
         for count in (0, 17):
             with self.assertRaises(ValueError):
                 dimension_page_scores(self.q, self.k, self.s, 515, count)
+
+    def test_group_rankings_and_weights(self):
+        scores = torch.arange(2*12*9).reshape(2, 12, 9).float()
+        grouped = scores.reshape(2, 2, 6, 9)
+        torch.testing.assert_close(group_page_scores(scores), grouped.max(2).values)
+        torch.testing.assert_close(group_page_scores(scores, mode='top2'), grouped[:, :, -2:].mean(2))
+        weights = torch.zeros(2, 12)
+        weights[:, ::6] = 1
+        torch.testing.assert_close(group_page_scores(scores, mode='weighted', weights=weights), grouped[:, :, 0])
+        with self.assertRaises(ValueError):
+            group_page_scores(scores, mode='unknown')
+        with self.assertRaises(ValueError):
+            group_page_scores(scores, mode='weighted')
+
+    def test_one_group_list_is_not_six_head_union(self):
+        scores = torch.eye(6).unsqueeze(0)
+        individual = scores.topk(1, -1).indices.unique()
+        grouped = group_page_scores(scores).topk(1, -1).indices.unique()
+        self.assertEqual(individual.numel(), 6)
+        self.assertEqual(grouped.numel(), 1)
+
+    def test_normalized_group_ranking_ignores_head_logit_offsets(self):
+        generator = torch.Generator().manual_seed(51)
+        scores = torch.randn(7,12,32,generator=generator)
+        offsets = torch.arange(12).float().reshape(1,12,1)*10
+        for mode in ('max','top2','weighted'):
+            weights = torch.ones(7,12)
+            a = group_page_scores(scores,mode=mode,weights=weights,normalize=True)
+            b = group_page_scores(scores+offsets,mode=mode,weights=weights,normalize=True)
+            torch.testing.assert_close(a,b,atol=1e-6,rtol=1e-5)
 
 
 if __name__ == '__main__':
