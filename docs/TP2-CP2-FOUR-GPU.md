@@ -10,11 +10,13 @@ Do not substitute an attention-only result for a model/task fidelity result.
 The existing two-GPU production server was not replaced by this work.
 
 [Recorded component checks](../results/tp2-cp2-2026-10-16/README.md): native
-partition output passed 32 cases with worst relative L2 0.03396%; the real
-two-device fused merge passed eager and changed-input graph replay. The
-capped C4 merge smoke still took about 1.1 ms with graphs. Four-GPU combined
-attention, full-model fidelity, serving speed and maximum concurrency remain
-unmeasured. The guide below is a qualification procedure, not a speed claim.
+partition output passed 32 cases with worst relative L2 0.03396%. The real
+two-device combined attention/merge passed 24 checks at 128K/200K, C1/C2/C4,
+q1/q7, eager and changed-input graph replay. After fixing serial LSE export,
+200K/C4 graph attention improved from **6.18 to 3.43 ms q1** and **12.17 to
+6.74 ms q7**, including communication: about **1.80×**. This is **one CP pair**,
+not four-rank model serving. Four-GPU combined attention, full-model fidelity,
+serving speed and maximum concurrency remain unmeasured. Follow the gates below.
 
 ## What uses each card
 
@@ -44,6 +46,37 @@ This preserves two local KV heads per GPU while roughly halving the historical
 KV walked by each full-attention operation. It does not halve model weights,
 GDN work, TP collectives or all other per-step costs. Additional communication
 may erase the saved KV time. Measure it.
+
+## Concurrency and the earlier two-card result
+
+CP2 does not turn `--max-seqs 8` into four requests. All eight requests span
+all four GPUs; every request's full-attention history is split between CP
+lanes. Useful maximum concurrency is a VRAM/state/performance measurement,
+not the configured sequence limit divided by CP size.
+
+At a 200K history, the approximate KV head-token volume **per GPU** is:
+
+| Layout | Global requests | KV heads/GPU | History/request/GPU | Total head-tokens/GPU |
+| --- | ---: | ---: | ---: | ---: |
+| Two GPUs, TP2 | 4 | 2 | 200K | 1,600K |
+| Four GPUs, TP2 × CP2 | 4 | 2 | 100K | 800K |
+| Four GPUs, TP2 × CP2 | 8 | 2 | 100K | 1,600K |
+| Four GPUs, two TP2 replicas | 8 total, 4 per replica | 2 | 200K | 1,600K |
+
+Thus C8 benefits from CP relative to putting C8 on one TP2 pair, but consumes
+the attention savings relative to C4 on that pair. This arithmetic excludes
+page rounding, workspace, communication, GDN and feed-forward work. It is not
+a tokens/second or capacity prediction. Replicated weights/state can also
+reduce usable capacity relative to another four-card layout; there is no
+universal factor-of-two concurrency limit.
+
+The earlier two-card no-win experiment **replaced TP2 with CP2**. Its
+[raw receipt](concurrency-dossier-2026-10-15/results/cp-vs-tp-gpu0.jsonl)
+recorded 2 heads × 200K at 1.659 ms q7 versus 4 heads ×
+about 100K at 1.742 ms: approximately the same KV volume per GPU, about 5%
+slower before adding a full serving claim. It did not test four-card
+TP2 × CP2. Those old absolute times use a different harness/library than the
+new combined measurements; compare each candidate to its own matched control.
 
 ## Why this needs an adapter
 
@@ -231,8 +264,10 @@ slows every agent badly, it is not automatically the best production setting.
 2. At 128K/200K, determine whether the new cost is the native LSE extraction,
    collective/merge, or replicated prefill. Do not optimize the half walk in
    isolation or reuse the previous host-merge timing as a device result.
-3. If the primitive wins and model fidelity passes, integrate LSE export into
-   S2, profile the fused device merge, add a correct faster prefill, and restore local
+3. The initial serial LSE export lost; a parallel M/L reduction now passes the
+   two-card long-context screen and shows the attention gain recorded above.
+   After the four-card and model gates pass, integrate LSE export into S2,
+   profile the fused device merge, add a correct faster prefill, and restore local
    shared-prefix q1 cascade support. Revalidate after each change.
 4. Qualify image inputs and async scheduling separately; neither is currently
    advertised by this CP launch profile.

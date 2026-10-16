@@ -1,0 +1,8 @@
+test_fused_packet_merge_matches_reference (k8v4_v030.tests.test_cp_kernel_xpu.NativeCpPartitionTest.test_fused_packet_merge_matches_reference) ... ok
+test_native_lse_and_striped_causal_walk_match_unsplit (k8v4_v030.tests.test_cp_kernel_xpu.NativeCpPartitionTest.test_native_lse_and_striped_causal_walk_match_unsplit) ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 28.315s
+
+OK
+Native CP virtual-lane cases=32 max_relative_l2=0.00033956626
