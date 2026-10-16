@@ -1,0 +1,35 @@
+{
+ "env": {
+  "CCL_SYCL_ALLTOALL_TMP_BUF": "1",
+  "CCL_SYCL_REDUCE_SCATTER_SIMPLE_THRESHOLD": "4294967296",
+  "CCL_SYCL_ALLGATHERV_SIMPLE_THRESHOLD": "4294967296",
+  "CCL_SYCL_ALLREDUCE_SIMPLE_READ": "1",
+  "CCL_SYCL_ALLREDUCE_SIMPLE_THRESHOLD": "4294967296",
+  "CCL_SYCL_ALLREDUCE_LL": "twoshots",
+  "CCL_SYCL_COPY_ENGINE": "1"
+ },
+ "cases": {
+  "T4": {
+   "bytes": 40960,
+   "eager_ar_ms": 6.143183059757575,
+   "eager_gemm_ms": 2.11818907991983,
+   "graph_ar_ms_per_op": 0.019857428742398042,
+   "graph_gemm_ms_per_op": 0.4074339237558888,
+   "graph_serial_ms_per_op": 0.4247243393547251,
+   "graph_overlap_ar_first_ms_per_op": "failed: RuntimeError: Event dependency from handler::depends_on does not correspond to a node within the graph",
+   "graph_overlap_gemm_first_ms_per_op": "failed: RuntimeError: Event dependency from handler::depends_on does not correspond to a node within the graph",
+   "graph_dependent_ms_per_op": 0.425276260029932
+  },
+  "T28": {
+   "bytes": 286720,
+   "eager_ar_ms": 0.1800953596830368,
+   "eager_gemm_ms": 0.6714478600770235,
+   "graph_ar_ms_per_op": 0.03931850937078707,
+   "graph_gemm_ms_per_op": 0.4217566125225858,
+   "graph_serial_ms_per_op": 0.4758533499989426,
+   "graph_overlap_ar_first_ms_per_op": 0.4860164700221503,
+   "graph_overlap_gemm_first_ms_per_op": 0.48579315378447063,
+   "graph_dependent_ms_per_op": 0.4775407162378542
+  }
+ }
+}
