@@ -18,6 +18,7 @@ install_if_requested()
 
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030 import cascade as _cascade
+from k8v4_v030 import context_parallel as _cp
 
 
 def _cascade_prealloc(device, kv_cache_spec) -> None:
@@ -129,7 +130,9 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             "K8/V4 local heads: %d KV / %d Q", self.layout.hkv, self.layout.hq
         )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
-        self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
+        self._init_reorder_batch_threshold(
+            1, supports_spec_as_decode=True, supports_dcp_with_varlen=_cp.enabled()
+        )
 
     def set_kernel_block_size(self, kernel_block_size: int) -> None:
         super().set_kernel_block_size(kernel_block_size)
@@ -152,8 +155,12 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         capture = []
         if comp is not None:
             capture = list(getattr(comp, "cudagraph_capture_sizes", None) or [])
+        max_local_len = int(model.max_model_len)
+        if _cp.enabled():
+            _cp.validate_vllm_config(self.vllm_config)
+            max_local_len = _cp.local_length(max_local_len, 0)
         nprog, store_tokens, out_tokens = scratch_capacity(
-            int(model.max_model_len),
+            max_local_len,
             manager,
             self.kernel_block_size,
             int(sched.max_num_batched_tokens),
@@ -199,6 +206,12 @@ def attention_pages(manager_block: int, kernel_block: int | None) -> int:
 
 
 class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
+    # CP is an explicit alternate runtime. Normal TP1/TP2 does not advertise
+    # support for upstream MLA PCP or TP-head-sharing DCP.
+    supports_pcp = _cp.enabled()
+    supports_dcp = _cp.enabled()
+    supports_mtp_with_cp_non_trivial_interleave_size = _cp.enabled()
+    can_return_lse_for_decode = _cp.enabled()
     def __init__(
         self,
         num_heads: int,
@@ -224,6 +237,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         self.scale = float(scale)
         self.kv_cache_dtype = kv_cache_dtype
         self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
+        self.context_lane = _cp.ContextLane.from_vllm()
 
     def do_kv_cache_update(
         self,
@@ -347,6 +361,23 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         partials, m_state, l_state, merged = scratch.workspace(nprog)
         views = bind_regions(cache, self.layout)
 
+        if self.context_lane is not None:
+            lane = self.context_lane
+            visible = lane.visible(seq_lens, q_len)
+            lse = torch.empty((width, self.num_heads), dtype=torch.float32, device=query.device)
+
+            def _cp_decode_attn():
+                ops().int8k_int4v_attn_batch_lse(
+                    q_buf, scratch.q8, scratch.q_scale, views["k"], views["k_scale"], views["v"],
+                    views["v_scale"], views["v_zero"], block_table, seq_lens, visible,
+                    partials, m_state, l_state, merged, out_buf, lse, q_len, meta.pages_per_block,
+                )
+                return lane.merge(out_buf, lse)
+
+            result = attention_span("decode", _cp_decode_attn)
+            output.narrow(0, tok0, width).copy_(result)
+            return
+
         casc = _cascade.get(query.device, self.layout.hkv, int(count))
 
         def _decode_attn() -> None:
@@ -413,6 +444,16 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                     )
                 row = meta.block_table[req]
                 q_fp = query.narrow(0, tok0, width).to(torch.float16)
+                if self.context_lane is not None:
+                    def _cp_prefill_attn():
+                        local_out, lse = _cp.paged_prefill(
+                            q_fp, views, row, seq_len, meta.pages_per_block, self.scale,
+                            self.context_lane,
+                        )
+                        return self.context_lane.merge(local_out, lse)
+                    attn = attention_span("prefill", _cp_prefill_attn)
+                    output.narrow(0, tok0, width).copy_(attn)
+                    continue
                 prefill = head_major_prefill if prefill_mode() == "onednn" else eager_prefill
 
                 def _prefill_attn():

@@ -1,0 +1,29 @@
+{
+  "scope": "two-rank CP merge only",
+  "native_attention_validated": false,
+  "full_model_validated": false,
+  "records": [
+    {
+      "q_len": 1,
+      "concurrency": 4,
+      "graphs": true,
+      "error": {
+        "relative_l2": 1.9045282328988833e-07,
+        "max_abs": 2.384185791015625e-07,
+        "finite": true
+      },
+      "collective_and_merge_ms": 1.150705007603392
+    },
+    {
+      "q_len": 7,
+      "concurrency": 4,
+      "graphs": true,
+      "error": {
+        "relative_l2": 2.1427575802590582e-07,
+        "max_abs": 1.9073486328125e-06,
+        "finite": true
+      },
+      "collective_and_merge_ms": 1.130869466578588
+    }
+  ]
+}

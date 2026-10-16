@@ -17,6 +17,8 @@ case "$TP" in
     DEVICES=${K8V4_DEVICES:-0}
     PREFIX_CACHING=${K8V4_PREFIX_CACHING:-0}
     CACHE_NAMESPACE=w4a8-tp1-v1
+    DEFAULT_DTYPE=bfloat16
+    DEFAULT_NATIVE_OPT=0
     ;;
   2)
     NAME=${NAME:-vllm-k8v4-tp2}
@@ -27,6 +29,8 @@ case "$TP" in
     DEVICES=${K8V4_DEVICES:-0,1}
     PREFIX_CACHING=${K8V4_PREFIX_CACHING:-1}
     CACHE_NAMESPACE=${K8V4_PREFILL_GEMM:-w4a8}-wired-v1
+    DEFAULT_DTYPE=float16
+    DEFAULT_NATIVE_OPT=1
     ;;
   *) echo "K8V4_TP must be 1 or 2" >&2; exit 2 ;;
 esac
@@ -46,6 +50,8 @@ SERVED_NAME=${SERVED_NAME:-Qwen3.8-27B-GPTQ-Int4-baked-v2-embed-int8}
 MODEL_DIR=${MODEL_DIR:-}
 TEMPLATE=${CHAT_TEMPLATE:-$ROOT/templates/chat_template.jinja}
 MAX_MODEL_LEN=${K8V4_MAX_MODEL_LEN:-262144}
+DTYPE=${K8V4_DTYPE:-$DEFAULT_DTYPE}
+[[ "$DTYPE" = float16 || "$DTYPE" = bfloat16 ]] || { echo "K8V4_DTYPE must be float16 or bfloat16" >&2; exit 2; }
 VISION=${K8V4_VISION:-1}
 MAX_IMAGES=${K8V4_MAX_IMAGES:-4}
 MAX_IMAGE_PIXELS=${K8V4_MAX_IMAGE_PIXELS:-1048576}
@@ -140,10 +146,6 @@ fi
 if [ -n "${XE2_KV_S2_PARALLEL:-}" ]; then
   extra+=(-e "XE2_KV_S2_PARALLEL=${XE2_KV_S2_PARALLEL}")
 fi
-# Optional fp16 S1 partial outputs (about -18% on the q7 verify attention op at 128K). Off unless set.
-if [ -n "${XE2_KV_PARTIAL_FP16:-}" ]; then
-  extra+=(-e "XE2_KV_PARTIAL_FP16=${XE2_KV_PARTIAL_FP16}")
-fi
 # Sub-group-parallel S1 for the 1-token draft is on by default; set 0 to disable.
 if [ -n "${XE2_KV_SMALL_S1:-}" ]; then
   extra+=(-e "XE2_KV_SMALL_S1=${XE2_KV_SMALL_S1}")
@@ -171,6 +173,9 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -e XE2_KV_S2_NSG_DRAFT="${XE2_KV_S2_NSG_DRAFT:-32}" \
   -e XE2_KV_S2_NSG_VERIFY="${XE2_KV_S2_NSG_VERIFY:-8}" \
   -e XE2_KV_S2_TWO_PASS="${XE2_KV_S2_TWO_PASS:-0}" \
+  -e XE2_KV_COMPACT_SLM="${XE2_KV_COMPACT_SLM:-$DEFAULT_NATIVE_OPT}" \
+  -e XE2_KV_PARTIAL_FP16="${XE2_KV_PARTIAL_FP16:-$DEFAULT_NATIVE_OPT}" \
+  -e XE2_KV_CASCADE="${XE2_KV_CASCADE:-$DEFAULT_NATIVE_OPT}" \
   -e B70_MTP_BF16_DRAFT=1 \
   -e B70_WORKER_AFFINITY=1 \
   -e HF_HUB_OFFLINE=1 \
@@ -186,7 +191,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --port=8000 \
   --served-model-name="$SERVED_NAME" \
   --gpu-memory-utilization="$GPU_UTIL" \
-  --dtype=bfloat16 \
+  --dtype="$DTYPE" \
   --max-model-len="$MAX_MODEL_LEN" \
   --kv-cache-dtype=int8_k_int4_v \
   --tensor-parallel-size="$TP" \
@@ -198,7 +203,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   "${prefix[@]}" \
   "${multimodal[@]}" \
   --trust-remote-code \
-  --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
+  --speculative-config='{"method":"mtp","num_speculative_tokens":6,"use_local_argmax_reduction":true}' \
   --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}")
 
 if [ "$DRY_RUN" = 1 ]; then

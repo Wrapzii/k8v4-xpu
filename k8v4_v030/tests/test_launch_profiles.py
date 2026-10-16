@@ -34,6 +34,7 @@ class LaunchProfileTest(unittest.TestCase):
         result, args = self.command()
         self.assertEqual(result.returncode, 0, result.stderr)
         for arg in ('--tensor-parallel-size=2', '--max-num-seqs=4', '--max-num-batched-tokens=4224',
+                    '--dtype=float16', 'XE2_KV_COMPACT_SLM=1', 'XE2_KV_PARTIAL_FP16=1', 'XE2_KV_CASCADE=1',
                     '--gpu-memory-utilization=0.95', '--enable-prefix-caching', 'ZE_AFFINITY_MASK=0,1',
                     'CCL_SYCL_ALLREDUCE_LL=twoshots', '127.0.0.1:8200:8000', 'vllm-openai-xpu:v0.30.0-k8v4-unified'):
             self.assertIn(arg, args)
@@ -45,6 +46,7 @@ class LaunchProfileTest(unittest.TestCase):
         result, args = self.command(K8V4_TP='1', K8V4_DEVICES='1')
         self.assertEqual(result.returncode, 0, result.stderr)
         for arg in ('--tensor-parallel-size=1', '--max-num-seqs=1', '--gpu-memory-utilization=0.92',
+                    '--dtype=bfloat16', 'XE2_KV_CASCADE=0',
                     '--no-enable-prefix-caching', '--mamba-cache-mode=none', 'ZE_AFFINITY_MASK=1',
                     'NEOReadDebugKeys=1', 'ForceZeDeviceCanAccessPerReturnValue=0',
                     '127.0.0.1:8201:8000', 'vllm-openai-xpu:v0.30.0-k8v4-unified'):

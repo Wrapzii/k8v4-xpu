@@ -2407,6 +2407,78 @@ static void int8k_int4v_attn_batch(const at::Tensor &q_fp16, at::Tensor q8, at::
   });
 }
 
+// CP needs the partition's normalization, not an average of normalized outputs.
+// Extract natural-log Z from the existing per-page M/L before the batch's
+// persistent workspace is reused. No KV reread and no host synchronization.
+template <int HKV> class Xe2KvPartitionLse;
+template <int HKV>
+static void launch_partition_lse(sycl::queue &q, const float *M, const float *L,
+                                 float *dst, const std::int32_t *visible,
+                                 int splits, int tq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  q.submit([&](sycl::handler &h) {
+    h.parallel_for<Xe2KvPartitionLse<HKV>>(
+        sycl::range<1>(static_cast<size_t>(tq * HQ)), [=](sycl::id<1> index) {
+          const int i = static_cast<int>(index[0]);
+          const int tok = i / HQ, head = (i % HQ) / GQA;
+          const int row = tok * GQA + i % GQA;
+          const int live = sycl::min(splits, (visible[0] + BM - 1) / BM);
+          float maximum = -INFINITY, total = 0.f;
+          for (int s = 0; s < live; ++s) {
+            const size_t at = (static_cast<size_t>(head) * splits + s) * BM + row;
+            const float m = M[at], l = L[at];
+            if (l > 0.f && m != -INFINITY) {
+              const float next = sycl::max(maximum, m);
+              total = total * ((maximum == -INFINITY) ? 0.f : sycl::exp(maximum - next))
+                      + l * sycl::exp(m - next);
+              maximum = next;
+            }
+          }
+          dst[i] = total > 0.f ? maximum + sycl::log(total) : -INFINITY;
+        });
+  });
+}
+
+static void int8k_int4v_attn_batch_lse(
+    const at::Tensor &q_fp16, at::Tensor q8, at::Tensor q_scale,
+    const at::Tensor &k_cache, const at::Tensor &k_scale, const at::Tensor &v_cache,
+    const at::Tensor &v_scale, const at::Tensor &v_zero, const at::Tensor &block_table,
+    const at::Tensor &seq_lens, const at::Tensor &visible_lens,
+    const at::Tensor &partials_ws, const at::Tensor &m_ws, const at::Tensor &l_ws,
+    const at::Tensor &merged_ws, at::Tensor out, at::Tensor lse,
+    int64_t q_len, int64_t pages_per_block) {
+  check_xpu_contig(lse, "lse");
+  check_xpu_contig(visible_lens, "visible_lens");
+  TORCH_CHECK(q_len > 0 && q_len <= 10 && pages_per_block > 0, "CP q_len/ratio");
+  TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(0) % q_len == 0, "CP query shape");
+  const int batch = static_cast<int>(q_fp16.size(0) / q_len);
+  const int heads = static_cast<int>(q_fp16.size(1));
+  TORCH_CHECK(lse.scalar_type() == at::kFloat && lse.dim() == 2 &&
+              lse.size(0) == q_fp16.size(0) && lse.size(1) == heads &&
+              lse.device() == q_fp16.device(), "lse float32 [T,HQ] on query device");
+  TORCH_CHECK(visible_lens.scalar_type() == at::kInt && visible_lens.dim() == 2 &&
+              visible_lens.size(0) == batch && visible_lens.size(1) == q_len + 1 &&
+              visible_lens.device() == q_fp16.device(), "CP visible int32 [B,1+Tq]");
+  TORCH_CHECK(block_table.dim() == 2 && block_table.size(0) == batch, "CP block table [B,N]");
+  dispatch_hkv(heads / Heads<2>::gqa, [&](auto hkv) {
+    constexpr int HKV = decltype(hkv)::value;
+    for (int b = 0; b < batch; ++b) {
+      auto qi = q_fp16.narrow(0, b * q_len, q_len);
+      auto oi = out.narrow(0, b * q_len, q_len);
+      auto vi = visible_lens.select(0, b);
+      int8k_int4v_s1_varlen_from_q_impl<HKV>(
+          qi, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
+          block_table.select(0, b), seq_lens.reshape({-1}).narrow(0, b, 1), vi,
+          partials_ws, m_ws, l_ws, merged_ws, oi, pages_per_block);
+      launch_partition_lse<HKV>(current_xpu_queue(), m_ws.data_ptr<float>(), l_ws.data_ptr<float>(),
+          lse.data_ptr<float>() + static_cast<size_t>(b) * q_len * heads,
+          vi.data_ptr<int32_t>(), static_cast<int>(block_table.size(1) * pages_per_block),
+          static_cast<int>(q_len));
+    }
+  });
+}
+
 // ============================================================================
 // Exact shared-prefix cascade (agent-work kv-sweep-opt-20261015).
 //
@@ -3320,6 +3392,12 @@ static void int8k_int4v_attn_batch_cascade(
 }  // namespace
 
 TORCH_LIBRARY(xe2_kv, m) {
+  m.def(
+      "int8k_int4v_attn_batch_lse(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale, "
+      "Tensor k_cache, Tensor k_scale, Tensor v_cache, Tensor v_scale, Tensor v_zero, "
+      "Tensor block_table, Tensor seq_lens, Tensor visible_lens, Tensor(c!) partials_ws, "
+      "Tensor(d!) m_ws, Tensor(e!) l_ws, Tensor(f!) merged_ws, Tensor(g!) out, "
+      "Tensor(h!) lse, int q_len, int pages_per_block) -> ()");
   m.def("q_quant_once(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale) -> ()");
   m.def("k_store(Tensor k_fp16, Tensor(a!) k8, Tensor(b!) k_scale) -> ()");
   m.def("v_store(Tensor v_fp16, Tensor(a!) v4, Tensor(b!) v_scale, Tensor(c!) v_zero) -> ()");
@@ -3373,6 +3451,7 @@ TORCH_LIBRARY(xe2_kv, m) {
 }
 
 TORCH_LIBRARY_IMPL(xe2_kv, XPU, m) {
+  m.impl("int8k_int4v_attn_batch_lse", &int8k_int4v_attn_batch_lse);
   m.impl("q_quant_once", &q_quant_once);
   m.impl("k_store", &k_store);
   m.impl("v_store", &v_store);
