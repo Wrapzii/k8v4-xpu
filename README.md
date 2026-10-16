@@ -10,6 +10,55 @@ passed 128K/200K numerical screens and measured about 1.80× faster combined
 attention at 200K/C4 with graph replay. This is an attention primitive result,
 including its collective/merge, not a model tokens/second result.
 
+## Four-GPU starting configuration: TP2 × CP2, concurrency 4
+
+For four B60s or four B70s in one host, **start with TP2 × CP2 and four
+active requests**. This is the recommended configuration to qualify first
+for lower long-context latency, not a proven best four-GPU production layout.
+The launcher defaults to FP16, K8/V4, MTP6, C4, 90% memory utilization and a
+262,144-token per-request window. Follow the [build and correctness gates](docs/TP2-CP2-FOUR-GPU.md)
+before serving real work; first validate without MTP, then with MTP6, then
+enable graphs only after graph/model checks pass.
+
+```bash
+# After building the experimental image; inspect without starting a server:
+python3 tools/launch_tp2_cp2.py --model-dir /ssd/model --max-seqs 4 --context 262144 --dry-run
+
+# First model correctness/control run:
+python3 tools/launch_tp2_cp2.py --model-dir /ssd/model --max-seqs 4 --context 262144 --no-mtp
+```
+
+**CP2 does not halve the concurrency limit.** All requests use all four GPUs,
+with each request's full-attention KV history split between the context lanes.
+At the same per-request history length:
+
+| Layout | Active requests | Approximate KV work per GPU, relative to two-GPU TP2/C4 |
+| --- | ---: | ---: |
+| Two GPUs, TP2 | 4 | 100% |
+| Four GPUs, TP2 × CP2 | 4 | 50% |
+| Four GPUs, TP2 × CP2 | 8 | 100% |
+
+Thus **C4 prioritizes the attention latency gain; C8 trades some of that gain
+for more simultaneous agents**. C8 still splits every history, but doubling
+requests consumes the saved KV work. Non-attention work, communication and
+scheduler overhead also affect speed. Test C8 with `--max-seqs 8` only after
+C4 passes and startup logs show enough cache. Compare two independent TP2
+replicas at C4 each as another eight-agent throughput configuration.
+
+The roughly **850K–860K-token cache pool observed on two B60s is shared across
+requests**, not a per-user context limit. Doubling an 850K pool would mean
+about **1.7M aggregate tokens**, but this is an estimate, not measured four-card
+capacity: replicated weights/GDN state, scratch, utilization and max-seqs all
+affect the usable pool. B70 capacity must be measured separately.
+
+Even a 1.7M pool would average **425K tokens at C4**, above this model profile's
+**262,144-token per-request limit, including prompt and output**. More VRAM
+does not raise that limit. Four requests at that limit require about 1.049M
+logical tokens; at C8, a hypothetical 1.7M pool averages only 212.5K per request.
+Eight full 262,144-token windows require about 2.097M logical tokens and are
+not promised. Read actual startup capacity and leave room for generated tokens
+instead of dividing aggregate VRAM and assuming larger model context support.
+
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
 The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. The October 1 deployment uses Swift 1.5 with its AutoRound INT4 body, a calibrated GPTQ INT4 head/MTP bake, and a verified resident INT8 embedding. Low thinking is the Hermes default, with medium available. See the [Swift bake and reproduction instructions](docs/swift-1.5-bake.md) and the [initial loader adaptation](docs/swift-1.5-trial.md). This repo does not ship weights.
