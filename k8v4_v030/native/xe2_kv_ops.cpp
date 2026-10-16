@@ -2417,25 +2417,33 @@ static void launch_partition_lse(sycl::queue &q, const float *M, const float *L,
                                  int splits, int tq) {
   constexpr int HQ = Heads<HKV>::hq;
   constexpr int GQA = Heads<HKV>::gqa;
+  constexpr int WG = 256;
   q.submit([&](sycl::handler &h) {
     h.parallel_for<Xe2KvPartitionLse<HKV>>(
-        sycl::range<1>(static_cast<size_t>(tq * HQ)), [=](sycl::id<1> index) {
-          const int i = static_cast<int>(index[0]);
+        sycl::nd_range<1>(sycl::range<1>(static_cast<size_t>(tq * HQ) * WG),
+                          sycl::range<1>(WG)), [=](sycl::nd_item<1> item) {
+          const int i = static_cast<int>(item.get_group(0));
+          const int lane = static_cast<int>(item.get_local_id(0));
           const int tok = i / HQ, head = (i % HQ) / GQA;
           const int row = tok * GQA + i % GQA;
           const int live = sycl::min(splits, (visible[0] + BM - 1) / BM);
-          float maximum = -INFINITY, total = 0.f;
-          for (int s = 0; s < live; ++s) {
+          // A serial online scan here erased the half-history savings at
+          // long context. Parallel two-pass logsumexp reads only S1's M/L,
+          // never K/V, and keeps every work item in both group reductions.
+          float maximum = -INFINITY;
+          for (int s = lane; s < live; s += WG) {
+            const size_t at = (static_cast<size_t>(head) * splits + s) * BM + row;
+            if (L[at] > 0.f) maximum = sycl::max(maximum, M[at]);
+          }
+          maximum = sycl::reduce_over_group(item.get_group(), maximum, sycl::maximum<float>());
+          float total = 0.f;
+          for (int s = lane; s < live; s += WG) {
             const size_t at = (static_cast<size_t>(head) * splits + s) * BM + row;
             const float m = M[at], l = L[at];
-            if (l > 0.f && m != -INFINITY) {
-              const float next = sycl::max(maximum, m);
-              total = total * ((maximum == -INFINITY) ? 0.f : sycl::exp(maximum - next))
-                      + l * sycl::exp(m - next);
-              maximum = next;
-            }
+            if (l > 0.f && m != -INFINITY) total += l * sycl::exp(m - maximum);
           }
-          dst[i] = total > 0.f ? maximum + sycl::log(total) : -INFINITY;
+          total = sycl::reduce_over_group(item.get_group(), total, sycl::plus<float>());
+          if (lane == 0) dst[i] = total > 0.f ? maximum + sycl::log(total) : -INFINITY;
         });
   });
 }

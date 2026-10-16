@@ -5,6 +5,10 @@ It includes an opt-in replicated-query runtime adapter, native partition-LSE
 export, a four-rank attention correctness/timing harness and a configurable
 concurrency launcher. **Four-GPU model performance and capacity are not yet
 validated.** The historical two-GPU measurements below do not establish them.
+The new [two-card CP attention checks](results/tp2-cp2-2026-10-16/README.md)
+passed 128K/200K numerical screens and measured about 1.80× faster combined
+attention at 200K/C4 with graph replay. This is an attention primitive result,
+including its collective/merge, not a model tokens/second result.
 
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 

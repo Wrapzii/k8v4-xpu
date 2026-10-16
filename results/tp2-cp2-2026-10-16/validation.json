@@ -2,10 +2,15 @@
   "date": "2026-10-16",
   "branch": "codex/tp2-cp2-four-gpu",
   "baseline_commit": "3eb9d37",
-  "native_library_sha256": "c50594a72a9b5cb61dd390646ae9d30630aca77ad88b9f843b82ef051acbb062",
+  "native_library_sha256": "124349ab8ecfb212a492e0d88f4723f68ba9eca8b6eb449082526bb8386edd0c",
   "native_compiler": "Intel oneAPI DPC++/C++ 2026.0.0",
   "native_build_passed": true,
-  "cpu_suite": {"tests_run": 132, "skipped": 10, "failures": 0, "errors": 0},
+  "cpu_suite": {
+    "tests_run": 132,
+    "skipped": 10,
+    "failures": 0,
+    "errors": 0
+  },
   "real_vllm_source_patch_and_backend_import_passed": true,
   "stock_base_source_contract_passed": true,
   "source_patch_idempotency_passed": true,
@@ -15,22 +20,40 @@
     "tests_passed": 2,
     "native_attention_cases": 32,
     "virtual_cp_lanes": 2,
-    "query_lengths": [1, 7],
+    "query_lengths": [
+      1,
+      7
+    ],
     "concurrency": 2,
-    "pages_per_manager_block": [1, 33],
-    "contexts": [7, 63, 64, 65, 129, 263, 2113, 4225],
-    "max_relative_l2": 0.00033956821,
+    "pages_per_manager_block": [
+      1,
+      33
+    ],
+    "contexts": [
+      7,
+      63,
+      64,
+      65,
+      129,
+      263,
+      2113,
+      4225
+    ],
+    "max_relative_l2": 0.00033956626,
     "relative_l2_gate": 0.001,
     "fused_pack_and_merge_extreme_lse_and_empty_shards_passed": true,
     "qualifies_four_gpu_model": false
   },
   "distributed_merge_smoke": {
     "physical_devices": 2,
-    "query_lengths": [1, 7],
+    "query_lengths": [
+      1,
+      7
+    ],
     "synthetic_concurrency": 4,
     "eager_passed": true,
     "changed_input_graph_replay_passed": true,
-    "max_relative_l2": 2.1427575802590582e-7,
+    "max_relative_l2": 2.1427575802590582e-07,
     "native_attention_included": false,
     "environment": {
       "container_cpu_limit": 2,
@@ -40,8 +63,8 @@
     },
     "timings_are_smoke_diagnostics_not_qualified_performance": true
   },
-  "combined_two_rank_native_and_collective_test_completed": false,
-  "combined_test_note": "Memory-capped attempts did not complete. A Docker OOM event confirmed the 2 GiB capped failure; a 3 GiB capped attempt also ended with SIGKILL. Separate native and collective checks passed. No combined timing is claimed.",
+  "combined_two_rank_native_and_collective_test_completed": true,
+  "combined_test_note": "Initial serial LSE export passed but lost at long context. Parallel LSE export passed the same 128K/200K C1/C2/C4 q1/q7 eager and changed-input graph checks. These are two-rank attention primitive results, not four-rank or model serving results.",
   "four_gpu_attention_tested": false,
   "four_gpu_model_serving_tested": false,
   "model_or_task_fidelity_tested": false,
@@ -49,5 +72,34 @@
   "maximum_agent_capacity_measured": false,
   "production_container_unchanged": true,
   "production_health_at_finish": 200,
-  "remaining_smoke_containers": 0
+  "remaining_smoke_containers": 0,
+  "initial_native_library_sha256": "c50594a72a9b5cb61dd390646ae9d30630aca77ad88b9f843b82ef051acbb062",
+  "combined_two_rank_long_test": {
+    "contexts": [
+      131072,
+      200003
+    ],
+    "concurrencies": [
+      1,
+      2,
+      4
+    ],
+    "query_lengths": [
+      1,
+      7
+    ],
+    "eager_cases": 12,
+    "changed_input_graph_cases": 12,
+    "iterations": 20,
+    "max_relative_l2": 0.0007063922821544111,
+    "relative_l2_gate": 0.001,
+    "production_stopped": true,
+    "cpu_quota": null,
+    "container_memory_limit_gib": 8,
+    "container_memory_plus_swap_limit_gib": 12,
+    "timing": "slowest-rank synchronized wall time; three warmup calls; one run per configuration; clocks not fixed",
+    "qualifies_four_gpu_model": false
+  },
+  "production_configuration_unchanged": true,
+  "production_native_library_sha256": "f1565f8415f4b09834ac514460881bb9bb70f2bd98a00af4e222e453013b3b95"
 }

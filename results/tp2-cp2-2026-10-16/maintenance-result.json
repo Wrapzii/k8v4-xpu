@@ -1,0 +1,19 @@
+{
+  "started": 1792167114.0954409,
+  "original_container_id": "ed6e8592a469c057922053028e09e7a24d41d7ef73ccd3f088cf4c1d720c0491",
+  "stages": [
+    {
+      "stage": "pair-long-eager",
+      "returncode": 0,
+      "seconds": 74.6814558506012
+    },
+    {
+      "stage": "pair-long-graph",
+      "returncode": 0,
+      "seconds": 83.90108370780945
+    }
+  ],
+  "production_health": 200,
+  "finished": 1792167681.0537193,
+  "restored_container_id": "ed6e8592a469c057922053028e09e7a24d41d7ef73ccd3f088cf4c1d720c0491"
+}
