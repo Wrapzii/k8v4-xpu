@@ -17,6 +17,16 @@ from k8v4_v030.w4a8_prefill import install_if_requested
 install_if_requested()
 
 from k8v4_v030.attn_time import attention_span
+from k8v4_v030 import cascade as _cascade
+
+
+def _cascade_prealloc(device, kv_cache_spec) -> None:
+    if not _cascade.enabled():
+        return
+    try:
+        _cascade.get(torch.device(device), int(getattr(kv_cache_spec, "num_kv_heads", 2)), 2)
+    except Exception as exc:  # never block start-up; the op falls back to serial
+        print("k8v4 cascade prealloc skipped:", exc, flush=True)
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
@@ -110,6 +120,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
     _cudagraph_support = AttentionCGSupport.UNIFORM_BATCH
 
     def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
+        _cascade_prealloc(device, kv_cache_spec)
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         # The spec carries this rank's KV head count (2 on a TP2 rank, 4 on
         # one GPU); scratch geometry follows it instead of a module constant.
@@ -336,7 +347,19 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         partials, m_state, l_state, merged = scratch.workspace(nprog)
         views = bind_regions(cache, self.layout)
 
+        casc = _cascade.get(query.device, self.layout.hkv, int(count))
+
         def _decode_attn() -> None:
+            if casc is not None:
+                # Shared-prefix cascade (XE2_KV_CASCADE=1): same result bits as the
+                # serial op; the shared prefix KV is read once for all requests.
+                ops().int8k_int4v_attn_batch_cascade(
+                    q_buf, scratch.q8, scratch.q_scale, views["k"], views["k_scale"], views["v"],
+                    views["v_scale"], views["v_zero"], block_table, seq_lens, scratch.visible,
+                    partials, m_state, l_state, merged, out_buf, q_len, meta.pages_per_block,
+                    casc.q8, casc.qsc, casc.plan, casc.part, casc.m, casc.l, casc.cap, casc.slot_rows,
+                )
+                return
             ops().int8k_int4v_attn_batch(
                 q_buf,
                 scratch.q8,
