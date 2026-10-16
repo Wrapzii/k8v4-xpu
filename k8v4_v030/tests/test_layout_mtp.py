@@ -93,11 +93,11 @@ class LayoutTest(unittest.TestCase):
         self.assertIn('static_assert(s2_nwg * S2_SG_COUNT == HKV * BM, "Stage2 1 row/SG")', text)
         self.assertEqual((2 * 64) // 8, 16)
         self.assertEqual((4 * 64) // 8, 32)
-        # ABI guard: every paged entry keeps the 64-bit parameter, and exactly
-        # the three paged ops declare it in a schema (a new op must not add
-        # one silently, nor narrow the C++ side to int).
+        # ABI guard: the original three paged entries keep their 64-bit
+        # parameter. The additional CP entry below exports LSE as well.
         self.assertEqual(text.count("at::Tensor out, int64_t pages_per_block = 1)"), 3)
-        self.assertEqual(text.count("int pages_per_block) -> ()"), 3)
+        # The CP entry additionally exports partition LSE; original ABI remains.
+        self.assertEqual(text.count("int pages_per_block) -> ()"), 4)
         self.assertNotIn("at::Tensor out, int pages_per_block", text)
         self.assertIn("int q_len, int pages_per_block) -> ()", text)
         self.assertIn("bt[logical / pages_per_block]", text)

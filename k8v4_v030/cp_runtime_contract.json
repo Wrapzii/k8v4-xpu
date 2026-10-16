@@ -1,0 +1,35 @@
+{
+  "description": "Runtime source contract inventoried read-only from current two-GPU server, 2026-10-16. Four-GPU execution is not yet validated.",
+  "sources": {
+    "config/vllm.py": {
+      "sha256": "956b812e5a719bcbfa3a3958801361b38b9c928c96b8c073311bbb96376dfb7a",
+      "patched_sha256": "0b7707de49d13564ec2b20f4c62980d2923c1768f8cfc804ab4b877a9be7d9f5"
+    },
+    "config/model.py": {
+      "sha256": "f4168b67cc93ce72ff2a6d4c66974223e32fd0f1fab4c05e44bd68a275e18d69",
+      "patched_sha256": "57b2f38e5a713e639784aef12d79b92a4f6c45ebb02fe7182c4633ec7eff374b"
+    },
+    "v1/worker/cp_utils.py": {
+      "sha256": "e32625d83a641b8dd8df82e92d1b6fb20af0cdf2e8fbd2fb131aa3c215415448",
+      "patched_sha256": "f846b2cc588501e0fcce4b96c70b6f178706308c1018e48a93c32a8561bd1166"
+    },
+    "v1/worker/gpu_model_runner.py": {
+      "sha256": "87c29d08c0bbf66993d8b984811e7325e35e6436242a773feb55ec88f16b2c51",
+      "patched_sha256": "ef6111f0afcd66377d1dc6204888694b8404648a63c49e30d7a109a9b8ebfbad"
+    },
+    "v1/spec_decode/utils.py": {
+      "sha256": "318067397e6827153b484953b4f245e64b0a04308cfe05fa6760418b83a15ed8",
+      "patched_sha256": "dc4f08b26946e9eef2ccae4290542fcda94a09302c2892787c332e4da5d66ecc"
+    }
+  },
+  "required_unchanged": {
+    "config/parallel.py": "f012ace89e3fb730a467f729f602679bc145c49f0d10721811c9d818570e7b2b",
+    "distributed/parallel_state.py": "d9b10ad56833ebc08a753e1a050ef0989c30d4134021b7b7b00150b7bd01adc6",
+    "v1/worker/block_table.py": "a09b8819e1417b7a186cf3472224e2138fc5d41a291c6692bb7df711b0c44259",
+    "v1/core/kv_cache_utils.py": "2666c9f113584e52e7521058efd2c0d9598544559dc942d3a3da87001a3fedf2",
+    "v1/worker/xpu_worker.py": "711b56432506b58041cd86e71320c3960413f7bd61061990b66488421d81cfc3",
+    "v1/worker/xpu_model_runner.py": "07fa0390d28f2b8c3c3c0019eb9c3b126e2397aea268ba47c889f06b423deb23",
+    "v1/spec_decode/llm_base_proposer.py": "5bd11c41f0a8cf1272b5880d9878043f876bee6c7e04fb781e613f92930b15ab",
+    "model_executor/layers/mamba/gdn/qwen_gdn_linear_attn.py": "b80f8e6f3fff442fb880aebb3209c52f814f66490009f4ac4003de603576d10a"
+  }
+}

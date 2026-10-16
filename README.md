@@ -1,5 +1,11 @@
 # K8/V4 KV cache for vLLM 0.30 on Intel XPU
 
+Four-card testers: see the [TP2 × CP2 branch guide and handoff](docs/TP2-CP2-FOUR-GPU.md).
+It includes an opt-in replicated-query runtime adapter, native partition-LSE
+export, a four-rank attention correctness/timing harness and a configurable
+concurrency launcher. **Four-GPU model performance and capacity are not yet
+validated.** The historical two-GPU measurements below do not establish them.
+
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
 The deployment uses tensor-parallel 2, MTP with 6 draft tokens, `FULL_DECODE_ONLY` graphs, prefix caching, a **262,144-token request window**, and **four active sequences**. The October 1 deployment uses Swift 1.5 with its AutoRound INT4 body, a calibrated GPTQ INT4 head/MTP bake, and a verified resident INT8 embedding. Low thinking is the Hermes default, with medium available. See the [Swift bake and reproduction instructions](docs/swift-1.5-bake.md) and the [initial loader adaptation](docs/swift-1.5-trial.md). This repo does not ship weights.
