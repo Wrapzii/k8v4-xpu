@@ -1,0 +1,12 @@
+{
+  "started": "2026-10-15T03:14:44.972388+00:00",
+  "mode": "two affinity-pinned workers, 100K half vs 200K full, shm O+LSE merge; no mount",
+  "library": "/mnt/hdd-500gb/model-validation/launch80-20261013/perf-resources-20261014/libxe2_kv_final.so",
+  "production_changed": true,
+  "worker0_returncode": 0,
+  "worker1_returncode": 0,
+  "returncode": 0,
+  "restoration_started": true,
+  "restored_healthy": true,
+  "ended": "2026-10-15T03:20:55.491723+00:00"
+}

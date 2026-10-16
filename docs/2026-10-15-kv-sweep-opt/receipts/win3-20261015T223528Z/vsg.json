@@ -1,0 +1,578 @@
+{
+ "q1/share1.0/B4/seq200000/r33": {
+  "ms_serial": 3.0902,
+  "ms_casc": 1.5824,
+  "plan_casc": [
+   3102,
+   0,
+   3102,
+   3102,
+   3102,
+   3102
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00017573297154629963,
+   "max_rel": 0.015351351428093477,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00017573297154629963,
+   "max_rel": 0.015351351428093477,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q1/share0.98/B4/seq200000/r33": {
+  "ms_serial": 3.0868,
+  "ms_casc": 1.6015,
+  "plan_casc": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036,
+   3036
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00020276893952386917,
+   "max_rel": 0.020276893952386917,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00020276893952386917,
+   "max_rel": 0.020276893952386917,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q1/share0.0/B4/seq200000/r33": {
+  "ms_serial": 3.0667,
+  "ms_casc": 3.0877,
+  "plan_casc": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0002666796805922411,
+   "max_rel": 0.026667968059224112,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0002666796805922411,
+   "max_rel": 0.026667968059224112,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q7/share1.0/B4/seq200000/r33": {
+  "ms_serial": 6.0475,
+  "ms_casc": 7.0855,
+  "plan_casc": [
+   3102,
+   0,
+   3102,
+   3102,
+   3102,
+   3102
+  ],
+  "ms_vsg2": 6.573,
+  "plan_vsg2": [
+   3102,
+   0,
+   3102,
+   3102,
+   3102,
+   3102
+  ],
+  "ms_vsg4": 7.4013,
+  "plan_vsg4": [
+   3102,
+   0,
+   3102,
+   3102,
+   3102,
+   3102
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0003006129770297501,
+   "max_rel": 0.03006129770297501,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0003006129770297501,
+   "max_rel": 0.03006129770297501,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.0003006129770297501,
+   "max_rel": 0.03006129770297501,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.0003006129770297501,
+   "max_rel": 0.03006129770297501,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ },
+ "q7/share0.98/B4/seq200000/r33": {
+  "ms_serial": 6.0292,
+  "ms_casc": 7.0831,
+  "plan_casc": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036,
+   3036
+  ],
+  "ms_vsg2": 6.5842,
+  "plan_vsg2": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036,
+   3036
+  ],
+  "ms_vsg4": 7.4045,
+  "plan_vsg4": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036,
+   3036
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00032966774330820195,
+   "max_rel": 0.023298579739266974,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00032966774330820195,
+   "max_rel": 0.023298579739266974,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.00032966774330820195,
+   "max_rel": 0.023298579739266974,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.00032966774330820195,
+   "max_rel": 0.023298579739266974,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ },
+ "q7/share0.0/B4/seq200000/r33": {
+  "ms_serial": 6.0358,
+  "ms_casc": 6.0543,
+  "plan_casc": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "ms_vsg2": 6.1164,
+  "plan_vsg2": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "ms_vsg4": 6.1271,
+  "plan_vsg4": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0002458629224846177,
+   "max_rel": 0.024064703768853987,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0002458629224846177,
+   "max_rel": 0.024064703768853987,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.0002458629224846177,
+   "max_rel": 0.024064703768853987,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.0002458629224846177,
+   "max_rel": 0.024064703768853987,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ },
+ "q1/share1.0/B4/seq200000/r1": {
+  "ms_serial": 3.0523,
+  "ms_casc": 1.6015,
+  "plan_casc": [
+   3125,
+   0,
+   3125,
+   3125,
+   3125,
+   3125
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00015077329404140655,
+   "max_rel": 0.015077329404140655,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00015077329404140655,
+   "max_rel": 0.015077329404140655,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q1/share0.98/B4/seq200000/r1": {
+  "ms_serial": 3.0329,
+  "ms_casc": 1.6004,
+  "plan_casc": [
+   3062,
+   0,
+   3062,
+   3062,
+   3062,
+   3062
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00013876431522915397,
+   "max_rel": 0.013876431522915397,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00013876431522915397,
+   "max_rel": 0.013876431522915397,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q1/share0.0/B4/seq200000/r1": {
+  "ms_serial": 3.0367,
+  "ms_casc": 3.0659,
+  "plan_casc": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00011104151452376396,
+   "max_rel": 0.011104151452376396,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00011104151452376396,
+   "max_rel": 0.011104151452376396,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true
+ },
+ "q7/share1.0/B4/seq200000/r1": {
+  "ms_serial": 6.053,
+  "ms_casc": 7.1728,
+  "plan_casc": [
+   3125,
+   0,
+   3125,
+   3125,
+   3125,
+   3125
+  ],
+  "ms_vsg2": 6.6345,
+  "plan_vsg2": [
+   3125,
+   0,
+   3125,
+   3125,
+   3125,
+   3125
+  ],
+  "ms_vsg4": 7.4687,
+  "plan_vsg4": [
+   3125,
+   0,
+   3125,
+   3125,
+   3125,
+   3125
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0004080817929935504,
+   "max_rel": 0.03707656557771378,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0004080817929935504,
+   "max_rel": 0.03707656557771378,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.0004080817929935504,
+   "max_rel": 0.03707656557771378,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.0004080817929935504,
+   "max_rel": 0.03707656557771378,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ },
+ "q7/share0.98/B4/seq200000/r1": {
+  "ms_serial": 6.0601,
+  "ms_casc": 7.165,
+  "plan_casc": [
+   3062,
+   0,
+   3062,
+   3062,
+   3062,
+   3062
+  ],
+  "ms_vsg2": 6.6388,
+  "plan_vsg2": [
+   3062,
+   0,
+   3062,
+   3062,
+   3062,
+   3062
+  ],
+  "ms_vsg4": 7.4474,
+  "plan_vsg4": [
+   3062,
+   0,
+   3062,
+   3062,
+   3062,
+   3062
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0002565447784691815,
+   "max_rel": 0.025654477846918152,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0002565447784691815,
+   "max_rel": 0.025654477846918152,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.0002565447784691815,
+   "max_rel": 0.025654477846918152,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.0002565447784691815,
+   "max_rel": 0.025654477846918152,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ },
+ "q7/share0.0/B4/seq200000/r1": {
+  "ms_serial": 6.0557,
+  "ms_casc": 6.0745,
+  "plan_casc": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "ms_vsg2": 6.1331,
+  "plan_vsg2": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "ms_vsg4": 6.1471,
+  "plan_vsg4": [
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.0001915329713308646,
+   "max_rel": 0.019153297133086458,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.0001915329713308646,
+   "max_rel": 0.019153297133086458,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.0001915329713308646,
+   "max_rel": 0.019153297133086458,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.0001915329713308646,
+   "max_rel": 0.019153297133086458,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ }
+}

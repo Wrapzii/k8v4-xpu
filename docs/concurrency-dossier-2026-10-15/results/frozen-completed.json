@@ -1,0 +1,533 @@
+{
+  "protocol": {
+    "budget": "two capacities per available FA layer; fixed256steps/model; all valid held-out frames evaluated; no hyperparameter sweep",
+    "rank": 16,
+    "MLP_hidden": 64,
+    "seed": 61142,
+    "learning_rate": 0.0003,
+    "objective": "dense-mass KL plus2x weighted hard-negative page ranking; importance mixes mean and max of six dense-head masses",
+    "budgets": [
+      0.05,
+      0.1,
+      0.2,
+      0.3,
+      0.4,
+      0.5,
+      0.6,
+      0.7
+    ],
+    "L2_threshold": 0.01,
+    "split": "existing CODE32K/128K plus new CODE128K train; all CODE200K and every TOOLS frame held out; no adjacent-position shuffle across split",
+    "acceptance": "learned must beat best matched heuristic accuracy versus actual global physical page union, below1% output L2, before fusion",
+    "generation_requests": 0,
+    "target_model_updates": 0,
+    "input_frames": 528
+  },
+  "valid_frames": 528,
+  "training_frames": 160,
+  "heldout_frames": 368,
+  "rejected_calibration": [],
+  "training": [
+    {
+      "layer": 3,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 32,
+      "first16_loss": 3.7634100764989853,
+      "last16_loss": 0.6853713057935238
+    },
+    {
+      "layer": 3,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 32,
+      "first16_loss": 3.589546099305153,
+      "last16_loss": 0.7863224223256111
+    },
+    {
+      "layer": 7,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 16,
+      "first16_loss": 3.888522893190384,
+      "last16_loss": 1.0561572164297104
+    },
+    {
+      "layer": 7,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 16,
+      "first16_loss": 3.809728041291237,
+      "last16_loss": 1.1252768784761429
+    },
+    {
+      "layer": 11,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 16,
+      "first16_loss": 4.056594416499138,
+      "last16_loss": 0.8144456185400486
+    },
+    {
+      "layer": 11,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 16,
+      "first16_loss": 4.066788285970688,
+      "last16_loss": 0.866936881095171
+    },
+    {
+      "layer": 15,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 32,
+      "first16_loss": 3.5527793616056442,
+      "last16_loss": 1.0172500424087048
+    },
+    {
+      "layer": 15,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 32,
+      "first16_loss": 3.644469916820526,
+      "last16_loss": 1.0665853098034859
+    },
+    {
+      "layer": 31,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 32,
+      "first16_loss": 3.9418874830007553,
+      "last16_loss": 0.8510319404304028
+    },
+    {
+      "layer": 31,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 32,
+      "first16_loss": 4.228464275598526,
+      "last16_loss": 0.9091573320329189
+    },
+    {
+      "layer": 63,
+      "model": "linear16",
+      "parameters": 73728,
+      "training_frames": 32,
+      "first16_loss": 3.704490065574646,
+      "last16_loss": 1.0054617151618004
+    },
+    {
+      "layer": 63,
+      "model": "mlp64-rank16",
+      "parameters": 299264,
+      "training_frames": 32,
+      "first16_loss": 3.661844551563263,
+      "last16_loss": 1.0041923634707928
+    }
+  ],
+  "frontier": [
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.05,
+      "frames": 368,
+      "worst_global_L2": 0.1579732447862625,
+      "worst_group_L2": 0.2721475660800934,
+      "physical_global_fraction_mean": 0.17668815340388813,
+      "physical_global_fraction_max": 0.27959053103007037,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.1,
+      "frames": 368,
+      "worst_global_L2": 0.09554097056388855,
+      "worst_group_L2": 0.2010805606842041,
+      "physical_global_fraction_mean": 0.3059762341537909,
+      "physical_global_fraction_max": 0.46417146513115803,
+      "global_pass_frames": 2
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.2,
+      "frames": 368,
+      "worst_global_L2": 0.04589015617966652,
+      "worst_group_L2": 0.13123401999473572,
+      "physical_global_fraction_mean": 0.5007473076696638,
+      "physical_global_fraction_max": 0.7035497281739687,
+      "global_pass_frames": 55
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.3,
+      "frames": 368,
+      "worst_global_L2": 0.02513216808438301,
+      "worst_group_L2": 0.09473232924938202,
+      "physical_global_fraction_mean": 0.6429250668272608,
+      "physical_global_fraction_max": 0.8442596738087624,
+      "global_pass_frames": 130
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.4,
+      "frames": 368,
+      "worst_global_L2": 0.01621231622993946,
+      "worst_group_L2": 0.0691596046090126,
+      "physical_global_fraction_mean": 0.7513749793966419,
+      "physical_global_fraction_max": 0.9142948512951711,
+      "global_pass_frames": 331
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.5,
+      "frames": 368,
+      "worst_global_L2": 0.008870008401572704,
+      "worst_group_L2": 0.05003480985760689,
+      "physical_global_fraction_mean": 0.8331943726586274,
+      "physical_global_fraction_max": 0.9584266069715383,
+      "global_pass_frames": 368
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.6,
+      "frames": 368,
+      "worst_global_L2": 0.004895726218819618,
+      "worst_group_L2": 0.03495073691010475,
+      "physical_global_fraction_mean": 0.8950929481859807,
+      "physical_global_fraction_max": 0.9868883914294851,
+      "global_pass_frames": 368
+    },
+    {
+      "method": "dense_mass_teacher",
+      "budget": 0.7,
+      "frames": 368,
+      "worst_global_L2": 0.0025871931575238705,
+      "worst_group_L2": 0.02281641773879528,
+      "physical_global_fraction_mean": 0.940484852500303,
+      "physical_global_fraction_max": 0.9958426606971538,
+      "global_pass_frames": 368
+    },
+    {
+      "method": "linear16",
+      "budget": 0.05,
+      "frames": 368,
+      "worst_global_L2": 0.3349854052066803,
+      "worst_group_L2": 0.48112475872039795,
+      "physical_global_fraction_mean": 0.12009889757287567,
+      "physical_global_fraction_max": 0.2168212344099776,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "linear16",
+      "budget": 0.1,
+      "frames": 368,
+      "worst_global_L2": 0.23933714628219604,
+      "worst_group_L2": 0.3942231237888336,
+      "physical_global_fraction_mean": 0.22588150829406886,
+      "physical_global_fraction_max": 0.36648544931244004,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "linear16",
+      "budget": 0.2,
+      "frames": 368,
+      "worst_global_L2": 0.15165828168392181,
+      "worst_group_L2": 0.28670594096183777,
+      "physical_global_fraction_mean": 0.4023718686456527,
+      "physical_global_fraction_max": 0.5943698016634676,
+      "global_pass_frames": 2
+    },
+    {
+      "method": "linear16",
+      "budget": 0.3,
+      "frames": 368,
+      "worst_global_L2": 0.09826739132404327,
+      "worst_group_L2": 0.22363881766796112,
+      "physical_global_fraction_mean": 0.5455812412337309,
+      "physical_global_fraction_max": 0.7508794371602174,
+      "global_pass_frames": 17
+    },
+    {
+      "method": "linear16",
+      "budget": 0.4,
+      "frames": 368,
+      "worst_global_L2": 0.06405530124902725,
+      "worst_group_L2": 0.1821780949831009,
+      "physical_global_fraction_mean": 0.6630727263284939,
+      "physical_global_fraction_max": 0.8486884197056942,
+      "global_pass_frames": 67
+    },
+    {
+      "method": "linear16",
+      "budget": 0.5,
+      "frames": 368,
+      "worst_global_L2": 0.0483265183866024,
+      "worst_group_L2": 0.150780588388443,
+      "physical_global_fraction_mean": 0.7601415104725213,
+      "physical_global_fraction_max": 0.9200255918106206,
+      "global_pass_frames": 182
+    },
+    {
+      "method": "linear16",
+      "budget": 0.6,
+      "frames": 368,
+      "worst_global_L2": 0.03416408225893974,
+      "worst_group_L2": 0.10891316086053848,
+      "physical_global_fraction_mean": 0.840327518187502,
+      "physical_global_fraction_max": 0.9609724888035829,
+      "global_pass_frames": 301
+    },
+    {
+      "method": "linear16",
+      "budget": 0.7,
+      "frames": 368,
+      "worst_global_L2": 0.023834573104977608,
+      "worst_group_L2": 0.07568806409835815,
+      "physical_global_fraction_mean": 0.9037069163864153,
+      "physical_global_fraction_max": 0.9836904381196034,
+      "global_pass_frames": 352
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.05,
+      "frames": 368,
+      "worst_global_L2": 0.3754641115665436,
+      "worst_group_L2": 0.5222703814506531,
+      "physical_global_fraction_mean": 0.11023829692870839,
+      "physical_global_fraction_max": 0.1980166346769034,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.1,
+      "frames": 368,
+      "worst_global_L2": 0.27386850118637085,
+      "worst_group_L2": 0.43163132667541504,
+      "physical_global_fraction_mean": 0.20978025965295247,
+      "physical_global_fraction_max": 0.3477287268074216,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.2,
+      "frames": 368,
+      "worst_global_L2": 0.18572257459163666,
+      "worst_group_L2": 0.3088974356651306,
+      "physical_global_fraction_mean": 0.3794817771227067,
+      "physical_global_fraction_max": 0.5743524144547489,
+      "global_pass_frames": 2
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.3,
+      "frames": 368,
+      "worst_global_L2": 0.12883295118808746,
+      "worst_group_L2": 0.2485750913619995,
+      "physical_global_fraction_mean": 0.5190011091725616,
+      "physical_global_fraction_max": 0.7412855772305724,
+      "global_pass_frames": 17
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.4,
+      "frames": 368,
+      "worst_global_L2": 0.09504761546850204,
+      "worst_group_L2": 0.20380015671253204,
+      "physical_global_fraction_mean": 0.6374175061246489,
+      "physical_global_fraction_max": 0.8461784457946914,
+      "global_pass_frames": 58
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.5,
+      "frames": 368,
+      "worst_global_L2": 0.071867935359478,
+      "worst_group_L2": 0.15903592109680176,
+      "physical_global_fraction_mean": 0.7388918550738828,
+      "physical_global_fraction_max": 0.91973137192197,
+      "global_pass_frames": 142
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.6,
+      "frames": 368,
+      "worst_global_L2": 0.04836631938815117,
+      "worst_group_L2": 0.12117058038711548,
+      "physical_global_fraction_mean": 0.8234064478400099,
+      "physical_global_fraction_max": 0.9670610809082187,
+      "global_pass_frames": 258
+    },
+    {
+      "method": "mlp64-rank16",
+      "budget": 0.7,
+      "frames": 368,
+      "worst_global_L2": 0.030967460945248604,
+      "worst_group_L2": 0.08943227678537369,
+      "physical_global_fraction_mean": 0.8913270895613546,
+      "physical_global_fraction_max": 0.9875279820914614,
+      "global_pass_frames": 334
+    },
+    {
+      "method": "quest",
+      "budget": 0.05,
+      "frames": 368,
+      "worst_global_L2": 0.2885246276855469,
+      "worst_group_L2": 0.383636474609375,
+      "physical_global_fraction_mean": 0.11639701999006395,
+      "physical_global_fraction_max": 0.18612088263511353,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "quest",
+      "budget": 0.1,
+      "frames": 368,
+      "worst_global_L2": 0.22223351895809174,
+      "worst_group_L2": 0.2848089933395386,
+      "physical_global_fraction_mean": 0.20957767393439003,
+      "physical_global_fraction_max": 0.33479746217667156,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "quest",
+      "budget": 0.2,
+      "frames": 368,
+      "worst_global_L2": 0.18491770327091217,
+      "worst_group_L2": 0.21597349643707275,
+      "physical_global_fraction_mean": 0.37023800099992754,
+      "physical_global_fraction_max": 0.5431861804222649,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "quest",
+      "budget": 0.3,
+      "frames": 368,
+      "worst_global_L2": 0.11846491694450378,
+      "worst_group_L2": 0.19083459675312042,
+      "physical_global_fraction_mean": 0.5035274009504512,
+      "physical_global_fraction_max": 0.6964171465131158,
+      "global_pass_frames": 13
+    },
+    {
+      "method": "quest",
+      "budget": 0.4,
+      "frames": 368,
+      "worst_global_L2": 0.11198294907808304,
+      "worst_group_L2": 0.17377595603466034,
+      "physical_global_fraction_mean": 0.6171066059458854,
+      "physical_global_fraction_max": 0.8106206014075495,
+      "global_pass_frames": 62
+    },
+    {
+      "method": "quest",
+      "budget": 0.5,
+      "frames": 368,
+      "worst_global_L2": 0.10905731469392776,
+      "worst_group_L2": 0.11559834331274033,
+      "physical_global_fraction_mean": 0.7139940610616236,
+      "physical_global_fraction_max": 0.8957133717210493,
+      "global_pass_frames": 173
+    },
+    {
+      "method": "quest",
+      "budget": 0.6,
+      "frames": 368,
+      "worst_global_L2": 0.10761380195617676,
+      "worst_group_L2": 0.11184535175561905,
+      "physical_global_fraction_mean": 0.7972881270000272,
+      "physical_global_fraction_max": 0.9488163787587972,
+      "global_pass_frames": 277
+    },
+    {
+      "method": "quest",
+      "budget": 0.7,
+      "frames": 368,
+      "worst_global_L2": 0.1065184697508812,
+      "worst_group_L2": 0.10849855095148087,
+      "physical_global_fraction_mean": 0.8676525286740306,
+      "physical_global_fraction_max": 0.9804862444017914,
+      "global_pass_frames": 335
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.05,
+      "frames": 368,
+      "worst_global_L2": 0.19977687299251556,
+      "worst_group_L2": 0.30380499362945557,
+      "physical_global_fraction_mean": 0.15488510841310268,
+      "physical_global_fraction_max": 0.22609529900863448,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.1,
+      "frames": 368,
+      "worst_global_L2": 0.13845577836036682,
+      "worst_group_L2": 0.22154009342193604,
+      "physical_global_fraction_mean": 0.2755858040456808,
+      "physical_global_fraction_max": 0.3780487804878049,
+      "global_pass_frames": 0
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.2,
+      "frames": 368,
+      "worst_global_L2": 0.11714057624340057,
+      "worst_group_L2": 0.17293263971805573,
+      "physical_global_fraction_mean": 0.46665966226629013,
+      "physical_global_fraction_max": 0.6135636596289188,
+      "global_pass_frames": 22
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.3,
+      "frames": 368,
+      "worst_global_L2": 0.03435883671045303,
+      "worst_group_L2": 0.1099778562784195,
+      "physical_global_fraction_mean": 0.6115381407395916,
+      "physical_global_fraction_max": 0.7808701215611005,
+      "global_pass_frames": 97
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.4,
+      "frames": 368,
+      "worst_global_L2": 0.02418402209877968,
+      "worst_group_L2": 0.094144806265831,
+      "physical_global_fraction_mean": 0.723971699485212,
+      "physical_global_fraction_max": 0.8928342930262316,
+      "global_pass_frames": 228
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.5,
+      "frames": 368,
+      "worst_global_L2": 0.012450220994651318,
+      "worst_group_L2": 0.06160235404968262,
+      "physical_global_fraction_mean": 0.8117673942828411,
+      "physical_global_fraction_max": 0.9539347408829175,
+      "global_pass_frames": 360
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.6,
+      "frames": 368,
+      "worst_global_L2": 0.0064203799702227116,
+      "worst_group_L2": 0.04483267292380333,
+      "physical_global_fraction_mean": 0.879504784149136,
+      "physical_global_fraction_max": 0.9846449136276392,
+      "global_pass_frames": 368
+    },
+    {
+      "method": "sparq64",
+      "budget": 0.7,
+      "frames": 368,
+      "worst_global_L2": 0.004851025063544512,
+      "worst_group_L2": 0.03065439872443676,
+      "physical_global_fraction_mean": 0.9306564813297535,
+      "physical_global_fraction_max": 0.9968010236724248,
+      "global_pass_frames": 368
+    }
+  ],
+  "serving_enabled": false,
+  "scope": "XPU train plus held-out dense reconstruction; selector/executor serving timings still separate; no target-model fine-tuning",
+  "device": "xpu:0"
+}

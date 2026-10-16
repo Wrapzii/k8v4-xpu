@@ -1,0 +1,10 @@
+{
+  "started": "2026-10-15T02:52:51.820071+00:00",
+  "mode": "native compact T(L) cascade bound + 2-GPU half-walk; no SHARED_WALK; no mount",
+  "library": "/mnt/hdd-500gb/model-validation/launch80-20261013/perf-resources-20261014/libxe2_kv_final.so",
+  "production_changed": true,
+  "returncode": 0,
+  "restoration_started": true,
+  "restored_healthy": true,
+  "ended": "2026-10-15T02:58:58.939156+00:00"
+}

@@ -1,0 +1,6 @@
+{"kind": "begin", "lib": "/experiment/libxe2_kv_sharedwalk.so", "note": "C2 q7 0/90/100 prefix, one K/V load two Q acc"}
+{"kind": "layout", "pages": 2048, "shared90": 1843, "tail": 205, "p90_overlap": 0.9}
+{"kind": "timing", "seq": 131072, "batch": 2, "q": 7, "prefix": "p0", "serial_us": 4473.4, "fused_us": 4303.0, "ratio": 1.04, "exact": false, "max_abs": 0.0190887451171875, "finite": true, "serial_samples": [4473.7, 4475.4, 4470.0, 4473.4, 4465.0], "fused_samples": [4306.4, 4301.2, 4302.2, 4303.0, 4303.0]}
+{"kind": "timing", "seq": 131072, "batch": 2, "q": 7, "prefix": "p90", "serial_us": 4470.6, "fused_us": 3863.0, "ratio": 1.157, "exact": false, "max_abs": 0.020416259765625, "finite": true, "serial_samples": [4469.0, 4471.4, 4470.6, 4474.7, 4468.1], "fused_samples": [3863.0, 3863.8, 3862.6, 3869.7, 3855.4]}
+{"kind": "timing", "seq": 131072, "batch": 2, "q": 7, "prefix": "p100", "serial_us": 4471.3, "fused_us": 3764.4, "ratio": 1.188, "exact": false, "max_abs": 0.0187835693359375, "finite": true, "serial_samples": [4464.7, 4471.3, 4473.8, 4473.5, 4469.6], "fused_samples": [3763.7, 3760.7, 3765.1, 3766.6, 3764.4]}
+{"kind": "end"}
