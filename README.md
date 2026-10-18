@@ -101,6 +101,38 @@ The [historical benchmark archive](docs/historical-benchmarks.md) preserves the 
 
 These CCL settings raised GPU faults on this platform and are not in the launch script: `CCL_SYCL_ALLREDUCE_ARC=1`, a simple threshold of 0 or 8192, `CCL_ALLREDUCE=direct`, `CCL_ATL_TRANSPORT=mpi`, `CCL_TOPO_FABRIC_VERTEX_CONNECTION_CHECK=0`.
 
+## Fedora 44 / dual B70: TP2 dies at the first all_reduce
+
+Reported on 2× Arc Pro B70, Fedora 44, kernel 7.2.9-201, linux-firmware 20260916 (BMG GuC v70.72.1). A plain `docker run` starts, but the TP2 workers die at engine init, on the first all_reduce, with:
+
+```text
+oneCCL: ze_handle_manager.cpp:42 mem_to_ipc_handle: condition device_fd != invalid_fd failed
+zeMemOpenIpcHandle: ZE_RESULT_ERROR_INVALID_ARGUMENT
+```
+
+The container needs the render group, an unconfined seccomp profile, `SYS_PTRACE` for the Level Zero IPC handles, the composite device hierarchy, and the CCL block from `launch.sh`:
+
+```bash
+docker run ... \
+  --device /dev/dri --ipc=host \
+  --group-add "$(stat -c %g /dev/dri/renderD* | head -n1)" \
+  --security-opt seccomp=unconfined \
+  --cap-add SYS_PTRACE \
+  -e ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE \
+  -e CCL_SYCL_ALLREDUCE_LL=twoshots \
+  -e CCL_SYCL_ALLREDUCE_SIMPLE_READ=1 \
+  -e CCL_SYCL_COPY_ENGINE=1 \
+  -e CCL_SYCL_ALLREDUCE_SIMPLE_THRESHOLD=4294967296 \
+  -e CCL_SYCL_REDUCE_SCATTER_SIMPLE_THRESHOLD=4294967296 \
+  -e CCL_SYCL_ALLGATHERV_SIMPLE_THRESHOLD=4294967296 \
+  -e CCL_SYCL_ALLTOALL_TMP_BUF=1 \
+  ...
+```
+
+With these flags, the engine boots cleanly, captures graphs and serves normally. `launch.sh` already sets the render group, composite hierarchy and CCL variables. On Fedora 44, also add `--security-opt seccomp=unconfined` and `--cap-add SYS_PTRACE`.
+
+Newer base: on the same Fedora 44 / dual B70 stack, `ghcr.io/rmacy/glimmer-b70-vllm:0.1.5` (Intel XPU vLLM `v0.21.1.dev0+gad7125a43`, August 2026 build) runs stably at TP2 with the flags above. That image's stock README flags reproduce the IPC failure. This check covers stability only, serving Muse-Glimmer-30B. It does not validate the K8/V4 kernels or a W4A8 Qwen path on the newer base.
+
 ## How this path was chosen
 
 vLLM owns the block table. Decode is one C++ op per uniform batch. Earlier eager prefill kernels were slower or faulted: untiled SDPA faulted at 16K, query-tiled eager faulted at 96K, online-softmax eager finished 128K at a few hundred tok/s. Fused on-chip decode, chunked stage-1, wider GRF, and fp16 partials were correct and slower than parallel stage-2. Those binaries are not this build.
