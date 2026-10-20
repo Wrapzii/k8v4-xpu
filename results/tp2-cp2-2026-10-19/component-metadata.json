@@ -1,0 +1,23 @@
+{
+  "scope": "single-visible-XPU component validation; not four-card model serving",
+  "torch": "2.13.0+xpu",
+  "device_count": 1,
+  "device": "Intel(R) Arc(TM) Pro B60 Graphics",
+  "files": {
+    "libxe2_kv.so": "909f7dd3201685fbfb769bbc20408f763b5e170be62b4550944d2cf8defb8998",
+    "libk8v4_sdpa.so": "bf40eaf73fec2cc67a35746db7cc39d600bca256a532ac19c96796c589d1210c",
+    "libdnnl.so.3": "13d2ee6e41033e2aa66999087fb28db82ee425dc1cfa66b9df20086d42f2a8b7"
+  },
+  "runtime_install_receipt": {
+    "adapter": "replicated-query-cp-v1",
+    "root": "/workspace/vllm/vllm",
+    "files_written": [
+      "config/vllm.py",
+      "config/model.py",
+      "v1/worker/cp_utils.py",
+      "v1/worker/gpu_model_runner.py",
+      "v1/spec_decode/utils.py"
+    ],
+    "four_gpu_serving_validated": false
+  }
+}

@@ -6,5 +6,5 @@ FROM ${BASE_IMAGE}
 COPY k8v4_v030 /opt/k8v4/k8v4_v030
 COPY build/libxe2_kv.so /opt/k8v4/libxe2_kv.so
 RUN python3 -m k8v4_v030.patch_context_parallel > /opt/k8v4/cp-install-receipt.json \
- && python3 -c "import torch; torch.ops.load_library('/opt/k8v4/libxe2_kv.so'); print(torch.ops.xe2_kv.int8k_int4v_attn_batch_lse.default._schema)"
+ && python3 -c "import torch; torch.ops.load_library('/opt/k8v4/libxe2_kv.so'); print(torch.ops.xe2_kv.int8k_int4v_attn_batch_lse.default._schema); print(torch.ops.xe2_kv.int8k_int4v_attn_batch_cascade_lse.default._schema)"
 ENV K8V4_CP=2 VLLM_USE_V2_MODEL_RUNNER=0

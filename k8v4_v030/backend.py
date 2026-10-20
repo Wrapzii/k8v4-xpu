@@ -365,13 +365,24 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             lane = self.context_lane
             visible = lane.visible(seq_lens, q_len)
             lse = torch.empty((width, self.num_heads), dtype=torch.float32, device=query.device)
+            # q1 can share the physically identical local prefix AND export
+            # the normalization required by the CP merge. q7 stays serial.
+            casc = _cascade.get(query.device, self.layout.hkv, int(count)) if q_len == 1 else None
 
             def _cp_decode_attn():
-                ops().int8k_int4v_attn_batch_lse(
-                    q_buf, scratch.q8, scratch.q_scale, views["k"], views["k_scale"], views["v"],
-                    views["v_scale"], views["v_zero"], block_table, seq_lens, visible,
-                    partials, m_state, l_state, merged, out_buf, lse, q_len, meta.pages_per_block,
-                )
+                if casc is not None:
+                    ops().int8k_int4v_attn_batch_cascade_lse(
+                        q_buf, scratch.q8, scratch.q_scale, views["k"], views["k_scale"], views["v"],
+                        views["v_scale"], views["v_zero"], block_table, seq_lens, visible,
+                        partials, m_state, l_state, merged, out_buf, q_len, meta.pages_per_block,
+                        casc.q8, casc.qsc, casc.plan, casc.part, casc.m, casc.l, casc.cap, casc.slot_rows, lse,
+                    )
+                else:
+                    ops().int8k_int4v_attn_batch_lse(
+                        q_buf, scratch.q8, scratch.q_scale, views["k"], views["k_scale"], views["v"],
+                        views["v_scale"], views["v_zero"], block_table, seq_lens, visible,
+                        partials, m_state, l_state, merged, out_buf, lse, q_len, meta.pages_per_block,
+                    )
                 return lane.merge(out_buf, lse)
 
             result = attention_span("decode", _cp_decode_attn)
@@ -446,6 +457,10 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                 q_fp = query.narrow(0, tok0, width).to(torch.float16)
                 if self.context_lane is not None:
                     def _cp_prefill_attn():
+                        if _cp.prefill_mode() == 'onednn':
+                            from k8v4_v030.cp_prefill import head_major_prefill as cp_prefill
+                            return cp_prefill(q_fp, views, row, seq_len, meta.pages_per_block,
+                                              self.scale, self.context_lane)
                         local_out, lse = _cp.paged_prefill(
                             q_fp, views, row, seq_len, meta.pages_per_block, self.scale,
                             self.context_lane,
