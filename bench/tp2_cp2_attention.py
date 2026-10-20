@@ -81,15 +81,26 @@ def store(views, key, value, slots):
                          views['v'],views['v_scale'],views['v_zero'])
 
 
-def prepare(context,batch,q_len,ratio,lane,tp_rank,device):
+def prepare(context,batch,q_len,ratio,lane,tp_rank,device,q1_cascade=False,shared_fraction=0):
     lengths=[context+3*i for i in range(batch)]
     local_lengths=[local_length(length,lane.rank) for length in lengths]
     full_raw,full,full_table=make_cache(lengths,ratio,device,111)
     local_raw,local,local_table=make_cache(local_lengths,ratio,device,222)
+    # Only identical PHYSICAL prefix blocks qualify. Align a shared global
+    # prefix to two manager blocks so both striped halves share whole blocks.
+    prefix_blocks=int(context*shared_fraction//(2*PAGE*ratio))*2
+    if prefix_blocks:
+        full_table[:,:prefix_blocks]=full_table[0,:prefix_blocks].clone()
+        local_table[:,:prefix_blocks//2]=local_table[0,:prefix_blocks//2].clone()
+    prefix_tokens=prefix_blocks*PAGE*ratio
+    prefix_k=prefix_v=None
     generator=torch.Generator(device=device).manual_seed(20261016+tp_rank)
     for request,length in enumerate(lengths):
         k=torch.randn((length,2,D),generator=generator,device=device,dtype=torch.float16)
         v=torch.randn((length,2,D),generator=generator,device=device,dtype=torch.float16)
+        if prefix_tokens:
+            if request==0:prefix_k=k[:prefix_tokens].clone();prefix_v=v[:prefix_tokens].clone()
+            else:k[:prefix_tokens].copy_(prefix_k);v[:prefix_tokens].copy_(prefix_v)
         positions=torch.arange(length,device=device,dtype=torch.int64)
         manager=PAGE*ratio
         slots=full_table[request,positions//manager].long()*manager+positions%manager
@@ -106,18 +117,31 @@ def prepare(context,batch,q_len,ratio,lane,tp_rank,device):
     full_s,nf=scratch(full_table);local_s,nl=scratch(local_table)
     out_full=torch.empty_like(q);out_local=torch.empty_like(q)
     lse=torch.empty(q.shape[:2],device=device,dtype=torch.float32)
+    use_cascade=q1_cascade and q_len==1
+    if use_cascade:
+        from k8v4_v030.cascade import CascadeScratch
+        full_cs=CascadeScratch(device,2,batch,0,8)
+        local_cs=CascadeScratch(device,2,batch,0,8)
     # Hold raw allocations for the lifetime of the cache views and graphs.
     def baseline():
         p,m,l,merged=full_s.workspace(nf)
-        ops().int8k_int4v_attn_batch(q,full_s.q8,full_s.q_scale,full['k'],full['k_scale'],
+        args=(q,full_s.q8,full_s.q_scale,full['k'],full['k_scale'],
             full['v'],full['v_scale'],full['v_zero'],full_table,seq,full_s.visible,
             p,m,l,merged,out_full,q_len,ratio)
+        if use_cascade:
+            c=full_cs
+            ops().int8k_int4v_attn_batch_cascade(*args,c.q8,c.qsc,c.plan,c.part,c.m,c.l,c.cap,c.slot_rows)
+        else:ops().int8k_int4v_attn_batch(*args)
         return out_full
     def local_walk():
         p,m,l,merged=local_s.workspace(nl)
-        ops().int8k_int4v_attn_batch_lse(q,local_s.q8,local_s.q_scale,local['k'],local['k_scale'],
+        args=(q,local_s.q8,local_s.q_scale,local['k'],local['k_scale'],
             local['v'],local['v_scale'],local['v_zero'],local_table,seq,lane.visible(seq,q_len),
-            p,m,l,merged,out_local,lse,q_len,ratio)
+            p,m,l,merged,out_local)
+        if use_cascade:
+            c=local_cs
+            ops().int8k_int4v_attn_batch_cascade_lse(*args,q_len,ratio,c.q8,c.qsc,c.plan,c.part,c.m,c.l,c.cap,c.slot_rows,lse)
+        else:ops().int8k_int4v_attn_batch_lse(*args,lse,q_len,ratio)
         return out_local
     def merge():return lane.merge(out_local,lse)
     def combined():
@@ -201,6 +225,8 @@ def main():
     p.add_argument('--graphs',action='store_true')
     p.add_argument('--pair-only',action='store_true')
     p.add_argument('--merge-only',action='store_true',help='isolate collective/merge; does not test native attention')
+    p.add_argument('--q1-cascade',action='store_true',help='enable physical-prefix q1 cascade in BOTH arms')
+    p.add_argument('--shared-fraction',type=float,default=0,help='separate shared-prefix case; primary comparison is independent (0)')
     p.add_argument('--output',type=Path,required=True)
     p.add_argument('--l2-limit',type=float,default=.001,help='0.1%% operation screen; not a model fidelity claim')
     args=p.parse_args()
@@ -210,6 +236,9 @@ def main():
     if min(contexts)<max(queries) or min(batches)<1 or args.iters<1 or args.pages_per_block<1:
         raise SystemExit('invalid context, batch, query, iteration or page-ratio configuration')
     if any(q not in (1,7) for q in queries):raise SystemExit('queries must be 1 or 7')
+    if not 0<=args.shared_fraction<=1:raise SystemExit('shared fraction must be 0..1')
+    if args.q1_cascade and max(batches)>8:raise SystemExit('q1 cascade supports at most eight requests')
+    if args.q1_cascade:os.environ['XE2_KV_CASCADE']='1'
     if not math.isfinite(args.l2_limit) or args.l2_limit<=0:raise SystemExit('L2 limit must be positive and finite')
     for name,value in {'XE2_KV_PARTIAL_FP16':'1','XE2_KV_COMPACT_SLM':'1',
                        'XE2_KV_S2_NSG_DRAFT':'32','XE2_KV_S2_NSG_VERIFY':'8','XE2_KV_S2_TWO_PASS':'0'}.items():
@@ -228,7 +257,7 @@ def main():
     for context in contexts:
         for batch in batches:
             for q_len in queries:
-                baseline,walk,merge,combined,q,seq,keep=prepare(context,batch,q_len,args.pages_per_block,lane,tp_rank,device)
+                baseline,walk,merge,combined,q,seq,keep=prepare(context,batch,q_len,args.pages_per_block,lane,tp_rank,device,args.q1_cascade,args.shared_fraction)
                 expected=baseline().clone();actual=combined()
                 report=error(actual,expected,device)
                 if report['relative_l2']>args.l2_limit:
@@ -247,6 +276,7 @@ def main():
                 else:fns=[baseline,walk,merge,combined]
                 dense_ms,walk_ms,merge_ms,total_ms=[timed(fn,args.iters,device) for fn in fns]
                 row={'context':context,'concurrency':batch,'q_len':q_len,'graphs':args.graphs,
+                     'q1_cascade':args.q1_cascade,'shared_fraction':args.shared_fraction,
                      'dense_per_tp_rank_ms':dense_ms,'cp_local_walk_and_lse_ms':walk_ms,
                      'cp_collective_and_merge_ms':merge_ms,'cp_total_ms':total_ms,
                      'attention_speedup':dense_ms/total_ms,'error':report}

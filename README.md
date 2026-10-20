@@ -1,6 +1,10 @@
 # K8/V4 KV cache for vLLM 0.30 on Intel XPU
 
 Four-card testers: see the [TP2 × CP2 branch guide and handoff](docs/TP2-CP2-FOUR-GPU.md).
+The [reproducible qualification procedure](docs/TP2-CP2-TESTING.md) covers the
+October 19 prefill/cascade/empty-history fixes, matched TP2 controls, actual
+four-rank inventories and 128K/200K C1/C2/C4 serving tests. See the
+[component results](results/tp2-cp2-2026-10-19/README.md) for what was tested.
 It includes an opt-in replicated-query runtime adapter, native partition-LSE
 export, a four-rank attention correctness/timing harness and a configurable
 concurrency launcher. **Four-GPU model performance and capacity are not yet

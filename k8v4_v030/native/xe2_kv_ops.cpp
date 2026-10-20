@@ -1407,7 +1407,7 @@ static void launch_s2_merge(sycl::queue &q, const float *M, const float *L, cons
           const std::int32_t seq_len32 = seq_lens[0];
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_len32);
           const int n_live = static_cast<int>(sycl::max(
-              static_cast<std::int64_t>(1),
+              static_cast<std::int64_t>(0),
               sycl::min(static_cast<std::int64_t>(n_splits),
                         (seq_len + BM - 1) / BM)));
           float gm = -INFINITY;
@@ -1475,7 +1475,7 @@ static void launch_s2_merge_to_out(sycl::queue &q, const float *M, const float *
           const std::int32_t seq_len32 = seq_lens[0];
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_len32);
           const int n_live = static_cast<int>(sycl::max(
-              static_cast<std::int64_t>(1),
+              static_cast<std::int64_t>(0),
               sycl::min(static_cast<std::int64_t>(n_splits),
                         (seq_len + BM - 1) / BM)));
           float gm = -INFINITY;
@@ -1548,7 +1548,7 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
           const std::int32_t seq_len32 = seq_lens[0];
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_len32);
           const int n_live = static_cast<int>(sycl::max(
-              static_cast<std::int64_t>(1),
+              static_cast<std::int64_t>(0),
               sycl::min(static_cast<std::int64_t>(n_splits),
                         (seq_len + BM - 1) / BM)));
           float gm = -INFINITY;
@@ -1626,7 +1626,7 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           const int p0 = head * n_splits;
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_lens[0]);
           const int n_live = static_cast<int>(sycl::max(
-              static_cast<std::int64_t>(1),
+              static_cast<std::int64_t>(0),
               sycl::min(static_cast<std::int64_t>(n_splits), (seq_len + BM - 1) / BM)));
           const int chunk = (n_live + N_SG - 1) / N_SG;
           const int s0 = sg_id * chunk;
@@ -3086,7 +3086,7 @@ static void launch_s2_cascade_half(sycl::queue &q, const float *M, const float *
           const int S = s_ptr[0];
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_lens[0]);
           const int n_live = static_cast<int>(sycl::max(
-              static_cast<std::int64_t>(1),
+              static_cast<std::int64_t>(0),
               sycl::min(static_cast<std::int64_t>(n_splits), (seq_len + BM - 1) / BM)));
           const int chunk = (n_live + N_SG - 1) / N_SG;
           const int s0 = sg_id * chunk;
@@ -3234,7 +3234,42 @@ static int cascade_mode(int batch, int q_len, int gqa, bool half_out) {
 // casc_q8 [CASC_MAX_B+1, HKV, 64, 256] int8, casc_qsc [CASC_MAX_B+1, HKV, 64] f32,
 // casc_plan [>= CASC_PLAN_LEN] i32, casc_part [R, HKV, cap, slot_rows, 256] f16,
 // casc_m / casc_l [R, HKV, cap, slot_rows] f32 with R >= batch-1 (multi path only).
-static void int8k_int4v_attn_batch_cascade(
+// Export normalization from the same mixed prefix/tail statistics S2 reads.
+// This runs before the next request overwrites its private-tail workspace.
+template <int HKV> class Xe2KvCascadeLse;
+template <int HKV>
+static void launch_cascade_lse(sycl::queue &q, const float *M, const float *L,
+                               const std::int32_t *shared, const std::int32_t *seq,
+                               int splits, int prefix_row, float *dst) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  constexpr int WG = 256;
+  q.submit([&](sycl::handler &h) {
+    h.parallel_for<Xe2KvCascadeLse<HKV>>(
+        sycl::nd_range<1>(sycl::range<1>(HQ * WG), sycl::range<1>(WG)),
+        [=](sycl::nd_item<1> it) {
+          const int i = it.get_group(0), tid = it.get_local_id(0);
+          const int head = i / GQA, row = i % GQA;
+          const int live = sycl::min(splits, sycl::max(0, (seq[0] + BM - 1) / BM));
+          const int S = shared[0];
+          float maximum = -INFINITY;
+          for (int s = tid; s < live; s += WG) {
+            size_t at = (static_cast<size_t>(head) * splits + s) * BM + row + (s < S ? prefix_row : 0);
+            if (L[at] > 0.f) maximum = sycl::fmax(maximum, M[at]);
+          }
+          maximum = sycl::reduce_over_group(it.get_group(), maximum, sycl::maximum<float>());
+          float total = 0.f;
+          for (int s = tid; s < live; s += WG) {
+            size_t at = (static_cast<size_t>(head) * splits + s) * BM + row + (s < S ? prefix_row : 0);
+            if (L[at] > 0.f && M[at] != -INFINITY) total += L[at] * sycl::exp(M[at] - maximum);
+          }
+          total = sycl::reduce_over_group(it.get_group(), total, sycl::plus<float>());
+          if (tid == 0) dst[i] = total > 0.f ? maximum + sycl::log(total) : -INFINITY;
+        });
+  });
+}
+
+static void int8k_int4v_attn_batch_cascade_impl(
     const at::Tensor &q_fp16, at::Tensor q8, at::Tensor q_scale, const at::Tensor &k_cache,
     const at::Tensor &k_scale, const at::Tensor &v_cache, const at::Tensor &v_scale,
     const at::Tensor &v_zero, const at::Tensor &block_table, const at::Tensor &seq_lens,
@@ -3242,14 +3277,26 @@ static void int8k_int4v_attn_batch_cascade(
     const at::Tensor &l_ws, const at::Tensor &merged_ws, at::Tensor out, int64_t q_len,
     int64_t pages_per_block, at::Tensor casc_q8, at::Tensor casc_qsc, at::Tensor casc_plan,
     at::Tensor casc_part, at::Tensor casc_m, at::Tensor casc_l, int64_t cap_pages,
-    int64_t slot_rows) {
+    int64_t slot_rows, at::Tensor lse) {
   constexpr int GQA6 = Heads<2>::gqa;
   TORCH_CHECK(q_fp16.dim() == 3 && q_fp16.size(2) == BK, "q_fp16 [T,HQ,D]");
   TORCH_CHECK(q_len > 0 && q_len * GQA6 <= BM, "q_len*GQA exceeds BM");
   const int batch_h = static_cast<int>(q_fp16.size(0) / q_len);
+  if (lse.defined()) {
+    TORCH_CHECK(q_len == 1, "CP cascade LSE supports q1 only");
+    check_xpu_contig(lse, "lse");
+    TORCH_CHECK(lse.scalar_type() == at::kFloat && lse.dim() == 2 &&
+                lse.size(0) == q_fp16.size(0) && lse.size(1) == q_fp16.size(1) &&
+                lse.device() == q_fp16.device(), "lse float32 [T,HQ] on query device");
+  }
   const bool half_out = out.scalar_type() == at::kHalf;
   const int mode = cascade_mode(batch_h, static_cast<int>(q_len), GQA6, half_out);
   if (mode == 0) {
+    if (lse.defined()) {
+      int8k_int4v_attn_batch_lse(q_fp16, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
+          block_table, seq_lens, visible_lens, partials_ws, m_ws, l_ws, merged_ws, out, lse, q_len, pages_per_block);
+      return;
+    }
     int8k_int4v_attn_batch(q_fp16, q8, q_scale, k_cache, k_scale, v_cache, v_scale, v_zero,
                            block_table, seq_lens, visible_lens, partials_ws, m_ws, l_ws, merged_ws,
                            out, q_len, pages_per_block);
@@ -3393,13 +3440,48 @@ static void int8k_int4v_attn_batch_cascade(
                                         static_cast<int>(cap_pages), static_cast<int>(slot_rows), 0, pb_i,
                                         dst_i, s2_seq, n_splits, tq);
       }
+      if (lse.defined()) {
+        TORCH_CHECK(mode == 1, "CP LSE requires packed q1 cascade");
+        launch_cascade_lse<HKV>(queue, mw, lw, pb_i, s2_seq, n_splits,
+                               TM + i * GQA, lse.data_ptr<float>() + static_cast<size_t>(i) * HQ);
+      }
     }
   });
+}
+
+static void int8k_int4v_attn_batch_cascade(
+    const at::Tensor &q, at::Tensor q8, at::Tensor qs, const at::Tensor &k, const at::Tensor &ks,
+    const at::Tensor &v, const at::Tensor &vs, const at::Tensor &vz, const at::Tensor &bt,
+    const at::Tensor &sl, const at::Tensor &vis, const at::Tensor &part, const at::Tensor &m,
+    const at::Tensor &l, const at::Tensor &merged, at::Tensor out, int64_t tq, int64_t ratio,
+    at::Tensor cq, at::Tensor cqs, at::Tensor plan, at::Tensor cp, at::Tensor cm, at::Tensor cl,
+    int64_t cap, int64_t rows) {
+  int8k_int4v_attn_batch_cascade_impl(q,q8,qs,k,ks,v,vs,vz,bt,sl,vis,part,m,l,merged,out,
+      tq,ratio,cq,cqs,plan,cp,cm,cl,cap,rows,at::Tensor());
+}
+
+static void int8k_int4v_attn_batch_cascade_lse(
+    const at::Tensor &q, at::Tensor q8, at::Tensor qs, const at::Tensor &k, const at::Tensor &ks,
+    const at::Tensor &v, const at::Tensor &vs, const at::Tensor &vz, const at::Tensor &bt,
+    const at::Tensor &sl, const at::Tensor &vis, const at::Tensor &part, const at::Tensor &m,
+    const at::Tensor &l, const at::Tensor &merged, at::Tensor out, int64_t tq, int64_t ratio,
+    at::Tensor cq, at::Tensor cqs, at::Tensor plan, at::Tensor cp, at::Tensor cm, at::Tensor cl,
+    int64_t cap, int64_t rows, at::Tensor lse) {
+  int8k_int4v_attn_batch_cascade_impl(q,q8,qs,k,ks,v,vs,vz,bt,sl,vis,part,m,l,merged,out,
+      tq,ratio,cq,cqs,plan,cp,cm,cl,cap,rows,lse);
 }
 
 }  // namespace
 
 TORCH_LIBRARY(xe2_kv, m) {
+  m.def(
+      "int8k_int4v_attn_batch_cascade_lse(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale, "
+      "Tensor k_cache, Tensor k_scale, Tensor v_cache, Tensor v_scale, Tensor v_zero, "
+      "Tensor block_table, Tensor seq_lens, Tensor visible_lens, Tensor(c!) partials_ws, "
+      "Tensor(d!) m_ws, Tensor(e!) l_ws, Tensor(f!) merged_ws, Tensor(g!) out, "
+      "int q_len, int pages_per_block, Tensor(h!) casc_q8, Tensor(i!) casc_qsc, "
+      "Tensor(j!) casc_plan, Tensor(k!) casc_part, Tensor(l!) casc_m, Tensor(m!) casc_l, "
+      "int cap_pages, int slot_rows, Tensor(n!) lse) -> ()");
   m.def(
       "int8k_int4v_attn_batch_lse(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale, "
       "Tensor k_cache, Tensor k_scale, Tensor v_cache, Tensor v_scale, Tensor v_zero, "
@@ -3459,6 +3541,7 @@ TORCH_LIBRARY(xe2_kv, m) {
 }
 
 TORCH_LIBRARY_IMPL(xe2_kv, XPU, m) {
+  m.impl("int8k_int4v_attn_batch_cascade_lse", &int8k_int4v_attn_batch_cascade_lse);
   m.impl("int8k_int4v_attn_batch_lse", &int8k_int4v_attn_batch_lse);
   m.impl("q_quant_once", &q_quant_once);
   m.impl("k_store", &k_store);

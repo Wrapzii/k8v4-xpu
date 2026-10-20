@@ -1,0 +1,12 @@
+.....s............................ssss.....sss............sssssss......................[mtp_topk] breadcrumb C:\Users\WHITEW~1\AppData\Local\Temp\tmpcihpe7xz\topk.jsonl
+...[mtp_topk] drafter cudagraph mode forced to NONE
+..[mtp_topk] writing C:\Users\WHITEW~1\AppData\Local\Temp\tmpy77f3lgn\topk.jsonl
+.[mtp_topk] writing C:\Users\WHITEW~1\AppData\Local\Temp\tmp58mpcgbp\topk.jsonl
+..........................................TP1 failed; inspect C:\Users\WHITEW~1\AppData\Local\Temp\tmp64mu4xxc\startup\tp1-start-262144.log (no capacity retry)
+TP1 context 262144 exceeds KV capacity; retrying at 133056 tokens. Log: C:\Users\WHITEW~1\AppData\Local\Temp\tmpm4mgkxlp\startup\tp1-start-262144.log
+............k8v4_w4a8: MLP-only installer active; small-M runtime gate=128
+.
+----------------------------------------------------------------------
+Ran 148 tests in 8.113s
+
+OK (skipped=15)

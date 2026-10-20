@@ -9,6 +9,14 @@ serving, maximum concurrency and endpoint speedup have not been validated.**
 Do not substitute an attention-only result for a model/task fidelity result.
 The existing two-GPU production server was not replaced by this work.
 
+**October 19 revision:** CP prefill now uses reconstructed full-history K/V
+with fused oneDNN, and CP q1 can use physical-prefix cascade with LSE export.
+Empty-partition scratch handling is corrected. See the
+[complete tester procedure](TP2-CP2-TESTING.md) and
+[new component receipts](../results/tp2-cp2-2026-10-19/README.md).
+Those tests do not establish that the screenshot's four-card serving losses
+are solved. Four-rank model/speed qualification is still required.
+
 [Recorded component checks](../results/tp2-cp2-2026-10-16/README.md): native
 partition output passed 32 cases with worst relative L2 0.03396%. The real
 two-device combined attention/merge passed 24 checks at 128K/200K, C1/C2/C4,
@@ -17,6 +25,8 @@ q1/q7, eager and changed-input graph replay. After fixing serial LSE export,
 6.74 ms q7**, including communication: about **1.80×**. This is **one CP pair**,
 not four-rank model serving. Four-GPU combined attention, full-model fidelity,
 serving speed and maximum concurrency remain unmeasured. Follow the gates below.
+The historical unsplit attention controls above are not a matched current
+production endpoint baseline; do not turn their 1.80× ratio into a serving claim.
 
 ## What uses each card
 
@@ -37,10 +47,14 @@ to physical cards. Check PCIe topology before comparing device orders.
 Each TP pair executes the **same complete input queries**, during both
 prefill and decode. Weights and Qwen's GDN/recurrent state are replicated
 between context lanes. Full-attention KV alone is striped in 64-token chunks.
-Each lane produces its attention output and natural-log softmax normalization;
+During decode, each lane produces its attention output and natural-log softmax normalization;
 one device collective and a fused Triton weighted merge reconstruct the complete output.
 No context pages are selected or dropped. Floating-point reduction order
 differs from the unsplit kernel, so bitwise identity is not promised.
+During fused prefill, each lane gathers the complete chronological K/V for
+one head and computes complete attention directly; no output/LSE merge follows.
+This keeps the compressed persistent cache sharded but adds temporary buffers
+and full-KV communication. Measure memory and PCIe cost on the actual host.
 
 This preserves two local KV heads per GPU while roughly halving the historical
 KV walked by each full-attention operation. It does not halve model weights,
@@ -111,13 +125,15 @@ compatibility authority for this branch.
 - Original TP1/TP2 oneDNN/Triton gather prefill and shared-prefix drafter cascade
   remain available in the ordinary two-GPU launch path.
 
-The **initial CP path has limitations**: text only; synchronous scheduling;
+The **CP path has limitations**: text only; synchronous scheduling;
 eager launch by default; no LoRA/KV-transfer connector; Qwen hybrid/four KV
-heads only. Its bounded-memory prefill is a correctness implementation, not
-the production oneDNN fast path. Its q1 LSE-export path does not yet use the
-drafter shared-prefix cascade. The current q7 kernel optimizations are reused.
-Do not describe this first CP configuration as retaining the same prefill
-speed or every serving feature. The normal two-GPU path retains those features.
+heads only. Prefill now calls the production oneDNN operator after reconstructing
+striped K/V. The old bounded-memory implementation remains explicit diagnostic
+mode only. q1 now supports the drafter physical-prefix cascade with normalization
+export. The current q7 compact kernel is retained, without the slower optional
+q7 cascade. These additions do not establish identical prefill speed or restore
+unsupported serving features. Use the new testing guide for a same-image TP2
+control, full-chunk prefill checks and repeated endpoint measurements.
 
 ## Build on the four-card Linux host
 
@@ -266,9 +282,9 @@ slows every agent badly, it is not automatically the best production setting.
    isolation or reuse the previous host-merge timing as a device result.
 3. The initial serial LSE export lost; a parallel M/L reduction now passes the
    two-card long-context screen and shows the attention gain recorded above.
-   After the four-card and model gates pass, integrate LSE export into S2,
-   profile the fused device merge, add a correct faster prefill, and restore local
-   shared-prefix q1 cascade support. Revalidate after each change.
+   October 19 adds fused oneDNN prefill reconstruction and q1 cascade/LSE support,
+   with single-device numerical/graph checks. Qualify their actual collective
+   cost and model behavior on four cards before further fusion or promotion.
 4. Qualify image inputs and async scheduling separately; neither is currently
    advertised by this CP launch profile.
 5. Publish four-GPU model C1/C2/C4 and capacity results for B60/B70 separately.
