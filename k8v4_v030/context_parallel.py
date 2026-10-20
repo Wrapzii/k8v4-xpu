@@ -7,10 +7,12 @@ Nothing in this module enables the experimental mode by default.
 from __future__ import annotations
 
 import os
+import json
 from dataclasses import dataclass
 
 import torch
 
+_RUNTIME_REPORTED = False
 
 def enabled() -> bool:
     value = os.environ.get("K8V4_CP", "1")
@@ -178,6 +180,7 @@ class ContextLane:
 
     @classmethod
     def from_vllm(cls):
+        global _RUNTIME_REPORTED
         if not enabled():
             return None
         from vllm.config import get_current_vllm_config
@@ -187,6 +190,19 @@ class ContextLane:
         group = get_dcp_group()
         if (group.world_size, get_tp_group().world_size, get_pcp_group().world_size) != (2, 2, 2):
             raise RuntimeError("four-rank CP/TP groups were not initialized")
+        from k8v4_v030.ops_api import ops
+        from k8v4_v030.cascade import enabled as cascade_enabled
+        if cascade_enabled() and not hasattr(ops(), 'int8k_int4v_attn_batch_cascade_lse'):
+            raise RuntimeError('CP q1 cascade needs the rebuilt native library; rebuild compile_decode.sh and Docker images')
+        if not _RUNTIME_REPORTED:
+            print('K8V4_CP_RUNTIME '+json.dumps({
+                'global_rank':torch.distributed.get_rank(), 'device':torch.xpu.current_device(),
+                'device_name':torch.xpu.get_device_name(), 'affinity':os.environ.get('ZE_AFFINITY_MASK'),
+                'tp_ranks':list(get_tp_group().ranks), 'cp_ranks':list(group.ranks),
+                'cp_lane':group.rank_in_group, 'prefill':prefill_mode(),
+                'q1_cascade':cascade_enabled(), 'interleave':64,
+                'q7_dispatch':'native_partition_lse', 'gdn':'replicated'}),flush=True)
+            _RUNTIME_REPORTED = True
         return cls(group.rank_in_group, 2, 64, group)
 
     def visible(self, seq_lens, q_len):
@@ -214,7 +230,22 @@ class ContextLane:
         return merge_partitions(shards[..., :-1], shards[..., -1]).to(output.dtype)
 
 
+def prefill_mode():
+    mode = os.environ.get('K8V4_CP_PREFILL', 'onednn')
+    if mode not in ('onednn', 'reference'):
+        raise ValueError('K8V4_CP_PREFILL must be onednn or reference')
+    return mode
+
+
 def paged_prefill(query, views, block_row, seq_len, pages_per_block, scale, lane):
+    """Local partition reference. Complete oneDNN prefill uses no LSE merge."""
+    mode = prefill_mode()
+    if query.device.type == 'xpu' and mode == 'onednn':
+        raise RuntimeError('oneDNN CP prefill returns complete attention; use cp_prefill.head_major_prefill without lane.merge')
+    return reference_prefill(query, views, block_row, seq_len, pages_per_block, scale, lane)
+
+
+def reference_prefill(query, views, block_row, seq_len, pages_per_block, scale, lane):
     """Bounded-memory correctness path, returning local O and natural-log LSE.
 
     Queries and GDN prefill are replicated, NOT DualChunkSwap partitioned.
