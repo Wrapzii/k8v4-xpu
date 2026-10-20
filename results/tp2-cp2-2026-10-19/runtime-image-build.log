@@ -1,0 +1,45 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.tp2cp2
+#1 transferring dockerfile: 757B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/4] FROM docker.io/library/vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2@sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742
+#4 resolve docker.io/library/vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2@sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742 0.0s done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 501.28kB 0.0s done
+#5 DONE 0.0s
+
+#4 [1/4] FROM docker.io/library/vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2@sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742
+#4 CACHED
+
+#6 [2/4] COPY k8v4_v030 /opt/k8v4/k8v4_v030
+#6 DONE 0.1s
+
+#7 [3/4] COPY build/libxe2_kv.so /opt/k8v4/libxe2_kv.so
+#7 DONE 0.0s
+
+#8 [4/4] RUN python3 -m k8v4_v030.patch_context_parallel > /opt/k8v4/cp-install-receipt.json  && python3 -c "import torch; torch.ops.load_library('/opt/k8v4/libxe2_kv.so'); print(torch.ops.xe2_kv.int8k_int4v_attn_batch_lse.default._schema); print(torch.ops.xe2_kv.int8k_int4v_attn_batch_cascade_lse.default._schema)"
+#8 1.941 xe2_kv::int8k_int4v_attn_batch_lse(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale, Tensor k_cache, Tensor k_scale, Tensor v_cache, Tensor v_scale, Tensor v_zero, Tensor block_table, Tensor seq_lens, Tensor visible_lens, Tensor(c!) partials_ws, Tensor(d!) m_ws, Tensor(e!) l_ws, Tensor(f!) merged_ws, Tensor(g!) out, Tensor(h!) lse, int q_len, int pages_per_block) -> ()
+#8 1.941 xe2_kv::int8k_int4v_attn_batch_cascade_lse(Tensor q_fp16, Tensor(a!) q8, Tensor(b!) q_scale, Tensor k_cache, Tensor k_scale, Tensor v_cache, Tensor v_scale, Tensor v_zero, Tensor block_table, Tensor seq_lens, Tensor visible_lens, Tensor(c!) partials_ws, Tensor(d!) m_ws, Tensor(e!) l_ws, Tensor(f!) merged_ws, Tensor(g!) out, int q_len, int pages_per_block, Tensor(h!) casc_q8, Tensor(i!) casc_qsc, Tensor(j!) casc_plan, Tensor(k!) casc_part, Tensor(l!) casc_m, Tensor(m!) casc_l, int cap_pages, int slot_rows, Tensor(n!) lse) -> ()
+#8 DONE 2.7s
+
+#9 exporting to image
+#9 exporting layers
+#9 exporting layers 0.2s done
+#9 exporting manifest sha256:0d0e38846a8ec90310a558fa2999ea7524f34ee19bf594f65f831a9d1a5fee13 0.0s done
+#9 exporting config sha256:726750ab6b52347eaa7cc1e972a21b0961ec85ed5215b8fb8a08fd0a8ed4ac5d 0.0s done
+#9 exporting attestation manifest sha256:dfaffe4602a80136a2a9b8b133dcfdf5d2ec43a9d69bfd4550ee384ab75b54c6 0.0s done
+#9 exporting manifest list sha256:6dc2eb376639c52c7500c39488c688e80d73e8a88310d8036c42848d4c48e36b 0.0s done
+#9 naming to docker.io/library/k8v4-tp2cp2-fixes:20261019 done
+#9 unpacking to docker.io/library/k8v4-tp2cp2-fixes:20261019 0.1s done
+#9 DONE 0.4s

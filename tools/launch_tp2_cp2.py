@@ -17,7 +17,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--model-dir', required=True, type=Path)
-    p.add_argument('--devices', default='0,1,2,3')
+    p.add_argument('--layout', choices=('tp2cp2','tp2'), default='tp2cp2',
+                   help='same-image two-card control or four-card CP candidate')
+    p.add_argument('--devices', help='defaults to 0,1 for tp2 or 0,1,2,3 for tp2cp2')
     p.add_argument('--image', default='vllm-openai-xpu:v0.30.0-k8v4-tp2cp2')
     p.add_argument('--name', default='vllm-k8v4-tp2cp2')
     p.add_argument('--port', type=int, default=8202)
@@ -31,17 +33,22 @@ def parser():
     p.add_argument('--chat-template', type=Path, default=ROOT/'templates/chat_template.jinja')
     p.add_argument('--graphs', action='store_true', help='enable FULL_DECODE_ONLY after graph correctness gate')
     p.add_argument('--no-mtp', action='store_true', help='no-speculation correctness/control run')
+    p.add_argument('--cp-prefill', choices=('onednn','reference'), default='onednn',
+                   help='gather striped K/V into fused oneDNN; reference is slow diagnostic-only')
+    p.add_argument('--no-cascade', action='store_true', help='disable CP q1 physical-prefix reuse for an A/B')
     p.add_argument('--dry-run', action='store_true')
     return p
 
 
 def command(args):
+    cp = args.layout == 'tp2cp2'
+    expected = 4 if cp else 2
     try:
-        devices = [int(x) for x in args.devices.split(',')]
+        devices = [int(x) for x in (args.devices or ('0,1,2,3' if cp else '0,1')).split(',')]
     except ValueError as error:
-        raise ValueError('select four distinct non-negative GPU indices') from error
-    if len(devices) != 4 or len(set(devices)) != 4 or min(devices) < 0:
-        raise ValueError('select four distinct non-negative GPU indices')
+        raise ValueError(f'select {expected} distinct non-negative GPU indices') from error
+    if len(devices) != expected or len(set(devices)) != expected or min(devices) < 0:
+        raise ValueError(f'select {expected} distinct non-negative GPU indices for {args.layout}')
     if args.max_seqs < 1 or args.max_seqs > 32 or args.context < 128 or args.batch_tokens < 128:
         raise ValueError('max-seqs must be 1..32; context and batch-tokens must be >=128')
     if not .1 <= args.utilization <= .95 or not 1 <= args.port <= 65535:
@@ -56,16 +63,17 @@ def command(args):
             'method':'mtp','num_speculative_tokens':6,'use_local_argmax_reduction':True},separators=(',',':'))]
     capture = [i*width for i in range(1,args.max_seqs+1)]
     env = {
-        'K8V4_CP':'2', 'VLLM_USE_V2_MODEL_RUNNER':'0',
+        'K8V4_CP':'2' if cp else '1', 'VLLM_USE_V2_MODEL_RUNNER':'0',
         'ZE_AFFINITY_MASK':','.join(map(str, devices)), 'ZE_FLAT_DEVICE_HIERARCHY':'COMPOSITE',
         'PYTHONPATH':'/opt/k8v4', 'XE2_KV_LIB':'/opt/k8v4/libxe2_kv.so',
         'K8V4_SDPA_LIB':'/opt/k8v4/libk8v4_sdpa.so', 'K8V4_PREFILL':'onednn',
         'K8V4_PREFILL_GATHER':'triton', 'K8V4_PREFILL_GEMM':'w4a8',
         'XE2_KV_COMPACT_SLM':'1', 'XE2_KV_PARTIAL_FP16':'1', 'XE2_KV_S2_NSG':'32',
         'XE2_KV_S2_NSG_DRAFT':'32', 'XE2_KV_S2_NSG_VERIFY':'8', 'XE2_KV_S2_TWO_PASS':'0',
-        # The serial TP2 cascade remains in this branch. The new CP path must
-        # export LSE; its initial q1 implementation does not use the cascade.
-        'XE2_KV_CASCADE':'0', 'B70_MTP_BF16_DRAFT':'1', 'B70_WORKER_AFFINITY':'1',
+        'K8V4_CP_PREFILL':args.cp_prefill,
+        'XE2_KV_CASCADE':'0' if args.no_cascade else '1',
+        'K8V4_CASCADE_MAX_B':str(min(args.max_seqs,8)),
+        'B70_MTP_BF16_DRAFT':'1', 'B70_WORKER_AFFINITY':'1',
         'CCL_SYCL_ALLREDUCE_LL':'twoshots','CCL_SYCL_ALLREDUCE_SIMPLE_READ':'1',
         'CCL_SYCL_COPY_ENGINE':'1','CCL_SYCL_ALLREDUCE_SIMPLE_THRESHOLD':'4294967296',
         'CCL_SYCL_REDUCE_SCATTER_SIMPLE_THRESHOLD':'4294967296',
@@ -85,13 +93,15 @@ def command(args):
     cmd += [args.image,'/model','--host=0.0.0.0','--port=8000',
             '--served-model-name='+args.served_name,'--dtype=float16','--trust-remote-code',
             '--kv-cache-dtype=int8_k_int4_v','--tensor-parallel-size=2',
-            '--prefill-context-parallel-size=2','--decode-context-parallel-size=2',
-            '--cp-kv-cache-interleave-size=64','--distributed-executor-backend=mp',
+            '--distributed-executor-backend=mp',
             '--max-model-len='+str(args.context),'--max-num-seqs='+str(args.max_seqs),
             '--max-num-batched-tokens='+str(args.batch_tokens),
             '--gpu-memory-utilization='+str(args.utilization),'--enable-prefix-caching',
             '--language-model-only','--no-async-scheduling','--enable-auto-tool-choice',
             '--tool-call-parser=qwen3_xml','--reasoning-parser=qwen3']
+    if cp:
+        cmd += ['--prefill-context-parallel-size=2','--decode-context-parallel-size=2',
+                '--cp-kv-cache-interleave-size=64']
     cmd += speculative
     if args.graphs:
         cmd += ['--compilation-config='+json.dumps({'cudagraph_mode':'FULL_DECODE_ONLY',
@@ -106,8 +116,10 @@ def main():
     try:cmd=command(args)
     except ValueError as error:raise SystemExit(str(error))
     if args.dry_run:
-        print(json.dumps({'argv':cmd,'world_size':4,'tp_groups':[[0,1],[2,3]],
-                          'cp_groups':[[0,2],[1,3]],'experimental':True,
+        cp=args.layout=='tp2cp2'
+        print(json.dumps({'argv':cmd,'world_size':4 if cp else 2,
+                          'tp_groups':[[0,1],[2,3]] if cp else [[0,1]],
+                          'cp_groups':[[0,2],[1,3]] if cp else [[0],[1]],'experimental':True,
                           'concurrency_limit':args.max_seqs,
                           'capacity_at_requested_context':'must be measured on target hardware'},indent=2))
         return

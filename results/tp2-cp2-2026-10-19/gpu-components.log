@@ -1,0 +1,50 @@
+test_complete_attention_matches_two_local_partitions (k8v4_v030.tests.test_cp_prefill.OneDnnCpXpuTest.test_complete_attention_matches_two_local_partitions) ... k8v4_sdpa compile q=256 kv=1 hq=6 hk=1 ms=1161
+CP_ONEDNN seq=1 q=1 r=1 lane=0 l2=0
+CP_ONEDNN seq=1 q=1 r=1 lane=1 l2=0
+k8v4_sdpa compile q=256 kv=65 hq=6 hk=1 ms=835
+CP_ONEDNN seq=65 q=65 r=1 lane=0 l2=0.00022566707
+CP_ONEDNN seq=65 q=65 r=1 lane=1 l2=0.00022566707
+k8v4_sdpa compile q=256 kv=129 hq=6 hk=1 ms=0
+CP_ONEDNN seq=129 q=65 r=33 lane=0 l2=0.00033799329
+CP_ONEDNN seq=129 q=65 r=33 lane=1 l2=0.00033799329
+k8v4_sdpa compile q=256 kv=263 hq=6 hk=1 ms=0
+CP_ONEDNN seq=263 q=128 r=33 lane=0 l2=0.00034127256
+CP_ONEDNN seq=263 q=128 r=33 lane=1 l2=0.00034127256
+k8v4_sdpa compile q=512 kv=4225 hq=6 hk=1 ms=8
+CP_ONEDNN seq=4225 q=257 r=33 lane=0 l2=0.00035164409
+CP_ONEDNN seq=4225 q=257 r=33 lane=1 l2=0.00035164409
+k8v4_sdpa compile q=256 kv=32769 hq=6 hk=1 ms=0
+CP_ONEDNN seq=32769 q=128 r=33 lane=0 l2=0.00035675013
+ok
+test_long_local_cost_and_changed_query (k8v4_v030.tests.test_cp_prefill.OneDnnCpXpuTest.test_long_local_cost_and_changed_query) ... CP_ONEDNN seq=32769 q=128 r=33 lane=1 l2=0.00035675013
+k8v4_sdpa compile q=256 kv=200003 hq=6 hk=1 ms=0
+CP_ONEDNN_LONG scope=one-device-virtual-gather milliseconds={'old_local_reference': 83.50200367082532, 'new_complete_virtual_gather': 29.56712133406351} l2=0.00035763651 changed_l2=0.00035724492
+ok
+test_production_query_chunk_against_independent_full_cache (k8v4_v030.tests.test_cp_prefill.OneDnnCpXpuTest.test_production_query_chunk_against_independent_full_cache) ... k8v4_sdpa compile q=4352 kv=4225 hq=6 hk=1 ms=9
+CP_ONEDNN_FULL_CHUNK seq=4225 q=4224 lane=0 changed=False l2=0
+CP_ONEDNN_FULL_CHUNK seq=4225 q=4224 lane=1 changed=False l2=0
+CP_ONEDNN_FULL_CHUNK seq=4225 q=4224 lane=0 changed=True l2=0
+CP_ONEDNN_FULL_CHUNK seq=4225 q=4224 lane=1 changed=True l2=0
+k8v4_sdpa compile q=4352 kv=200003 hq=6 hk=1 ms=8
+CP_ONEDNN_FULL_CHUNK seq=200003 q=4224 lane=0 changed=False l2=0
+CP_ONEDNN_FULL_CHUNK seq=200003 q=4224 lane=1 changed=False l2=0
+CP_ONEDNN_FULL_CHUNK seq=200003 q=4224 lane=0 changed=True l2=0
+CP_ONEDNN_FULL_CHUNK seq=200003 q=4224 lane=1 changed=True l2=0
+ok
+test_mode_rejects_unknown_or_unimplemented_path (k8v4_v030.tests.test_cp_prefill.ReconstructionTest.test_mode_rejects_unknown_or_unimplemented_path) ... ok
+test_uneven_stripes_padding_and_empty_lane (k8v4_v030.tests.test_cp_prefill.ReconstructionTest.test_uneven_stripes_padding_and_empty_lane) ... ok
+test_empty_partition_ignores_poisoned_previous_request_workspace (k8v4_v030.tests.test_cp_cascade_xpu.CpCascadeXpuTest.test_empty_partition_ignores_poisoned_previous_request_workspace) ... ok
+test_shared_and_independent_q1_lse_and_changed_graph_replay (k8v4_v030.tests.test_cp_cascade_xpu.CpCascadeXpuTest.test_shared_and_independent_q1_lse_and_changed_graph_replay) ... CP_CASCADE B=1 seq=129 ratio=1 share=0 graph=PASS
+CP_CASCADE B=4 seq=4225 ratio=33 share=0 graph=PASS
+CP_CASCADE B=4 seq=4225 ratio=33 share=1 graph=PASS
+CP_CASCADE B=8 seq=4225 ratio=33 share=0.5 graph=PASS
+CP_CASCADE B=4 seq=100003 ratio=33 share=0.75 graph=PASS
+ok
+test_fused_packet_merge_matches_reference (k8v4_v030.tests.test_cp_kernel_xpu.NativeCpPartitionTest.test_fused_packet_merge_matches_reference) ... ok
+test_native_lse_and_striped_causal_walk_match_unsplit (k8v4_v030.tests.test_cp_kernel_xpu.NativeCpPartitionTest.test_native_lse_and_striped_causal_walk_match_unsplit) ... Native CP virtual-lane cases=32 max_relative_l2=0.00033956626
+ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 24.457s
+
+OK

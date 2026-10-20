@@ -1,0 +1,39 @@
+Intel(R) oneAPI DPC++/C++ Compiler 2026.0.0 (2026.0.0.20260331)
+Target: x86_64-unknown-linux-gnu
+Thread model: posix
+InstalledDir: /opt/intel-2026/oneapi/compiler/2026.0/bin/compiler
+Configuration file: /opt/intel-2026/oneapi/compiler/2026.0/bin/compiler/../icpx.cfg
+In file included from /src/xe2_kv_ops.cpp:12:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/ATen.h:8:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/Context.h:5:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/CPUGeneratorImpl.h:4:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/core/Generator.h:19:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/GeneratorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/TensorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/InferenceMode.h:4:
+/opt/venv/lib/python3.12/site-packages/torch/include/c10/core/AutogradState.h:89:33: warning: default member initializer for bit-field is a C++20 extension [-Wc++20-extensions]
+   89 |   bool view_replay_enabled_ : 1 = false;
+      |                                 ^
+/opt/venv/lib/python3.12/site-packages/torch/include/c10/core/AutogradState.h:90:45: warning: default member initializer for bit-field is a C++20 extension [-Wc++20-extensions]
+   90 |   bool grad_layout_enforcement_enabled_ : 1 = true;
+      |                                             ^
+2 warnings generated.
+In file included from /src/xe2_kv_ops.cpp:12:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/ATen.h:8:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/Context.h:5:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/CPUGeneratorImpl.h:4:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/core/Generator.h:19:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/GeneratorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/TensorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/InferenceMode.h:4:
+/opt/venv/lib/python3.12/site-packages/torch/include/c10/core/AutogradState.h:89:33: warning: default member initializer for bit-field is a C++20 extension [-Wc++20-extensions]
+   89 |   bool view_replay_enabled_ : 1 = false;
+      |                                 ^
+/opt/venv/lib/python3.12/site-packages/torch/include/c10/core/AutogradState.h:90:45: warning: default member initializer for bit-field is a C++20 extension [-Wc++20-extensions]
+   90 |   bool grad_layout_enforcement_enabled_ : 1 = true;
+      |                                             ^
+2 warnings generated.
+909f7dd3201685fbfb769bbc20408f763b5e170be62b4550944d2cf8defb8998  /mnt/hdd-500gb/tp2cp2-fixes-20261019/build/libxe2_kv.so
+September 30 measured library: 11535539e01ab3d5b0942911c14c4bb9d8ab0eb855cfd784748a83e33c379498
+A rebuild can hash differently. The build still succeeds.
+DECODE_COMPILE_OK

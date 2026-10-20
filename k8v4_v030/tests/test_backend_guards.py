@@ -9,7 +9,9 @@ device work.
 from __future__ import annotations
 
 import importlib.util
+import os
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -51,6 +53,7 @@ class BackendForwardGuardTest(unittest.TestCase):
             layout=layout,
         )
 
+    @patch.dict(os.environ, {'K8V4_CP': '1'})
     def test_builder_impl_layout_mismatch_is_refused(self):
         from k8v4_v030.backend import Xe2K8V4Impl
 
