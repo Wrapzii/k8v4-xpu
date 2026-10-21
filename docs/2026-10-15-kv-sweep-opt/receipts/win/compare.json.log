@@ -1,0 +1,226 @@
+{
+ "q1/share1.0/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.98/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.9/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.0/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share1.0/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.9/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.0/B4/seq200000/r33": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share1.0/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.98/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.9/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.0/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share1.0/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.9/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.0/B4/seq200000/r1": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share1.0/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.98/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.9/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.0/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share1.0/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.9/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.0/B4/seq200000/r33/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share1.0/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.98/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.9/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.0/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share1.0/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.9/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.0/B4/seq200000/r1/cand_serial": {
+  "bitwise_equal": true,
+  "n_diff": 0,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ }
+}

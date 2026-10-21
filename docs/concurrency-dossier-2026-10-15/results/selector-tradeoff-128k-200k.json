@@ -1,0 +1,113 @@
+{
+  "fidelity_relative_L2_strictly_below": 0.01,
+  "total_ms_strictly_below": 1.6,
+  "scope": "one layer31 q7 native timing snapshot per context, global page union; not workload/task validation",
+  "selector_includes": "scores, ranking, host compaction",
+  "excluded_costs": "metadata build/live maintenance, table allocation, serving/model work",
+  "counts": [
+    {
+      "length": 131079,
+      "tested": 105,
+      "actual_pass": 0,
+      "free_selector_pass": 25
+    },
+    {
+      "length": 200007,
+      "tested": 105,
+      "actual_pass": 0,
+      "free_selector_pass": 16
+    }
+  ],
+  "table": [
+    {
+      "context": 131079,
+      "case": "Fastest overall, measured",
+      "selector": "quest",
+      "aggregation": "prob_max",
+      "budget": 0.05,
+      "physical_page_percent": 7.076622742801367,
+      "attention_ms": 0.12618568507605232,
+      "selector_ms": 1.7931400070665404,
+      "total_ms": 1.9193256921425927,
+      "error_percent": 6.97835311293602,
+      "actual_selector_ms_even_if_idealized_row": 1.7931400070665404,
+      "max_selector_ms_for_cutoff": 1.4738143149239478,
+      "max_selector_ms_to_beat_own_baseline": 0.9598110045772046
+    },
+    {
+      "context": 131079,
+      "case": "Fastest below 1% L2, measured",
+      "selector": "quest",
+      "aggregation": "independent_union",
+      "budget": 0.3,
+      "physical_page_percent": 63.05514885309908,
+      "attention_ms": 0.6986570624576416,
+      "selector_ms": 2.154288798919879,
+      "total_ms": 2.8529458613775205,
+      "error_percent": 0.7998568937182426,
+      "actual_selector_ms_even_if_idealized_row": 2.154288798919879,
+      "max_selector_ms_for_cutoff": 0.9013429375423585,
+      "max_selector_ms_to_beat_own_baseline": 0.3873396271956153
+    },
+    {
+      "context": 131079,
+      "case": "Best below 1% L2, FREE selector",
+      "selector": "sparq64",
+      "aggregation": "weighted",
+      "budget": 0.5,
+      "physical_page_percent": 56.8081991215227,
+      "attention_ms": 0.6371095005306415,
+      "selector_ms": 0,
+      "total_ms": 0.6371095005306415,
+      "error_percent": 0.8482671342790127,
+      "actual_selector_ms_even_if_idealized_row": 5.1558043487602845,
+      "max_selector_ms_for_cutoff": 0.9628904994693586,
+      "max_selector_ms_to_beat_own_baseline": 0.4488871891226154
+    },
+    {
+      "context": 200007,
+      "case": "Fastest overall, measured",
+      "selector": "quest",
+      "aggregation": "max",
+      "budget": 0.05,
+      "physical_page_percent": 6.877799104286628,
+      "attention_ms": 0.1514856849098578,
+      "selector_ms": 1.7334086442133412,
+      "total_ms": 1.884894329123199,
+      "error_percent": 8.590339124202728,
+      "actual_selector_ms_even_if_idealized_row": 1.7334086442133412,
+      "max_selector_ms_for_cutoff": 1.4485143150901423,
+      "max_selector_ms_to_beat_own_baseline": 1.4489094392047264
+    },
+    {
+      "context": 200007,
+      "case": "Fastest below 1% L2, measured",
+      "selector": "quest",
+      "aggregation": "independent_union",
+      "budget": 0.3,
+      "physical_page_percent": 63.62763915547025,
+      "attention_ms": 1.0456285017426126,
+      "selector_ms": 2.107617416186258,
+      "total_ms": 3.1532459179288708,
+      "error_percent": 0.9828514419496059,
+      "actual_selector_ms_even_if_idealized_row": 2.107617416186258,
+      "max_selector_ms_for_cutoff": 0.5543714982573875,
+      "max_selector_ms_to_beat_own_baseline": 0.5547666223719716
+    },
+    {
+      "context": 200007,
+      "case": "Best below 1% L2, FREE selector",
+      "selector": "sparq64",
+      "aggregation": "prob_top2",
+      "budget": 0.5,
+      "physical_page_percent": 59.11708253358925,
+      "attention_ms": 0.9767300616658758,
+      "selector_ms": 0,
+      "total_ms": 0.9767300616658758,
+      "error_percent": 0.9947588667273521,
+      "actual_selector_ms_even_if_idealized_row": 9.413694635441061,
+      "max_selector_ms_for_cutoff": 0.6232699383341243,
+      "max_selector_ms_to_beat_own_baseline": 0.6236650624487083
+    }
+  ]
+}

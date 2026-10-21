@@ -1,0 +1,67 @@
+{
+ "q7/share0.98/B3/seq200000/r33": {
+  "ms_serial": 4.5499,
+  "ms_casc": 5.3921,
+  "plan_casc": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036
+  ],
+  "ms_vsg2": 5.7871,
+  "plan_vsg2": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036
+  ],
+  "ms_vsg4": 6.6018,
+  "plan_vsg4": [
+   3036,
+   0,
+   3036,
+   3036,
+   3036
+  ],
+  "vs_fp64_serial": {
+   "max_abs": 0.00012681202677893456,
+   "max_rel": 0.012681202677893456,
+   "finite": true
+  },
+  "vs_fp64_casc": {
+   "max_abs": 0.00012681202677893456,
+   "max_rel": 0.012681202677893456,
+   "finite": true
+  },
+  "vs_fp64_vsg2": {
+   "max_abs": 0.00012681202677893456,
+   "max_rel": 0.012681202677893456,
+   "finite": true
+  },
+  "vs_fp64_vsg4": {
+   "max_abs": 0.00012681202677893456,
+   "max_rel": 0.012681202677893456,
+   "finite": true
+  },
+  "vs_serial_casc": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg2": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "vs_serial_vsg4": {
+   "bitwise": true,
+   "max_abs": 0.0,
+   "max_rel": 0.0
+  },
+  "graph_replay_casc_bitwise": true,
+  "graph_replay_vsg2_bitwise": true,
+  "graph_replay_vsg4_bitwise": true
+ }
+}
