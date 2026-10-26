@@ -200,7 +200,16 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         logits_soft_cap: float | None = None,
         attn_type: str = AttentionType.DECODER,
         kv_sharing_target_layer_name: str | None = None,
+        sinks: torch.Tensor | None = None,
     ) -> None:
+        # k8v4-sinks patch (draft-quality-plan Phase 1): vLLM 0.30 DFlash draft attention
+        # always passes sinks= (None unless the draft config sets attention_sink_bias).
+        # Accept the kwarg; sink bias itself is NOT implemented on this backend - fail
+        # loud rather than silently dropping a real bias.
+        if sinks is not None:
+            raise RuntimeError(
+                'Xe2K8V4Impl: attention sink bias (sinks) is not implemented on the k8v4 backend'
+            )
         if kv_cache_dtype != CACHE_DTYPE:
             raise RuntimeError("K8/V4 impl got kv dtype %s" % kv_cache_dtype)
         if num_kv_heads is None:
