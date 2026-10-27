@@ -26,9 +26,19 @@ from vllm.model_executor.utils import set_weight_attrs
 GROUP_SIZE = 128
 
 
-def _island_suffixes():
-    raw = os.environ.get('K8V4_INT8_ISLANDS', '')
-    return tuple(s.strip() for s in raw.split(',') if s.strip())
+def _register_int8_fake():
+    try:
+        import vllm_xpu_kernels._xpu_C  # noqa: F401
+
+        @torch.library.register_fake("_xpu_C::int8_gemm_w8a16")
+        def _int8_gemm_w8a16_fake(x, w, bias, scale, group_size):
+            return torch.empty(x.shape[:-1] + (w.shape[1],),
+                               dtype=x.dtype, device=x.device)
+    except Exception:
+        pass
+
+
+_register_int8_fake()
 
 
 def _int8_op():
@@ -36,8 +46,12 @@ def _int8_op():
         import vllm_xpu_kernels._xpu_C  # noqa: F401
     except Exception:
         return None
-    op = getattr(torch.ops._xpu_C, "int8_gemm_w8a16", None)
-    return op if op is not None else None
+    return getattr(torch.ops._xpu_C, "int8_gemm_w8a16", None)
+
+
+def _island_suffixes():
+    raw = os.environ.get('K8V4_INT8_ISLANDS', '')
+    return tuple(s.strip() for s in raw.split(',') if s.strip())
 
 
 def maybe_island_method(prefix: str):
@@ -107,7 +121,7 @@ class Int8IslandLinearMethod(LinearMethodBase):
         bias: torch.Tensor | None = None,
     ) -> torch.Tensor:
         op = _int8_op()
-        if op is not None and layer.weight_t.device == x.device:
+        if op is not None and not x.is_meta and layer.weight_t.device == x.device:
             out_shape = x.shape[:-1] + (layer.weight_t.shape[1],)
             y = op(x.reshape(-1, x.shape[-1]), layer.weight_t, bias, layer.scale_t,
                    GROUP_SIZE)
