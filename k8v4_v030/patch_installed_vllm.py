@@ -28,6 +28,31 @@ _XPU_NEW = (
     '        if kv_cache_dtype is not None and kv_cache_dtype.startswith("turboquant_"):\n'
 )
 
+_ISLAND_WRAP_OLD = '            return UnquantizedLinearMethod()\n'
+_ISLAND_WRAP_NEW = (
+    '            try:\n'
+    '                from k8v4_v030.int8_island import maybe_island_method as _mk_island\n'
+    '                _island = _mk_island(prefix)\n'
+    '                if _island is not None:\n'
+    '                    return _island\n'
+    '            except ImportError:\n'
+    '                pass\n'
+    '            return UnquantizedLinearMethod()\n'
+)
+
+
+def _splice_island_wrap(path: Path) -> str:
+    """Wrap the UnquantizedLinearMethod return so K8V4_INT8_ISLANDS modules
+    get the int8 island method instead (see k8v4_v030/int8_island.py)."""
+    text = path.read_text(encoding='utf-8')
+    if 'maybe_island_method' in text:
+        return 'unchanged'
+    if text.count(_ISLAND_WRAP_OLD) != 1:
+        raise RuntimeError('%s island anchor count %d' % (path, text.count(_ISLAND_WRAP_OLD)))
+    path.write_text(text.replace(_ISLAND_WRAP_OLD, _ISLAND_WRAP_NEW, 1), encoding='utf-8')
+    return 'patched'
+
+
 _DEFAULT_ROOTS = (
     Path("/opt/venv/lib/python3.12/site-packages/vllm"),
     Path("/workspace/vllm/vllm"),
@@ -58,6 +83,9 @@ def patch_vllm_tree(root: Path) -> list[str]:
         if not path.is_file():
             raise RuntimeError("missing %s" % path)
         notes.append("%s:%s" % (label, _splice(path, old, new, label)))
+    gptq_utils = root / "model_executor/layers/quantization/utils/gptq_utils.py"
+    if gptq_utils.exists():
+        notes.append("int8_island:%s" % _splice_island_wrap(gptq_utils))
     return notes
 
 
