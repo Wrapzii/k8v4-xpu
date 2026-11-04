@@ -1,0 +1,12 @@
+Wed 2026-11-04 20:00:00 UTC 1min 50s Wed 2026-11-04 19:30:01 UTC    28min ago fstrim.timer                    fstrim.service
+Thu 2026-11-05 09:00:00 UTC      13h Wed 2026-11-04 09:00:00 UTC      10h ago ai01-branch-cleanup.timer       ai01-branch-cleanup.service
+stopped-timer fstrim.timer
+stopped-timer ai01-branch-cleanup.timer
+stopped-timer e2scrub_all.timer
+paused-container FORGEJO-ACTIONS-TASK-28994_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+paused-container FORGEJO-ACTIONS-TASK-28992_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+paused-container FORGEJO-ACTIONS-TASK-28995_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+paused-container FORGEJO-ACTIONS-TASK-28987_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+paused-container wrapzii-server-runner
+paused-container forgejo-runner
+flag+healthcheck-timer-stopped

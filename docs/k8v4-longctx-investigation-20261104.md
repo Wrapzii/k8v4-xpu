@@ -84,3 +84,74 @@ Correctness reference: dequantize K/V (dequant.py) and run fp32 SDPA; tolerance 
   Build: oneAPI 2025.3.2 from the host, mounted into a throwaway CPU-only container of the vLLM image,
   `-fsycl-targets=spir64_gen -Xs "-device bmg-g21"`. Production lib source: missing (kv-sweep-opt-20261015 is gone).
 * Isolated bench (ready, not run): `tools/k8v4_attn_splits_bench.py --sweep default`.
+
+---
+# UPDATE 2026-11-04 15:15 ET: blocker cleared, funnel A/B run (production library)
+
+Restart: vLLM recreated once at `--gpu-memory-utilization=0.90` (everything else identical, profiler on).
+Down 19:58:47Z, healthy 20:06:33Z (**~7.8 min**). Test completion OK. KV pool 753,004 tokens (was 814,581),
+"max concurrency 2.87x" at 262K. GPU0 frees ~1.7 GiB. Rollback container: `vllm-k8v4-tp2-before-gmu090-20261104T195848`.
+Paused during the window and restored afterwards (`results/paused-20261104.txt`): fstrim.timer, ai01-branch-cleanup.timer,
+e2scrub_all.timer, forgejo-runner + wrapzii-server-runner + 4 CI job containers (docker pause/unpause; nothing killed),
+vllm-healthcheck.timer + /run/vllm-intentional-stop. Outside vLLM load before the runs: 0 running / 0 waiting.
+
+All numbers below are **MEASURED, PRODUCTION library** (libxe2_kv_cascade.so sha256 f1565f84?), isolated process
+in a throwaway container on GPU0, fixture built directly (seed 1234, one layer, HKV=2), production XE2_* knobs.
+Combined = torch.xpu.Event p50 of 30-40 reps. S1/S2 = the library's own `XE2_KV_TIME_SPLITS` host-timed split (10 reps).
+p10-p90 spread is <1% except a few outliers. Batch reuses the same physical pages per request (KV >> L2, so it still reads DRAM).
+`attn_batch` (non-cascade) is the unique-context case.
+
+## A. Decisive test: verifier q_len 7, PARTIAL_FP16 0 vs 1 (us per request)
+| ctx | b | pf16 | S1 | S2 | total | est workspace MB/req |
+|---|---|---|---|---|---|---|
+| 131072 | 1 | 0 | 904 | 466 | 1408 | 403 |
+| 131072 | 1 | 1 | 748 | 269 | 1044 | 201 |
+| 204800 | 1 | 0 | 1398 | 722 | 2145 | 629 |
+| 204800 | 1 | 1 | 1151 | 402 | 1584 | 315 |
+| 204800 | 4 | 0 | 1397 | 714 | 2120 | 629 |
+| 204800 | 4 | 1 | 1152 | 401 | 1557 | 315 |
+Halving the workspace bytes (157 MB less written in S1 and 157 MB less read in S2 at 200K) cut S1 by 247 us and S2 by 321 us.
+**Time tracks workspace bytes**, and the marginal cost is close to DRAM speed (~490-630 GB/s apparent, which means part of
+the write is absorbed by L2). Outputs are identical (max |diff| 4e-6).
+
+## B. Broad sweep, pf16=1 (us per request; full table in results/kernel/broad.jsonl)
+| ctx | draft S1 / S2 / total | verify S1 / S2 / total | verify/draft |
+|---|---|---|---|
+| 2K | 57 / 58 / 204 | 93 / 33 / 239 | fixed-overhead bound (~200 us/call) |
+| 32K | 105 / 29 / 163 | 201 / 83 / 314 | 1.9x |
+| 128K | 450 / 61 / 540 | 744 / 268 / 1044 | 1.9x |
+| 200K | 690 / 88 / 809 | 1151 / 402 / 1585 | 2.0x |
+* **Concurrency:** us/req is flat in batch (200K verify b1/b2/b4 = 1585/1566/1558). There is no contention or geometry
+  penalty: the op runs requests serially, so the per-step attention cost is exactly linear in concurrent requests.
+* **Achieved bandwidth (KV + estimated workspace):** S1 draft 200K (162+26 MB)/690 us = 272 GB/s, S1 verify
+  (162+157)/1151 = 277 GB/s, S2 verify 157/402 = 391 GB/s (86% of 456). Verify S1 exceeds draft S1 by almost exactly
+  its extra workspace bytes at the same ~275 GB/s.
+* **Existing knobs re-checked** (production values already best): S2_NSG_VERIFY 8 ? 16/32 makes verify S2 slower
+  (402 ? 515/441 us at 200K); COMPACT_SLM 0 makes verify S1 slower (1151 ? 1418); SMALL_S1 0 makes draft S1 slower (690 ? 1000).
+
+## Verdict: bandwidth (intermediate traffic), not compute
+* S2 is pure workspace bandwidth (86% of peak). S1 time is proportional to KV + workspace bytes at ~275 GB/s
+  (60% of peak) for both draft and verify, despite 6x more live rows in verify. That rules out DPAS/row compute as the
+  differentiator. Spills are ruled out (compiler study).
+* Verify workspace is 1.94x KV bytes per request (measured to matter by the pf16 A/B). It's the largest removable cost.
+* The 4-concurrency loss at long context: the attention cost is linear in requests (measured). Per step at 200K x4,
+  verify attention is ~16 layers x 4 x 1.56 ms ? 100 ms (combined measured x layer count). The remaining superlinear
+  E2E loss (77 vs 94 tok/s) still points at outside-attention effects (MTP acceptance/scheduling). **Not measured.**
+
+## Next optimization (justified): multi-page verifier splits
+P pages per S1 program (online softmax across pages, one 48-row fp16 partial per P pages). PROJECTION from
+the measured ~277 GB/s (S1) and ~391 GB/s (S2) at 200K:
+| P | ws MB/req | S1 | S2 | total | speedup |
+|---|---|---|---|---|---|
+| 1 (now) | 315 | 1151 | 402 | 1585 | 1.0x |
+| 2 | 157 | ~875 | ~200 | ~1075 | ~1.5x |
+| 4 | 79 | ~730 | ~100 | ~830 | ~1.9x |
+Draft at P=4: ~809 ? ~650 us (~1.2x). At 200K x4 this removes ~45-50 ms of verify attention per step (projected).
+A second-order S1 item: S1 reaches only 60% of peak (8-byte V loads, per-page Q reload). Try 16-byte V loads after P.
+Implementation needs a rebuild from the c4 source (closest available) and a correctness check against fp32 SDPA. Not done,
+and nothing promoted.
+
+## Reproduce
+`results/kernel/run.sh <name> --ctx 131072,204800 --batch 1,4 --qlen 7 --pf16 0,1` (throwaway container,
+production lib + package read-only, GPU0). Knob overrides: `NSGV=16|32`, `CSLM=0`, `SMALLS1=0`. Files: `results/kernel/
+{decisive,broad,nsgv16,nsgv32,cslm0,smalls1off}.jsonl`, hashes `results/kernel/sha256.txt`.
