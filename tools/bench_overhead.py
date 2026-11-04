@@ -4,7 +4,10 @@ profiler OFF and once with it ON (same image, same args); compare.
 
 Measures per request: TTFT, TPOT (mean inter-chunk gap after the first token),
 end-to-end, output tok/s; and aggregate throughput per concurrency level.
-Prompts are synthetic, unique per run (nonce prefix) to defeat prefix caching.
+Prompts are FIXED per context size (identical for every request, every phase)
+so the prefix cache is hit: TTFT is mostly a cache hit and the timings
+reflect decode/attention. One warm-up request per context size (excluded)
+fills the cache after a restart.
 
 usage: bench_overhead.py --label off --url http://127.0.0.1:8100/v1 \
          --ctx 2000,32000,128000 --conc 1,4 --reps 3 --max-tokens 256 --out results/
@@ -24,14 +27,14 @@ def model_id(url):
         return json.load(r)["data"][0]["id"]
 
 
-def prompt(ntok, nonce):
+def prompt(ntok, nonce=None):
     # ~1 token per word for these words; exact length is reported by the server.
     body = " ".join(WORDS[i % len(WORDS)] for i in range(ntok))
-    return "[%s] %s\nSummarise the list above in one long paragraph." % (nonce, body)
+    return "%s\nSummarise the list above in one long paragraph." % body
 
 
 def one(url, model, ntok, max_tokens):
-    data = json.dumps({"model": model, "prompt": prompt(ntok, uuid.uuid4().hex), "max_tokens": max_tokens,
+    data = json.dumps({"model": model, "prompt": prompt(ntok), "max_tokens": max_tokens,
                        "temperature": 0, "ignore_eos": True, "stream": True,
                        "stream_options": {"include_usage": True}}).encode()
     req = urllib.request.Request(url + "/completions", data=data, headers={"Content-Type": "application/json"})
@@ -60,14 +63,15 @@ def run(a):
     url = a.url.rstrip("/"); model = a.model or model_id(url)
     res = {"label": a.label, "model": model, "started": time.time(), "points": []}
     for ctx in [int(x) for x in a.ctx.split(",")]:
+        w = one(url, model, ctx, a.max_tokens)  # cache warm-up, excluded
+        res.setdefault("warmups", []).append(w)
+        print(json.dumps({"warmup_ctx": ctx, "ttft_s": round(w["ttft_s"], 3)}), flush=True)
         for conc in [int(x) for x in a.conc.split(",")]:
-            for rep in range(a.reps + 1):  # rep 0 = warmup, discarded
+            for rep in range(1, a.reps + 1):
                 t0 = time.perf_counter()
                 with cf.ThreadPoolExecutor(conc) as ex:
                     reqs = list(ex.map(lambda _: one(url, model, ctx, a.max_tokens), range(conc)))
                 wall = time.perf_counter() - t0
-                if rep == 0:
-                    continue
                 pt = {"ctx": ctx, "conc": conc, "rep": rep, "wall_s": wall,
                       "agg_out_tok_s": sum(r["completion_tokens"] for r in reqs) / wall, "reqs": reqs}
                 res["points"].append(pt)

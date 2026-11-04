@@ -1,0 +1,38 @@
+== off pre-metrics 18:37:02
+vllm:num_requests_running{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="capacity"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="deferred"} 0.0
+{"ctx": 2000, "conc": 1, "rep": 1, "wall_s": 3.3773104020074243, "agg_out_tok_s": 37.89998098010732}
+{"ctx": 2000, "conc": 1, "rep": 2, "wall_s": 2.4864714260038454, "agg_out_tok_s": 51.47857267184298}
+{"ctx": 2000, "conc": 4, "rep": 1, "wall_s": 7.084115416000714, "agg_out_tok_s": 72.27437300690478}
+{"ctx": 2000, "conc": 4, "rep": 2, "wall_s": 7.287990448006894, "agg_out_tok_s": 70.25256188967985}
+{"ctx": 16000, "conc": 1, "rep": 1, "wall_s": 13.078448048996506, "agg_out_tok_s": 9.787093967148593}
+{"ctx": 16000, "conc": 1, "rep": 2, "wall_s": 13.232877331000054, "agg_out_tok_s": 9.6728773945588}
+{"ctx": 16000, "conc": 4, "rep": 1, "wall_s": 51.37246738000249, "agg_out_tok_s": 9.9664280520679}
+{"ctx": 16000, "conc": 4, "rep": 2, "wall_s": 51.42264568700921, "agg_out_tok_s": 9.956702794258318}
+wrote results/off-1793817672.json
+== off post-metrics 18:41:12
+vllm:num_requests_running{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="capacity"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="deferred"} 0.0
+== off2 pre-metrics 18:41:12
+vllm:num_requests_running{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="capacity"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="deferred"} 0.0
+{"ctx": 2000, "conc": 1, "rep": 1, "wall_s": 2.3780225819937186, "agg_out_tok_s": 53.82623401863814}
+{"ctx": 2000, "conc": 1, "rep": 2, "wall_s": 2.718212510997546, "agg_out_tok_s": 47.08976928114638}
+{"ctx": 2000, "conc": 4, "rep": 1, "wall_s": 7.4040259449975565, "agg_out_tok_s": 69.151567512527}
+{"ctx": 2000, "conc": 4, "rep": 2, "wall_s": 9.670628692998434, "agg_out_tok_s": 52.943817434608945}
+{"ctx": 16000, "conc": 1, "rep": 1, "wall_s": 13.316610517009394, "agg_out_tok_s": 9.612055547956798}
+{"ctx": 16000, "conc": 1, "rep": 2, "wall_s": 13.167957056997693, "agg_out_tok_s": 9.72056632976172}
+{"ctx": 16000, "conc": 4, "rep": 1, "wall_s": 51.394983471007436, "agg_out_tok_s": 9.962061769877321}
+{"ctx": 16000, "conc": 4, "rep": 2, "wall_s": 51.711031319006, "agg_out_tok_s": 9.901175570091914}
+wrote results/off2-1793817899.json
+== off2 post-metrics 18:44:59
+vllm:num_requests_running{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="capacity"} 0.0
+vllm:num_requests_waiting_by_reason{engine="0",model_name="Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",reason="deferred"} 0.0
