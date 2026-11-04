@@ -1,0 +1,1411 @@
+//.kernel _ZTSN12_GLOBAL__N_130Xe2KvTorchAbiS2ParallelFloat16ILi4EEE
+//.platform XE2
+//.thread_config numGRF=128, numAcc=4, numSWSB=16
+//.options_string "-emitCrossThreadOffR0Reloc -hashmovs 2337579243 2071589261 -hashmovs1 0 6 "
+//.full_options "-emitLocation -wideMulMadOpsEn -enableCoalesceScalarMoves -supportLSCImmScale 0 -samplerHeaderWA -enablePreemptionR0Only -hasRNEandDenorm -noStitchExternFunc -useInlineData -emitCrossThreadOffR0Reloc -abortOnSpill 4 -enableBCR -enableBundleCR 3 -freqBasedSpillCost 8 -freqBasedSpillCostFunc 1 -boundsChecking -presched-ctrl 6 -presched-rp 100 -nodpsendreorder -SBIDDepLoc -PVCSendWARWA -output -binary -dumpcommonisa -dumpcombinedcisa -dumpvisa -printHexFloatInAsm -noverifyCISA -enableHalfLSC -partialInt64 -activeThreadsOnlyBarrier -hashmovs 2337579243 2071589261 -hashmovs1 0 6 -GRFBumpUpNumber 2 "
+//.instCount 650
+//.RA type	HYBRID_BC_RA
+//.git-hash 3eef0f89d3a4fe2b443de595e23d7700a5d1491b
+
+//.declare BuiltInR0 (0)  rf=r size=64 type=ud align=32 words (r0.0) IsBuiltin
+//.declare  (1)  rf=r size=64 type=ud align=32 words (r46.0) IsBuiltin
+//.declare BuiltinA0 (2)  rf=a size=4 type=ud align=1 words (a0.0) IsBuiltin
+//.declare BuiltinA0Dot2 (3)  rf=a size=4 type=ud align=1 words (a0.2) IsBuiltin
+//.declare BuiltinSR0Dot1 (5)  rf=r size=4 type=ud align=2 words IsBuiltin
+//.declare %null (10)  rf=r size=4 type=ud align=32 words
+//.declare %local_id_x (13)  rf=r size=4 type=ud align=2 words (r2.12)
+//.declare %local_id_y (14)  rf=r size=4 type=ud align=2 words (r2.13)
+//.declare %local_size_x (15)  rf=r size=4 type=ud align=2 words (r2.8)
+//.declare %local_size_y (16)  rf=r size=4 type=ud align=2 words (r2.9)
+//.declare %group_id_x (17)  rf=r size=4 type=ud align=2 words (r0.1)
+//.declare %group_id_y (18)  rf=r size=4 type=ud align=2 words (r0.6)
+//.declare %group_id_z (19)  rf=r size=4 type=ud align=2 words (r0.7)
+//.declare %group_count_x (20)  rf=r size=4 type=ud align=2 words (r2.10)
+//.declare %group_count_y (21)  rf=r size=4 type=ud align=2 words (r2.11)
+//.declare %tsc (22)  rf=r size=20 type=ud align=2 words
+//.declare %arg (23)  rf=r size=0 type=ud align=32 words (r26.0)
+//.declare %retval (24)  rf=r size=0 type=ud align=32 words (r26.0) Output
+//.declare %sp (25)  rf=r size=8 type=uq align=32 words (r127.3)
+//.declare %fp (26)  rf=r size=8 type=uq align=32 words (r127.2)
+//.declare %sr0 (27)  rf=r size=16 type=ud align=2 words
+//.declare %cr0 (28)  rf=r size=12 type=ud align=2 words
+//.declare %ce0 (29)  rf=r size=4 type=ud align=2 words
+//.declare %dbg0 (30)  rf=r size=8 type=ud align=2 words
+//.declare implBufPtr (32)  rf=r size=8 type=uq align=32 words (r126.0)
+//.declare localIdBufPtr (33)  rf=r size=8 type=uq align=32 words (r126.3)
+//.declare %msg0 (34)  rf=r size=12 type=ud align=2 words
+//.declare %scratchloc (35)  rf=r size=8 type=uq align=4 words (s0.7)
+//.declare V0033 (43)  rf=r size=64 type=d alias=+0 align=32 words (r46.0)
+//.declare V0034 (44)  rf=r size=4 type=d align=2 words (r2.4)
+//.declare V0035 (45)  rf=r size=8 type=uq align=4 words (r1.1)
+//.declare V0036 (46)  rf=r size=8 type=uq align=4 words (r1.2)
+//.declare V0037 (47)  rf=r size=8 type=uq align=4 words (r1.3)
+//.declare V0038 (48)  rf=r size=8 type=uq align=4 words (r2.0)
+//.declare V0039 (49)  rf=r size=8 type=uq align=4 words (r2.1)
+//.declare V0041 (51)  rf=r size=32 type=d alias=+0 align=32 words (r46.0)
+//.declare V0043 (53)  rf=r size=8 type=uq align=4 words (r2.3)
+//.declare V0056 (66)  rf=r size=256 type=f align=32 words (r6.0)
+//.declare V0057 (67)  rf=r size=256 type=f align=32 words (r16.0)
+//.declare V0058 (68)  rf=r size=256 type=f align=32 words (r10.0)
+//.declare V0059 (69)  rf=r size=256 type=f align=32 words (r6.0)
+//.declare V0060 (70)  rf=r size=4 type=d align=2 words (r2.5)
+//.declare V0061 (71)  rf=r size=32 type=b alias=V0041+0 align=32 words (r46.0)
+//.declare V0062 (72)  rf=r size=1 type=b align=1 words (r27.44)
+//.declare V0063 (73)  rf=r size=32 type=w align=32 words (r25.0)
+//.declare V0064 (74)  rf=r size=4 type=d align=32 words (r1.0)
+//.declare V0065 (75)  rf=r size=4 type=ud alias=V0060+0 align=2 words (r2.5)
+//.declare V0066 (76)  rf=r size=4 type=ud alias=V0064+0 align=2 words (r1.0)
+//.declare V0067 (77)  rf=r size=4 type=d align=2 words (r27.1)
+//.declare V0068 (78)  rf=r size=4 type=ud alias=V0067+0 align=2 words (r27.1)
+//.declare V0069 (79)  rf=r size=4 type=d align=2 words (r27.0)
+//.declare V0070 (80)  rf=r size=4 type=d align=32 words (r6.0)
+//.declare P01 (81)  rf=f16  size=2 type=uw align=1 words (f1.1)
+//.declare V0071 (82)  rf=r size=4 type=d align=32 words (r3.0)
+//.declare V0072 (83)  rf=r size=8 type=uq align=32 words (r1.0)
+//.declare V0073 (84)  rf=r size=8 type=q align=4 words (r1.0)
+//.declare V0074 (85)  rf=r size=4 type=d align=2 words (r6.1)
+//.declare P02 (86)  rf=f16  size=2 type=uw align=1 words (f1.0)
+//.declare V0075 (87)  rf=r size=8 type=q align=4 words (r6.1)
+//.declare V0076 (88)  rf=r size=8 type=q align=4 words (r1.0)
+//.declare V0077 (89)  rf=r size=8 type=d align=2 words (r2.5)
+//.declare V0078 (90)  rf=r size=8 type=d alias=V0076+0 align=4 words (r1.0)
+//.declare P03 (91)  rf=f16  size=2 type=uw align=1 words (f3.1)
+//.declare V0079 (92)  rf=r size=8 type=ud alias=V0077+0 align=2 words (r2.5)
+//.declare V0080 (93)  rf=r size=4 type=ud alias=V0034+0 align=32 words (r2.4)
+//.declare P04 (94)  rf=f16  size=2 type=uw align=1 words (f3.0)
+//.declare P05 (95)  rf=f16  size=2 type=uw align=1 words (f2.1)
+//.declare V0081 (96)  rf=r size=4 type=d align=2 words (r2.7)
+//.declare V0082 (97)  rf=r size=4 type=d align=2 words (r3.0)
+//.declare P06 (98)  rf=f16  size=2 type=uw align=1 words (f2.1)
+//.declare V0083 (99)  rf=r size=4 type=ud alias=V0081+0 align=2 words (r2.7)
+//.declare P07 (100)  rf=f16  size=2 type=uw align=1 words (f2.0)
+//.declare P08 (101)  rf=f16  size=2 type=uw align=1 words (f2.0)
+//.declare V0087 (105)  rf=r size=8 type=q align=4 words (r3.1)
+//.declare V0088 (106)  rf=r size=8 type=d alias=V0087+0 align=4 words (r3.2)
+//.declare V0090 (108)  rf=r size=4 type=d align=2 words (r4.0)
+//.declare V0091 (109)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0092 (110)  rf=r size=4 type=ud alias=V0090+0 align=2 words (r4.0)
+//.declare V0093 (111)  rf=r size=4 type=ud alias=V0091+0 align=2 words (r1.0)
+//.declare V0094 (112)  rf=r size=4 type=d align=2 words (r27.10)
+//.declare V0095 (113)  rf=r size=1 type=ub alias=V0062+0 align=1 words (r27.44)
+//.declare V0096 (114)  rf=r size=4 type=d align=32 words (r31.0)
+//.declare V0097 (115)  rf=r size=4 type=d align=2 words (r5.0)
+//.declare V0098 (116)  rf=r size=4 type=d align=2 words (r27.8)
+//.declare V0099 (117)  rf=r size=32 type=w align=32 words (r29.0)
+//.declare V0100 (118)  rf=r size=64 type=d align=32 words (r47.0)
+//.declare V0101 (119)  rf=r size=32 type=uw alias=V0099+0 align=32 words (r29.0)
+//.declare P09 (120)  rf=f16  size=2 type=uw align=1 words (f3.0)
+//.declare V0102 (121)  rf=r size=4 type=f align=2 words (r27.3)
+//.declare V0103 (122)  rf=r size=4 type=f align=2 words (r27.2)
+//.declare V0104 (123)  rf=r size=64 type=f align=32 words (r73.0)
+//.declare V0105 (124)  rf=r size=64 type=f align=32 words (r72.0)
+//.declare V0106 (125)  rf=r size=64 type=f align=32 words (r68.0)
+//.declare V0107 (126)  rf=r size=64 type=f align=32 words (r67.0)
+//.declare V0108 (127)  rf=r size=64 type=f align=32 words (r66.0)
+//.declare V0109 (128)  rf=r size=64 type=f align=32 words (r64.0)
+//.declare V0110 (129)  rf=r size=64 type=f align=32 words (r63.0)
+//.declare V0111 (130)  rf=r size=64 type=f align=32 words (r62.0)
+//.declare V0112 (131)  rf=r size=64 type=f align=32 words (r61.0)
+//.declare V0113 (132)  rf=r size=64 type=f align=32 words (r60.0)
+//.declare V0114 (133)  rf=r size=64 type=f align=32 words (r56.0)
+//.declare V0115 (134)  rf=r size=64 type=f align=32 words (r55.0)
+//.declare V0116 (135)  rf=r size=64 type=f align=32 words (r54.0)
+//.declare V0117 (136)  rf=r size=64 type=f align=32 words (r52.0)
+//.declare V0118 (137)  rf=r size=64 type=f align=32 words (r50.0)
+//.declare V0119 (138)  rf=r size=64 type=f align=32 words (r48.0)
+//.declare V0120 (139)  rf=r size=4 type=f align=32 words (r33.0)
+//.declare V0121 (140)  rf=r size=4 type=f align=32 words (r37.0)
+//.declare V0122 (141)  rf=r size=4 type=d align=2 words (r2.5)
+//.declare V0123 (142)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0124 (143)  rf=r size=4 type=d align=32 words (r35.0)
+//.declare V0125 (144)  rf=r size=8 type=q alias=V0036+0 align=32 words (r1.2)
+//.declare V0127 (146)  rf=r size=8 type=q align=4 words (r1.4)
+//.declare V0128 (147)  rf=r size=8 type=q align=4 words (r27.3)
+//.declare V0129 (148)  rf=r size=8 type=q alias=V0037+0 align=32 words (r1.3)
+//.declare V0130 (149)  rf=r size=8 type=q align=4 words (r25.7)
+//.declare V0131 (150)  rf=r size=8 type=q align=4 words (r25.6)
+//.declare V0132 (151)  rf=r size=8 type=q alias=V0038+0 align=32 words (r2.0)
+//.declare V0134 (153)  rf=r size=128 type=q align=32 words (r44.0)
+//.declare V0135 (154)  rf=r size=64 type=d align=32 words (r5.0)
+//.declare V0136 (155)  rf=r size=128 type=q align=32 words (r42.0)
+//.declare V0137 (156)  rf=r size=64 type=ud alias=V0135+0 align=32 words (r5.0)
+//.declare V0138 (157)  rf=r size=4 type=f align=2 words (r25.10)
+//.declare V0139 (158)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0140 (159)  rf=r size=8 type=q align=4 words (r25.4)
+//.declare V0141 (160)  rf=r size=8 type=q align=4 words (r2.3)
+//.declare V0142 (161)  rf=r size=8 type=q align=32 words (r4.0)
+//.declare V0143 (162)  rf=r size=8 type=uq alias=V0142+0 align=32 words (r4.0)
+//.declare V0144 (163)  rf=r size=4 type=f align=32 words (r8.0)
+//.declare V0145 (164)  rf=r size=8 type=q align=32 words (r6.0)
+//.declare V0146 (165)  rf=r size=8 type=uq alias=V0145+0 align=32 words (r6.0)
+//.declare V0147 (166)  rf=r size=4 type=f align=32 words (r9.0)
+//.declare V0148 (167)  rf=r size=4 type=f align=2 words (r27.5)
+//.declare P10 (168)  rf=f16  size=2 type=uw align=1 words (f1.1)
+//.declare V0149 (169)  rf=r size=4 type=f align=2 words (r27.4)
+//.declare V0150 (170)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0151 (171)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0152 (172)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0153 (173)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0154 (174)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0155 (175)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0156 (176)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0157 (177)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0158 (178)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P11 (179)  rf=f1  size=2 type=uw align=1 words (f1.0)
+//.declare V0159 (180)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P12 (181)  rf=f1  size=2 type=uw align=1 words (f0.1)
+//.declare P13 (182)  rf=f16  size=2 type=uw align=1 words (f1.1)
+//.declare P14 (183)  rf=f16  size=2 type=uw align=1 words (f0.0)
+//.declare V0160 (184)  rf=r size=4 type=f align=2 words (r8.1)
+//.declare V0161 (185)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0162 (186)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0163 (187)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0164 (188)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0165 (189)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0166 (190)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0167 (191)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0168 (192)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0169 (193)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P15 (194)  rf=f1  size=2 type=uw align=1 words (f0.0)
+//.declare V0170 (195)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P16 (196)  rf=f1  size=2 type=uw align=1 words (f3.1)
+//.declare V0171 (197)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0172 (198)  rf=r size=8 type=q align=4 words (r1.0)
+//.declare V0173 (199)  rf=r size=8 type=q align=4 words (r2.3)
+//.declare V0174 (200)  rf=r size=8 type=q align=4 words (r3.0)
+//.declare V0175 (201)  rf=r size=128 type=q align=32 words (r4.0)
+//.declare V0176 (202)  rf=r size=128 type=uq alias=V0175+0 align=32 words (r4.0)
+//.declare V0177 (203)  rf=r size=256 type=f align=32 words (r8.0)
+//.declare V0182 (208)  rf=r size=128 type=q align=32 words (r6.0)
+//.declare V0183 (209)  rf=r size=128 type=uq alias=V0182+0 align=32 words (r6.0)
+//.declare V0184 (210)  rf=r size=256 type=f align=32 words (r12.0)
+//.declare V0185 (211)  rf=r size=64 type=f align=32 words (r24.0)
+//.declare V0186 (212)  rf=r size=64 type=f align=32 words (r26.0)
+//.declare V0187 (213)  rf=r size=64 type=f align=32 words (r28.0)
+//.declare V0188 (214)  rf=r size=64 type=f align=32 words (r30.0)
+//.declare V0189 (215)  rf=r size=256 type=f align=32 words (r16.0)
+//.declare V0190 (216)  rf=r size=64 type=f align=32 words (r32.0)
+//.declare V0191 (217)  rf=r size=64 type=f align=32 words (r4.0)
+//.declare V0192 (218)  rf=r size=64 type=f align=32 words (r34.0)
+//.declare V0193 (219)  rf=r size=64 type=f align=32 words (r36.0)
+//.declare V0194 (220)  rf=r size=256 type=f align=32 words (r20.0)
+//.declare V0195 (221)  rf=r size=64 type=f align=32 words (r6.0)
+//.declare V0196 (222)  rf=r size=64 type=f align=32 words (r38.0)
+//.declare V0197 (223)  rf=r size=64 type=f align=32 words (r40.0)
+//.declare V0198 (224)  rf=r size=64 type=f align=32 words (r8.0)
+//.declare P17 (225)  rf=f16  size=2 type=uw align=1 words (f3.0)
+//.declare V0199 (226)  rf=r size=4 type=ud alias=V0096+0 align=2 words (r31.0)
+//.declare V0200 (227)  rf=r size=4 type=ud alias=V0098+0 align=2 words (r27.8)
+//.declare V0201 (228)  rf=r size=4 type=f align=2 words (r27.9)
+//.declare P18 (229)  rf=f16  size=2 type=uw align=1 words (f0.1)
+//.declare V0202 (230)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0203 (231)  rf=r size=4 type=ud alias=V0202+0 align=2 words (r1.0)
+//.declare V0204 (232)  rf=r size=4 type=ud align=32 words (r3.0)
+//.declare V0205 (233)  rf=r size=4 type=ud align=32 words (r4.0)
+//.declare V0206 (234)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0208 (236)  rf=r size=64 type=d align=32 words (r15.0)
+//.declare V0209 (237)  rf=r size=256 type=f align=32 words (r3.0)
+//.declare V0210 (238)  rf=r size=256 type=f align=32 words (r7.0)
+//.declare V0211 (239)  rf=r size=256 type=f align=32 words (r11.0)
+//.declare V0212 (240)  rf=r size=256 type=f align=32 words (r16.0)
+//.declare  (241)  rf=r size=64 type=ud align=32 words (r20.0)
+//.declare  (242)  rf=r size=32 type=ud align=32 words (r21.0)
+//.declare V0213 (243)  rf=r size=2 type=w align=1 words (r1.0)
+//.declare P19 (244)  rf=f16  size=2 type=uw align=1 words (f0.0)
+//.declare V0214 (245)  rf=r size=64 type=f align=32 words (r92.0)
+//.declare V0215 (246)  rf=r size=64 type=f align=32 words (r91.0)
+//.declare V0216 (247)  rf=r size=64 type=f align=32 words (r90.0)
+//.declare V0217 (248)  rf=r size=64 type=f align=32 words (r89.0)
+//.declare V0218 (249)  rf=r size=64 type=f align=32 words (r88.0)
+//.declare V0219 (250)  rf=r size=64 type=f align=32 words (r87.0)
+//.declare V0220 (251)  rf=r size=64 type=f align=32 words (r86.0)
+//.declare V0221 (252)  rf=r size=64 type=f align=32 words (r85.0)
+//.declare V0222 (253)  rf=r size=64 type=f align=32 words (r84.0)
+//.declare V0223 (254)  rf=r size=64 type=f align=32 words (r83.0)
+//.declare V0224 (255)  rf=r size=64 type=f align=32 words (r82.0)
+//.declare V0225 (256)  rf=r size=64 type=f align=32 words (r81.0)
+//.declare V0226 (257)  rf=r size=64 type=f align=32 words (r80.0)
+//.declare V0227 (258)  rf=r size=64 type=f align=32 words (r78.0)
+//.declare V0228 (259)  rf=r size=64 type=f align=32 words (r76.0)
+//.declare V0229 (260)  rf=r size=64 type=f align=32 words (r74.0)
+//.declare V0230 (261)  rf=r size=4 type=f align=2 words (r27.6)
+//.declare V0231 (262)  rf=r size=4 type=f align=2 words (r27.5)
+//.declare V0232 (263)  rf=r size=4 type=d align=2 words (r27.4)
+//.declare V0233 (264)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0234 (265)  rf=r size=4 type=ud alias=V0233+0 align=2 words (r1.0)
+//.declare V0235 (266)  rf=r size=4 type=f align=32 words (r8.0)
+//.declare V0236 (267)  rf=r size=4 type=ud align=32 words (r3.0)
+//.declare V0237 (268)  rf=r size=4 type=d align=32 words (r4.0)
+//.declare V0238 (269)  rf=r size=4 type=ud alias=V0237+0 align=32 words (r4.0)
+//.declare V0239 (270)  rf=r size=4 type=f align=32 words (r9.0)
+//.declare V0240 (271)  rf=r size=4 type=f align=2 words (r27.9)
+//.declare P20 (272)  rf=f16  size=2 type=uw align=1 words (f2.1)
+//.declare V0241 (273)  rf=r size=4 type=f align=2 words (r27.8)
+//.declare V0242 (274)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0243 (275)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0244 (276)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0245 (277)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0246 (278)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0247 (279)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0248 (280)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0249 (281)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0250 (282)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P21 (283)  rf=f1  size=2 type=uw align=1 words (f2.0)
+//.declare V0251 (284)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P22 (285)  rf=f1  size=2 type=uw align=1 words (f1.1)
+//.declare P23 (286)  rf=f16  size=2 type=uw align=1 words (f1.0)
+//.declare P24 (287)  rf=f16  size=2 type=uw align=1 words (f3.1)
+//.declare V0252 (288)  rf=r size=4 type=f align=2 words (r27.7)
+//.declare V0253 (289)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0254 (290)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0255 (291)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0256 (292)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0257 (293)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0258 (294)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0259 (295)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0260 (296)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0261 (297)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P25 (298)  rf=f1  size=2 type=uw align=1 words (f1.0)
+//.declare V0262 (299)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P26 (300)  rf=f1  size=2 type=uw align=1 words (f0.1)
+//.declare V0263 (301)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0264 (302)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0266 (304)  rf=r size=64 type=d align=32 words (r3.0)
+//.declare V0267 (305)  rf=r size=64 type=d align=32 words (r6.0)
+//.declare V0268 (306)  rf=r size=64 type=ud alias=V0267+0 align=32 words (r6.0)
+//.declare V0269 (307)  rf=r size=256 type=f align=32 words (r10.0)
+//.declare V0274 (312)  rf=r size=64 type=f align=32 words (r80.0)
+//.declare V0275 (313)  rf=r size=64 type=f align=32 words (r72.0)
+//.declare V0276 (314)  rf=r size=64 type=f align=32 words (r70.0)
+//.declare V0277 (315)  rf=r size=64 type=f align=32 words (r68.0)
+//.declare V0278 (316)  rf=r size=64 type=d align=32 words (r7.0)
+//.declare V0279 (317)  rf=r size=64 type=ud alias=V0278+0 align=32 words (r7.0)
+//.declare V0280 (318)  rf=r size=256 type=f align=32 words (r14.0)
+//.declare V0281 (319)  rf=r size=64 type=f align=32 words (r26.0)
+//.declare V0282 (320)  rf=r size=64 type=f align=32 words (r4.0)
+//.declare V0283 (321)  rf=r size=64 type=f align=32 words (r28.0)
+//.declare V0284 (322)  rf=r size=64 type=f align=32 words (r30.0)
+//.declare V0285 (323)  rf=r size=64 type=f align=32 words (r67.0)
+//.declare V0286 (324)  rf=r size=64 type=f align=32 words (r66.0)
+//.declare V0287 (325)  rf=r size=64 type=f align=32 words (r65.0)
+//.declare V0288 (326)  rf=r size=64 type=f align=32 words (r64.0)
+//.declare V0289 (327)  rf=r size=64 type=d align=32 words (r8.0)
+//.declare V0290 (328)  rf=r size=64 type=ud alias=V0289+0 align=32 words (r8.0)
+//.declare V0291 (329)  rf=r size=256 type=f align=32 words (r18.0)
+//.declare V0292 (330)  rf=r size=64 type=f align=32 words (r6.0)
+//.declare V0293 (331)  rf=r size=64 type=f align=32 words (r32.0)
+//.declare V0294 (332)  rf=r size=64 type=f align=32 words (r8.0)
+//.declare V0295 (333)  rf=r size=64 type=f align=32 words (r34.0)
+//.declare V0296 (334)  rf=r size=64 type=f align=32 words (r63.0)
+//.declare V0297 (335)  rf=r size=64 type=f align=32 words (r62.0)
+//.declare V0298 (336)  rf=r size=64 type=f align=32 words (r56.0)
+//.declare V0299 (337)  rf=r size=64 type=f align=32 words (r55.0)
+//.declare V0300 (338)  rf=r size=64 type=d align=32 words (r9.0)
+//.declare V0301 (339)  rf=r size=64 type=ud alias=V0300+0 align=32 words (r9.0)
+//.declare V0302 (340)  rf=r size=256 type=f align=32 words (r22.0)
+//.declare V0303 (341)  rf=r size=64 type=f align=32 words (r36.0)
+//.declare V0304 (342)  rf=r size=64 type=f align=32 words (r38.0)
+//.declare V0305 (343)  rf=r size=64 type=f align=32 words (r40.0)
+//.declare V0306 (344)  rf=r size=64 type=f align=32 words (r10.0)
+//.declare V0307 (345)  rf=r size=64 type=f align=32 words (r54.0)
+//.declare V0308 (346)  rf=r size=64 type=f align=32 words (r53.0)
+//.declare V0309 (347)  rf=r size=64 type=f align=32 words (r52.0)
+//.declare V0310 (348)  rf=r size=64 type=f align=32 words (r51.0)
+//.declare V0311 (349)  rf=r size=4 type=f align=2 words (r27.12)
+//.declare V0312 (350)  rf=r size=4 type=d align=2 words (r27.11)
+//.declare V0313 (351)  rf=r size=4 type=d align=2 words (r2.6)
+//.declare V0314 (352)  rf=r size=4 type=ud alias=V0313+0 align=2 words (r2.6)
+//.declare V0315 (353)  rf=r size=4 type=f align=32 words (r31.0)
+//.declare V0316 (354)  rf=r size=4 type=ud align=32 words (r4.0)
+//.declare V0317 (355)  rf=r size=4 type=d align=32 words (r5.0)
+//.declare V0318 (356)  rf=r size=4 type=ud alias=V0317+0 align=32 words (r5.0)
+//.declare V0319 (357)  rf=r size=4 type=f align=32 words (r33.0)
+//.declare V0320 (358)  rf=r size=4 type=f align=2 words (r27.10)
+//.declare P27 (359)  rf=f16  size=2 type=uw align=1 words (f0.0)
+//.declare V0321 (360)  rf=r size=4 type=f align=2 words (r27.8)
+//.declare V0322 (361)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0323 (362)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0324 (363)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0325 (364)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0326 (365)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0327 (366)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0328 (367)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0329 (368)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0330 (369)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P28 (370)  rf=f1  size=2 type=uw align=1 words (f3.1)
+//.declare V0331 (371)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P29 (372)  rf=f1  size=2 type=uw align=1 words (f3.0)
+//.declare P30 (373)  rf=f16  size=2 type=uw align=1 words (f0.1)
+//.declare P31 (374)  rf=f16  size=2 type=uw align=1 words (f3.0)
+//.declare V0332 (375)  rf=r size=4 type=f align=2 words (r27.7)
+//.declare V0333 (376)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0334 (377)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0335 (378)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0336 (379)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0337 (380)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0338 (381)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0339 (382)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0340 (383)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0341 (384)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P32 (385)  rf=f1  size=2 type=uw align=1 words (f2.1)
+//.declare V0342 (386)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P33 (387)  rf=f1  size=2 type=uw align=1 words (f2.0)
+//.declare V0343 (388)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0344 (389)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0346 (391)  rf=r size=64 type=d align=32 words (r3.0)
+//.declare V0347 (392)  rf=r size=64 type=d align=32 words (r6.0)
+//.declare V0348 (393)  rf=r size=64 type=ud alias=V0347+0 align=32 words (r6.0)
+//.declare V0349 (394)  rf=r size=256 type=f align=32 words (r10.0)
+//.declare V0354 (399)  rf=r size=64 type=f align=32 words (r50.0)
+//.declare V0355 (400)  rf=r size=64 type=f align=32 words (r48.0)
+//.declare V0356 (401)  rf=r size=64 type=f align=32 words (r44.0)
+//.declare V0357 (402)  rf=r size=64 type=f align=32 words (r42.0)
+//.declare V0358 (403)  rf=r size=64 type=d align=32 words (r7.0)
+//.declare V0359 (404)  rf=r size=64 type=ud alias=V0358+0 align=32 words (r7.0)
+//.declare V0360 (405)  rf=r size=256 type=f align=32 words (r14.0)
+//.declare V0361 (406)  rf=r size=64 type=f align=32 words (r26.0)
+//.declare V0362 (407)  rf=r size=64 type=f align=32 words (r4.0)
+//.declare V0363 (408)  rf=r size=64 type=f align=32 words (r28.0)
+//.declare V0364 (409)  rf=r size=64 type=f align=32 words (r30.0)
+//.declare V0365 (410)  rf=r size=64 type=f align=32 words (r41.0)
+//.declare V0366 (411)  rf=r size=64 type=f align=32 words (r39.0)
+//.declare V0367 (412)  rf=r size=64 type=f align=32 words (r35.0)
+//.declare V0368 (413)  rf=r size=64 type=f align=32 words (r33.0)
+//.declare V0369 (414)  rf=r size=64 type=d align=32 words (r8.0)
+//.declare V0370 (415)  rf=r size=64 type=ud alias=V0369+0 align=32 words (r8.0)
+//.declare V0371 (416)  rf=r size=256 type=f align=32 words (r18.0)
+//.declare V0372 (417)  rf=r size=64 type=f align=32 words (r6.0)
+//.declare V0373 (418)  rf=r size=64 type=f align=32 words (r32.0)
+//.declare V0374 (419)  rf=r size=64 type=f align=32 words (r8.0)
+//.declare V0375 (420)  rf=r size=64 type=f align=32 words (r34.0)
+//.declare V0376 (421)  rf=r size=64 type=f align=32 words (r127.0)
+//.declare V0377 (422)  rf=r size=64 type=f align=32 words (r126.0)
+//.declare V0378 (423)  rf=r size=64 type=f align=32 words (r120.0)
+//.declare V0379 (424)  rf=r size=64 type=f align=32 words (r119.0)
+//.declare V0380 (425)  rf=r size=64 type=d align=32 words (r9.0)
+//.declare V0381 (426)  rf=r size=64 type=ud alias=V0380+0 align=32 words (r9.0)
+//.declare V0382 (427)  rf=r size=256 type=f align=32 words (r22.0)
+//.declare V0383 (428)  rf=r size=64 type=f align=32 words (r36.0)
+//.declare V0384 (429)  rf=r size=64 type=f align=32 words (r38.0)
+//.declare V0385 (430)  rf=r size=64 type=f align=32 words (r40.0)
+//.declare V0386 (431)  rf=r size=64 type=f align=32 words (r10.0)
+//.declare V0387 (432)  rf=r size=64 type=f align=32 words (r118.0)
+//.declare V0388 (433)  rf=r size=64 type=f align=32 words (r117.0)
+//.declare V0389 (434)  rf=r size=64 type=f align=32 words (r116.0)
+//.declare V0390 (435)  rf=r size=64 type=f align=32 words (r115.0)
+//.declare V0391 (436)  rf=r size=4 type=f align=2 words (r27.12)
+//.declare V0392 (437)  rf=r size=4 type=d align=2 words (r27.11)
+//.declare V0393 (438)  rf=r size=4 type=d align=2 words (r2.6)
+//.declare V0394 (439)  rf=r size=4 type=ud alias=V0393+0 align=2 words (r2.6)
+//.declare V0395 (440)  rf=r size=4 type=f align=32 words (r31.0)
+//.declare V0396 (441)  rf=r size=4 type=ud align=32 words (r4.0)
+//.declare V0397 (442)  rf=r size=4 type=d align=32 words (r5.0)
+//.declare V0398 (443)  rf=r size=4 type=ud alias=V0397+0 align=32 words (r5.0)
+//.declare V0399 (444)  rf=r size=4 type=f align=32 words (r37.0)
+//.declare V0400 (445)  rf=r size=4 type=f align=2 words (r27.9)
+//.declare P34 (446)  rf=f16  size=2 type=uw align=1 words (f1.1)
+//.declare V0401 (447)  rf=r size=4 type=f align=2 words (r27.8)
+//.declare V0402 (448)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0403 (449)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0404 (450)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0405 (451)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0406 (452)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0407 (453)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0408 (454)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0409 (455)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0410 (456)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P35 (457)  rf=f1  size=2 type=uw align=1 words (f1.0)
+//.declare V0411 (458)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P36 (459)  rf=f1  size=2 type=uw align=1 words (f0.1)
+//.declare P37 (460)  rf=f16  size=2 type=uw align=1 words (f0.0)
+//.declare P38 (461)  rf=f16  size=2 type=uw align=1 words (f2.1)
+//.declare V0412 (462)  rf=r size=4 type=f align=2 words (r27.7)
+//.declare V0413 (463)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0414 (464)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0415 (465)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0416 (466)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0417 (467)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0418 (468)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0419 (469)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0420 (470)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0421 (471)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P39 (472)  rf=f1  size=2 type=uw align=1 words (f0.0)
+//.declare V0422 (473)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P40 (474)  rf=f1  size=2 type=uw align=1 words (f3.1)
+//.declare V0423 (475)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0424 (476)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0426 (478)  rf=r size=64 type=d align=32 words (r3.0)
+//.declare V0427 (479)  rf=r size=64 type=d align=32 words (r6.0)
+//.declare V0428 (480)  rf=r size=64 type=ud alias=V0427+0 align=32 words (r6.0)
+//.declare V0429 (481)  rf=r size=256 type=f align=32 words (r10.0)
+//.declare V0434 (486)  rf=r size=64 type=f align=32 words (r114.0)
+//.declare V0435 (487)  rf=r size=64 type=f align=32 words (r112.0)
+//.declare V0436 (488)  rf=r size=64 type=f align=32 words (r110.0)
+//.declare V0437 (489)  rf=r size=64 type=f align=32 words (r108.0)
+//.declare V0438 (490)  rf=r size=64 type=d align=32 words (r7.0)
+//.declare V0439 (491)  rf=r size=64 type=ud alias=V0438+0 align=32 words (r7.0)
+//.declare V0440 (492)  rf=r size=256 type=f align=32 words (r14.0)
+//.declare V0441 (493)  rf=r size=64 type=f align=32 words (r26.0)
+//.declare V0442 (494)  rf=r size=64 type=f align=32 words (r4.0)
+//.declare V0443 (495)  rf=r size=64 type=f align=32 words (r28.0)
+//.declare V0444 (496)  rf=r size=64 type=f align=32 words (r30.0)
+//.declare V0445 (497)  rf=r size=64 type=f align=32 words (r107.0)
+//.declare V0446 (498)  rf=r size=64 type=f align=32 words (r106.0)
+//.declare V0447 (499)  rf=r size=64 type=f align=32 words (r105.0)
+//.declare V0448 (500)  rf=r size=64 type=f align=32 words (r104.0)
+//.declare V0449 (501)  rf=r size=64 type=d align=32 words (r8.0)
+//.declare V0450 (502)  rf=r size=64 type=ud alias=V0449+0 align=32 words (r8.0)
+//.declare V0451 (503)  rf=r size=256 type=f align=32 words (r18.0)
+//.declare V0452 (504)  rf=r size=64 type=f align=32 words (r6.0)
+//.declare V0453 (505)  rf=r size=64 type=f align=32 words (r32.0)
+//.declare V0454 (506)  rf=r size=64 type=f align=32 words (r8.0)
+//.declare V0455 (507)  rf=r size=64 type=f align=32 words (r34.0)
+//.declare V0456 (508)  rf=r size=64 type=f align=32 words (r103.0)
+//.declare V0457 (509)  rf=r size=64 type=f align=32 words (r102.0)
+//.declare V0458 (510)  rf=r size=64 type=f align=32 words (r100.0)
+//.declare V0459 (511)  rf=r size=64 type=f align=32 words (r98.0)
+//.declare V0460 (512)  rf=r size=64 type=d align=32 words (r9.0)
+//.declare V0461 (513)  rf=r size=64 type=ud alias=V0460+0 align=32 words (r9.0)
+//.declare V0462 (514)  rf=r size=256 type=f align=32 words (r22.0)
+//.declare V0463 (515)  rf=r size=64 type=f align=32 words (r36.0)
+//.declare V0464 (516)  rf=r size=64 type=f align=32 words (r38.0)
+//.declare V0465 (517)  rf=r size=64 type=f align=32 words (r40.0)
+//.declare V0466 (518)  rf=r size=64 type=f align=32 words (r10.0)
+//.declare V0467 (519)  rf=r size=64 type=f align=32 words (r97.0)
+//.declare V0468 (520)  rf=r size=64 type=f align=32 words (r96.0)
+//.declare V0469 (521)  rf=r size=64 type=f align=32 words (r95.0)
+//.declare V0470 (522)  rf=r size=64 type=f align=32 words (r94.0)
+//.declare V0471 (523)  rf=r size=4 type=f align=2 words (r27.11)
+//.declare V0472 (524)  rf=r size=4 type=d align=2 words (r27.10)
+//.declare V0473 (525)  rf=r size=4 type=d align=2 words (r2.6)
+//.declare V0474 (526)  rf=r size=4 type=ud alias=V0473+0 align=2 words (r2.6)
+//.declare V0475 (527)  rf=r size=4 type=f align=32 words (r31.0)
+//.declare V0476 (528)  rf=r size=4 type=ud align=32 words (r4.0)
+//.declare V0477 (529)  rf=r size=4 type=d align=32 words (r5.0)
+//.declare V0478 (530)  rf=r size=4 type=ud alias=V0477+0 align=32 words (r5.0)
+//.declare V0479 (531)  rf=r size=4 type=f align=32 words (r37.0)
+//.declare P41 (532)  rf=f16  size=2 type=uw align=1 words (f3.0)
+//.declare V0480 (533)  rf=r size=4 type=f align=2 words (r27.8)
+//.declare V0481 (534)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0482 (535)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0483 (536)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0484 (537)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0485 (538)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0486 (539)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0487 (540)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0488 (541)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0489 (542)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P42 (543)  rf=f1  size=2 type=uw align=1 words (f2.1)
+//.declare V0490 (544)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P43 (545)  rf=f1  size=2 type=uw align=1 words (f2.0)
+//.declare P44 (546)  rf=f16  size=2 type=uw align=1 words (f3.1)
+//.declare P45 (547)  rf=f16  size=2 type=uw align=1 words (f2.0)
+//.declare V0491 (548)  rf=r size=4 type=f align=2 words (r27.7)
+//.declare V0492 (549)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0493 (550)  rf=r size=4 type=f align=2 words (r1.1)
+//.declare V0494 (551)  rf=r size=4 type=f alias=+0 align=2 words (r4.0)
+//.declare V0495 (552)  rf=r size=4 type=f align=2 words (r3.0)
+//.declare V0496 (553)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0497 (554)  rf=r size=4 type=f alias=+4 align=2 words (r4.1)
+//.declare V0498 (555)  rf=r size=4 type=f alias=+0 align=2 words (r5.0)
+//.declare V0499 (556)  rf=r size=4 type=f alias=+4 align=2 words (r5.1)
+//.declare V0500 (557)  rf=r size=4 type=f align=2 words (r6.0)
+//.declare P46 (558)  rf=f1  size=2 type=uw align=1 words (f1.1)
+//.declare V0501 (559)  rf=r size=4 type=f align=2 words (r7.0)
+//.declare P47 (560)  rf=f1  size=2 type=uw align=1 words (f1.0)
+//.declare V0502 (561)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0503 (562)  rf=r size=4 type=d align=2 words (r1.0)
+//.declare V0505 (564)  rf=r size=64 type=d align=32 words (r3.0)
+//.declare V0506 (565)  rf=r size=64 type=d align=32 words (r4.0)
+//.declare V0507 (566)  rf=r size=64 type=ud alias=V0506+0 align=32 words (r4.0)
+//.declare V0508 (567)  rf=r size=256 type=f align=32 words (r8.0)
+//.declare V0513 (572)  rf=r size=64 type=d align=32 words (r5.0)
+//.declare V0514 (573)  rf=r size=64 type=ud alias=V0513+0 align=32 words (r5.0)
+//.declare V0515 (574)  rf=r size=256 type=f align=32 words (r12.0)
+//.declare V0516 (575)  rf=r size=64 type=f align=32 words (r24.0)
+//.declare V0517 (576)  rf=r size=64 type=f align=32 words (r26.0)
+//.declare V0518 (577)  rf=r size=64 type=f align=32 words (r28.0)
+//.declare V0519 (578)  rf=r size=64 type=f align=32 words (r30.0)
+//.declare V0520 (579)  rf=r size=64 type=d align=32 words (r6.0)
+//.declare V0521 (580)  rf=r size=64 type=ud alias=V0520+0 align=32 words (r6.0)
+//.declare V0522 (581)  rf=r size=256 type=f align=32 words (r16.0)
+//.declare V0523 (582)  rf=r size=64 type=f align=32 words (r32.0)
+//.declare V0524 (583)  rf=r size=64 type=f align=32 words (r4.0)
+//.declare V0525 (584)  rf=r size=64 type=f align=32 words (r34.0)
+//.declare V0526 (585)  rf=r size=64 type=f align=32 words (r6.0)
+//.declare V0527 (586)  rf=r size=64 type=d align=32 words (r7.0)
+//.declare V0528 (587)  rf=r size=64 type=ud alias=V0527+0 align=32 words (r7.0)
+//.declare V0529 (588)  rf=r size=256 type=f align=32 words (r20.0)
+//.declare V0530 (589)  rf=r size=64 type=f align=32 words (r36.0)
+//.declare V0531 (590)  rf=r size=64 type=f align=32 words (r38.0)
+//.declare V0532 (591)  rf=r size=64 type=f align=32 words (r40.0)
+//.declare V0533 (592)  rf=r size=64 type=f align=32 words (r8.0)
+//.declare P48 (593)  rf=f16  size=2 type=uw align=1 words (f0.1)
+//.declare V0534 (594)  rf=r size=4 type=ud alias=V0472+0 align=2 words (r27.10)
+//.declare V0535 (595)  rf=r size=4 type=f align=2 words (r1.0)
+//.declare V0536 (596)  rf=r size=4 type=f align=2 words (r2.5)
+//.declare V0537 (597)  rf=r size=4 type=d align=2 words (r2.6)
+//.declare V0539 (599)  rf=r size=4 type=ud alias=V0537+0 align=2 words (r2.6)
+//.declare V0541 (601)  rf=r size=8 type=q align=4 words (r3.0)
+//.declare V0542 (602)  rf=r size=8 type=q align=4 words (r4.0)
+//.declare V0543 (603)  rf=r size=8 type=q alias=V0039+0 align=32 words (r2.1)
+//.declare V0544 (604)  rf=r size=8 type=q align=4 words (r5.0)
+//.declare V0546 (606)  rf=r size=128 type=q align=32 words (r12.0)
+//.declare V0547 (607)  rf=r size=128 type=q align=32 words (r14.0)
+//.declare V0548 (608)  rf=r size=128 type=uq alias=V0547+0 align=32 words (r14.0)
+//.declare V0549 (609)  rf=r size=64 type=d align=32 words (r20.0)
+//.declare V0551 (611)  rf=r size=64 type=ud alias=V0549+0 align=32 words (r20.0)
+//.declare V0552 (612)  rf=r size=128 type=q align=32 words (r22.0)
+//.declare V0553 (613)  rf=r size=128 type=uq alias=V0552+0 align=32 words (r22.0)
+//.declare V0554 (614)  rf=r size=4 type=ud align=2 words (r1.0)
+//.declare  (615)  rf=r size=64 type=ud align=32 words (r127.0)
+//.declare  (616)  rf=r size=4 type=d alias=V0087+0 align=2 words (r3.2)
+//.declare  (617)  rf=r size=4 type=d alias=V0087+0 align=2 words (r3.2)
+//.declare  (618)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (619)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (620)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (621)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (622)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (623)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (624)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (625)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (626)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (627)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (628)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (629)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (630)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (631)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (632)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (633)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (634)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (635)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (636)  rf=r size=8 type=f align=32 words (r5.0)
+//.declare  (637)  rf=r size=8 type=f align=32 words (r4.0)
+//.declare  (638)  rf=r size=128 type=uw align=32 words (r3.0)
+//.declare  (639)  rf=r size=128 type=ud align=32 words (r6.0)
+//.declare  (640)  rf=r size=128 type=uw align=32 words (r10.0)
+//.declare  (641)  rf=r size=128 type=ud align=32 words (r3.0)
+//.declare  (642)  rf=r size=64 type=d align=32 words (r1.0)
+//.declare  (643)  rf=r size=64 type=d align=32 words (r2.0)
+//.declare  (644)  rf=r size=64 type=d align=32 words (r3.0)
+//.declare  (645)  rf=r size=64 type=d align=32 words (r4.0)
+//.declare  (646)  rf=r size=64 type=d align=32 words (r5.0)
+//.declare  (647)  rf=r size=64 type=d align=32 words (r6.0)
+//.declare  (648)  rf=r size=64 type=d align=32 words (r7.0)
+//.declare  (649)  rf=r size=64 type=d align=32 words (r8.0)
+//.declare  (650)  rf=r size=64 type=d align=32 words (r9.0)
+//.declare  (651)  rf=r size=64 type=d align=32 words (r10.0)
+//.declare  (652)  rf=r size=64 type=d align=32 words (r11.0)
+//.declare  (653)  rf=r size=64 type=d align=32 words (r12.0)
+//.declare  (654)  rf=r size=64 type=d align=32 words (r13.0)
+//.declare  (655)  rf=r size=64 type=d align=32 words (r14.0)
+//.declare  (656)  rf=r size=64 type=d align=32 words (r15.0)
+//.declare  (657)  rf=r size=64 type=d align=32 words (r16.0)
+//.declare  (658)  rf=r size=64 type=d align=32 words (r17.0)
+//.declare  (659)  rf=r size=64 type=d align=32 words (r18.0)
+//.declare  (660)  rf=r size=64 type=d align=32 words (r19.0)
+//.declare  (661)  rf=r size=64 type=d align=32 words (r20.0)
+//.declare  (662)  rf=r size=64 type=d align=32 words (r21.0)
+//.declare  (663)  rf=r size=64 type=d align=32 words (r22.0)
+//.declare  (664)  rf=r size=64 type=d align=32 words (r23.0)
+//.declare  (665)  rf=r size=64 type=d align=32 words (r24.0)
+//.declare  (666)  rf=r size=64 type=d align=32 words (r25.0)
+//.declare  (667)  rf=r size=64 type=d align=32 words (r26.0)
+//.declare  (668)  rf=r size=64 type=d align=32 words (r28.0)
+//.declare  (669)  rf=r size=64 type=d align=32 words (r30.0)
+//.declare  (670)  rf=r size=64 type=d align=32 words (r32.0)
+//.declare  (671)  rf=r size=64 type=d align=32 words (r34.0)
+//.declare  (672)  rf=r size=64 type=d align=32 words (r36.0)
+//.declare  (673)  rf=r size=64 type=d align=32 words (r38.0)
+//.declare  (674)  rf=r size=64 type=d align=32 words (r40.0)
+//.declare r0 (675)  rf=r size=64 type=ud align=32 words (r0.0)
+//.declare rtmp (676)  rf=r size=64 type=ud align=32 words (r127.0)
+//.declare  (677)  rf=r size=32 type=ud align=2 words (r2.0)
+
+// .inputs
+// +----------+----------+--------+----------+------------------+
+// | id       | type     |  bytes | at       | from             |
+// +----------+----------+--------+----------+------------------+
+// | V0554    | :ud      |    0x4 | r1       | inline+0x0       |
+// | V0035    | :uq      |    0x8 | r1+0x8   | inline+0x8       |
+// | V0036    | :uq      |    0x8 | r1+0x10  | inline+0x10      |
+// | V0037    | :uq      |    0x8 | r1+0x18  | inline+0x18      |
+// | V0038    | :uq      |    0x8 | r2       | cti+0x20         |
+// | V0039    | :uq      |    0x8 | r2+0x8   | cti+0x28         |
+// | V0034    | :d       |    0x4 | r2+0x10  | cti+0x30         |
+// | V0043    | :uq      |    0x8 | r2+0x18  | cti+0x38         |
+// +----------+----------+--------+----------+------------------+
+
+
+// B000: Preds:{},  Succs:{B001}
+cross_thread_prolog:
+(W)     and (1|M0)               r127.0<1>:ud  r0.0<0;1,0>:ud    0xFFFFFFC0:ud                       //  ALU pipe: int; 
+(W)     add (1|M0)               r127.0<1>:ud  r127.0<0;1,0>:ud  0x0:ud              {I@1}           //  R_SYM_ADDR_32: __INTEL_PATCH_CROSS_THREAD_OFFSET_OFF_R0; ALU pipe: int; 
+(W)     load.ugm.d32x8t.a32.ca.cc (1|M0)  r2:1  bti[255][r127:1]   {A@1,$0} // ex_desc:0xFF000000; desc:0x6219C500 // 
+// B001: Preds:{B000},  Succs:{B002, B003}
+// _main:
+(W)     mov (16|M0)              r46.0<1>:ud   r0.0<1;1,0>:ud                                        //  ALU pipe: int; $1
+(W)     or (1|M0)                cr0.0<1>:ud   cr0.0<0;1,0>:ud   0x400004C0:ud              {A@1}    // $1
+(W)     mov (1|M0)               r2.5<1>:d     r46.1<0;1,0>:d                   {A@1,$0.dst}         //  ALU pipe: int; $2
+(W)     mov (8|M0)               r25.0<1>:w    0x76543210:v                                          //  ALU pipe: int; $4
+(W)     mul (1|M0)               acc0.0<1>:ud  r2.5<0;1,0>:ud    0xAAAB:uw              {I@2}        //  ALU pipe: int; $6
+(W)     mach (1|M0)              r1.0<1>:ud    r2.5<0;1,0>:ud    0xAAAAAAAB:ud                       //  ALU pipe: int; 
+(W)     mov (1|M0)               r27.44<2>:b   r46.8<0;1,0>:b                                        //  ALU pipe: int; $3
+(W)     shr (1|M0)               r27.1<1>:ud   r1.0<0;1,0>:ud    4:w               {I@2}             //  ALU pipe: int; $7
+(W)     add (8|M0)               r25.8<1>:w    r25.0<1;1,0>:w    8:w                                 //  ALU pipe: int; $5
+(W)     mad (1|M0)               r27.0<1>:d    r2.5<0;0>:d       r27.1<0;0>:d      -24:w               {I@2} //  ALU pipe: int; $8
+(W)     mul (1|M0)               acc0.0<1>:d   r27.0<0;1,0>:d    0xAAAB:uw              {I@1}        //  ALU pipe: int; $9
+(W)     mach (1|M0)              r6.0<1>:d     r27.0<0;1,0>:d    715827883:d                         //  ALU pipe: int; 
+(W)     cmp (16|M0)   (lt)f1.1   null<1>:d     r6.0<0;1,0>:d     0:w               {I@1}             //  ALU pipe: int; $10
+(W&~f1.1) jmpi                               _0_052                                                  //  ALU pipe: int; $11
+// B002: Preds:{B001},  Succs:{B003}
+_0_053:
+(W)     add (1|M0)               r6.0<1>:d     r6.0<0;1,0>:d     1:w               {Compacted}       //  ALU pipe: int; $13
+// B003: Preds:{B002, B001},  Succs:{B004, B005}
+_0_052:
+(W)     mov (1|M0)               r1.0<1>:uq    r1.1<0;1,0>:uq                   {Compacted}          //  ALU pipe: int; $15
+(W)     asr (1|M0)               r6.1<1>:d     r2.4<0;1,0>:d     31:w                                //  ALU pipe: int; $18
+(W)     load.ugm.d32x1t.a64 (1|M0)  r3:1        [r1:1]             {I@2,$1} // ex_desc:0x0; desc:0x2108580 // $16
+(W)     cmp (16|M0)   (lt)f1.0   null<1>:d     r3.0<0;1,0>:d     -63:w               {$1.dst}        //  ALU pipe: int; $19
+(W)     mov (1|M0)               r1.0<1>:q     r3.0<0;1,0>:d                                         //  ALU pipe: int; $17
+(W&f1.0) jmpi                                _0_054                                                  //  ALU pipe: int; $20
+// B004: Preds:{B003},  Succs:{B006}
+_0_055:
+(W)     add (1|M0)               r6.1<1>:q     r1.0<0;1,0>:q     63:w               {I@2}            //  ALU pipe: int; $22
+(W)     jmpi                                 _0_056                                                  // $23
+// B005: Preds:{B003},  Succs:{B006}
+_0_054:
+(W)     add (1|M0)               r6.1<1>:q     r1.0<0;1,0>:q     126:w               {Compacted}     //  ALU pipe: int; $25
+// B006: Preds:{B005, B004},  Succs:{B007, B008}
+_0_056:
+(W)     asr (1|M0)               r1.0<1>:q     r6.1<0;1,0>:q     6:w               {Compacted,I@1}   //  ALU pipe: int; $27
+(W)     mov (1|M0)               r27.10<1>:d   r27.44<0;1,0>:ub                                      //  ALU pipe: int; $50
+(W)     mov (2|M0)               r2.5<1>:d     r1.0<1;1,0>:d                    {I@2}                //  ALU pipe: int; $28
+        shl (16|M0)              r29.0<1>:w    r25.0<1;1,0>:w    2:w                                 //  ALU pipe: int; $54
+(W)     cmp (16|M0)   (lt)f2.1   null<1>:d     r2.5<0;1,0>:ud    r2.4<0;1,0>:ud   {I@2}              //  ALU pipe: int; $29
+        mov (16|M0)              r47.0<1>:d    r29.0<1;1,0>:uw                  {I@2}                //  ALU pipe: int; $55
+(W&f2.1) cmp (16|M0)  (eq)f2.1   null<1>:d     r2.6<0;1,0>:d     r6.1<0;1,0>:d                       //  ALU pipe: int; $30
+(W)     mov (1|M0)               r27.3<1>:f    0xB5BFBE8E:f                                          //  ALU pipe: float; $57
+(W)     mov (1|M0)               r27.2<1>:f    0xBF317200:f                                          //  ALU pipe: float; $58
+(W&~f2.1) cmp (16|M0) (lt)f2.1   null<1>:d     r2.6<0;1,0>:d     r6.1<0;1,0>:d                       //  ALU pipe: int; $32
+(W&f2.1) sel (1|M0)              r2.7<1>:d     r2.5<0;1,0>:d     r2.4<0;1,0>:d                       //  ALU pipe: int; $34
+(W&f2.1) sel (1|M0)              r3.0<1>:d     r2.6<0;1,0>:d     r6.1<0;1,0>:d                       //  ALU pipe: int; $35
+(W)     cmp (16|M0)   (gt)f2.0   null<1>:d     r2.7<0;1,0>:ud    0x1:uw              {I@2}           //  ALU pipe: int; $36
+(W&f2.0) cmp (16|M0)  (eq)f2.0   null<1>:d     r3.0<0;1,0>:d     0:w               {I@2}             //  ALU pipe: int; $37
+(W&~f2.0) cmp (16|M0) (gt)f2.0   null<1>:d     r3.0<0;1,0>:d     0:w                                 //  ALU pipe: int; $39
+(W&f2.0) sel (1|M0)              r3.2<1>:d     r2.7<0;1,0>:d     1:w                                 //  ALU pipe: int; $41
+(W&f2.0) sel (1|M0)              r3.3<1>:d     r3.0<0;1,0>:d     0:w                                 //  ALU pipe: int; $42
+(W)     add (1|M0)               r4.0<1>:d     r3.2<0;1,0>:d     15:w               {I@2}            //  ALU pipe: int; $48
+(W)     shr (1|M0)               r1.0<1>:ud    r4.0<0;1,0>:ud    4:w               {I@1}             //  ALU pipe: int; $49
+(W)     mul (1|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r27.20<0;1,0>:uw {I@1}              //  ALU pipe: int; $51
+(W)     macl (1|M0)              r31.0<1>:d    r1.0<0;1,0>:d     r27.10<0;1,0>:d  {Compacted}        //  ALU pipe: int; $52
+(W)     add (1|M0)               r5.0<1>:d     r31.0<0;1,0>:d    r1.0<0;1,0>:d    {Compacted,I@1}    //  ALU pipe: int; $52
+(W)     sel (1|M0)    (lt)f0.0   r27.8<1>:d    r5.0<0;1,0>:d     r3.2<0;1,0>:d    {I@1}              //  ALU pipe: int; $53
+(W)     cmp (16|M0)   (lt)f3.0   null<1>:d     r31.0<0;1,0>:d    r27.8<0;1,0>:d   {I@1}              //  ALU pipe: int; $56
+(W&f3.0) jmpi                                _0_057                                                  //  ALU pipe: int; $59
+// B007: Preds:{B006},  Succs:{B018}
+_0_058:
+        mov (16|M0)              r73.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $61
+        mov (16|M0)              r72.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $62
+        mov (16|M0)              r68.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $63
+        mov (16|M0)              r67.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $64
+        mov (16|M0)              r66.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $65
+        mov (16|M0)              r64.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $66
+        mov (16|M0)              r63.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $67
+        mov (16|M0)              r62.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $68
+        mov (16|M0)              r61.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $69
+        mov (16|M0)              r60.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $70
+        mov (16|M0)              r56.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $71
+        mov (16|M0)              r55.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $72
+        mov (16|M0)              r54.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $73
+        mov (16|M0)              r52.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $74
+        mov (16|M0)              r50.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $75
+        mov (16|M0)              r48.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $76
+(W)     mov (1|M0)               r33.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $77
+(W)     mov (1|M0)               r37.0<1>:f    0xFF800000:f                               {Compacted} //  ALU pipe: float; $78
+(W)     jmpi                                 _0_059                                                  // $79
+// B008: Preds:{B006},  Succs:{B009}
+_0_057:
+        shl (16|M0)              r5.0<1>:d     r47.0<1;1,0>:d    2:w                                 //  ALU pipe: int; $91
+(W)     mad (1|M0)               r2.5<1>:d     r27.0<0;0>:d      r6.0<0;0>:d       -6:w               //  ALU pipe: int; $81
+        add (16|M0)              r5.0<1>:d     r5.0<1;1,0>:d     256:w               {I@2}           //  ALU pipe: int; $92
+(W)     mul (1|M0)               acc0.0<1>:d   r6.0<0;1,0>:d     r2.8<0;1,0>:uw                      //  ALU pipe: int; $83
+(W)     mad (1|M0)               r1.0<1>:d     r2.5<0;0>:d       r27.1<0;0>:d      6:w               {I@3} //  ALU pipe: int; $82
+        mov (16|M0)              r3.0<4>:uw    r29.0<1;1,0>:uw                                       //  ALU pipe: int; $90
+(W)     macl (1|M0)              r35.0<1>:d    r6.0<0;1,0>:d     r2.4<0;1,0>:d    {Compacted}        //  ALU pipe: int; $85
+        mov (16|M0)              r6.0<2>:ud    r5.0<1;1,0>:ud                   {Compacted,I@5}      //  ALU pipe: int; $93
+(W)     shl (1|M0)               r1.4<1>:q     r1.0<0;1,0>:d     2:w               {I@4}             //  ALU pipe: int; $85
+        mov (16|M0)              r73.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $94
+        mov (16|M0)              r72.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $95
+        mov (16|M0)              r68.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $96
+        mov (16|M0)              r67.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $97
+        mov (16|M0)              r66.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $98
+        mov (16|M0)              r64.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $99
+        mov (16|M0)              r63.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $100
+        mov (16|M0)              r62.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $101
+        mov (16|M0)              r61.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $102
+        mov (16|M0)              r60.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $103
+        mov (16|M0)              r56.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $104
+        mov (16|M0)              r55.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $105
+        mov (16|M0)              r54.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $106
+        mov (16|M0)              r52.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $107
+        mov (16|M0)              r50.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $108
+        mov (16|M0)              r48.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $109
+        shl (16|M0)              r44.0<1>:q    r3.0<4;1,0>:uw    2:w                                 //  ALU pipe: int; $90
+        mov (16|M0)              r42.0<1>:q    r6.0<2;1,0>:ud                   {I@7}                //  ALU pipe: int; $93
+(W)     mov (1|M0)               r25.10<1>:f   0xFF800000:f                                          //  ALU pipe: float; $110
+(W)     mov (1|M0)               r33.0<1>:f    0x0:f                                                 //  ALU pipe: float; $111
+(W)     shl (1|M0)               r25.6<1>:q    r1.0<0;1,0>:d     10:w                                //  ALU pipe: int; $88
+(W)     add (1|M0)               r27.3<1>:q    r1.4<0;1,0>:q     r1.2<0;1,0>:q                       //  ALU pipe: int; $86
+(W)     add (1|M0)               r25.7<1>:q    r1.4<0;1,0>:q     r1.3<0;1,0>:q                       //  ALU pipe: int; $87
+// B009: Preds:{B016, B008},  Succs:{B010, B011}
+_0_060:
+(W)     add (1|M0)               r1.0<1>:d     r35.0<0;1,0>:d    r31.0<0;1,0>:d                      //  ALU pipe: int; $113
+(W)     cmp (16|M0)   (eq)f1.1   null<1>:f     r25.10<0;1,0>:f   0xFF800000:f               {F@2}    //  ALU pipe: float; $121
+(W)     mov (1|M0)               r25.4<1>:q    r1.0<0;1,0>:d                    {I@1}                //  ALU pipe: int; $114
+(W)     shl (1|M0)               r2.3<1>:q     r25.4<0;1,0>:q    8:w               {I@1}             //  ALU pipe: int; $115
+(W)     add (1|M0)               r4.0<1>:q     r27.3<0;1,0>:q    r2.3<0;1,0>:q    {Compacted,I@1}    //  ALU pipe: int; $116
+(W)     add (1|M0)               r6.0<1>:q     r25.7<0;1,0>:q    r2.3<0;1,0>:q    {Compacted}        //  ALU pipe: int; $118
+(W)     load.ugm.d32x1t.a64 (1|M0)  r8:1        [r4:1]             {I@2,$2} // ex_desc:0x0; desc:0x2108580 // $117
+(W)     load.ugm.d32x1t.a64 (1|M0)  r9:1        [r6:1]             {I@1,$3} // ex_desc:0x0; desc:0x2108580 // $119
+(W)     sel (1|M0)    (ge)f0.0   r27.5<1>:f    r25.10<0;1,0>:f   r8.0<0;1,0>:f    {$2.dst}           //  ALU pipe: float; $120
+(W&~f1.1) jmpi                               _0_061                                                  //  ALU pipe: int; $122
+// B010: Preds:{B009},  Succs:{B012}
+_0_062:
+(W)     mov (1|M0)               r27.4<1>:f    0x0:f                                                 //  ALU pipe: float; $124
+(W)     jmpi                                 _0_063                                                  // $125
+// B011: Preds:{B009},  Succs:{B012}
+_0_061:
+(W)     add (1|M0)               r1.0<1>:f     r25.10<0;1,0>:f   -r27.5<0;1,0>:f  {F@2}              //  ALU pipe: float; $127
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $128
+(W)     cmp (1|M0)    (lt)f1.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $136
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $129
+(W)     cmp (1|M0)    (gt)f0.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $138
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $130
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                                         //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $131
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $132
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $133
+        sync.nop                             null                             {Compacted,M@1}        // $135
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {Compacted,$3.src} //  ALU pipe: float; $135
+(W&~f1.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $137
+(W&~f0.1) sel (1|M0)             r27.4<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $139
+// B012: Preds:{B011, B010},  Succs:{B013, B014}
+_0_063:
+(W)     cmp (16|M0)   (eq)f0.0   null<1>:f     r27.5<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $141
+(W&~f0.0) cmp (16|M0) (eq)f0.0   null<1>:f     r8.0<0;1,0>:f     0xFF800000:f                        //  ALU pipe: float; $142
+(W&~f0.0) jmpi                               _0_064                                                  //  ALU pipe: int; $144
+// B013: Preds:{B012},  Succs:{B015}
+_0_065:
+(W)     mov (1|M0)               r8.1<1>:f     0x0:f                                                 //  ALU pipe: float; $146
+(W)     jmpi                                 _0_066                                                  // $147
+// B014: Preds:{B012},  Succs:{B015}
+_0_064:
+(W)     add (1|M0)               r1.0<1>:f     r8.0<0;1,0>:f     -r27.5<0;1,0>:f                     //  ALU pipe: float; $149
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $150
+(W)     cmp (1|M0)    (lt)f0.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f               {I@2}    //  ALU pipe: float; $158
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $151
+(W)     cmp (1|M0)    (gt)f3.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $160
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $152
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                                         //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $153
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $154
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $155
+        sync.nop                             null                             {Compacted,M@1}        // $157
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {Compacted,$3.src} //  ALU pipe: float; $157
+(W&~f0.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $159
+(W&~f3.1) sel (1|M0)             r8.1<1>:f     r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $161
+// B015: Preds:{B014, B013},  Succs:{B016, B017}
+_0_066:
+(W)     shl (1|M0)               r1.0<1>:q     r25.4<0;1,0>:q    16:w               {Compacted}      //  ALU pipe: int; $164
+(W)     mul (1|M0)               r2.5<1>:f     r8.1<0;1,0>:f     r9.0<0;1,0>:f    {@1,$3.dst}        //  ALU pipe: float; $163
+(W)     add (1|M0)               r2.3<1>:q     r1.0<0;1,0>:q     r25.6<0;1,0>:q   {I@1}              //  ALU pipe: int; $165
+(W)     add (1|M0)               r31.0<1>:d    r31.0<0;1,0>:d    1:w               {Compacted}       //  ALU pipe: int; $206
+(W)     add (1|M0)               r3.0<1>:q     r2.3<0;1,0>:q     r2.0<0;1,0>:q    {I@2}              //  ALU pipe: int; $166
+(W)     cmp (16|M0)   (lt)f3.0   null<1>:d     r31.0<0;1,0>:ud   r27.8<0;1,0>:ud  {I@2}              //  ALU pipe: int; $207
+        add (16|M0)              r4.0<1>:q     r3.0<0;1,0>:q     r44.0<1;1,0>:q   {Compacted,I@2}    //  ALU pipe: int; $167
+        add (16|M0)              r6.0<1>:q     r3.0<0;1,0>:q     r42.0<1;1,0>:q   {Compacted}        //  ALU pipe: int; $177
+        load.ugm.d32x4.a64 (16|M0)  r8:4        [r4:2]             {A@1,$4} // ex_desc:0x0; desc:0x4403580 // $168
+        load.ugm.d32x4.a64 (16|M0)  r12:4       [r6:2]             {I@1,$5} // ex_desc:0x0; desc:0x4403580 // $178
+        load.ugm.d32x4.a64 (16|M0)  r16:4       [r6:2+0x100]       {$6} // ex_desc:0x100000; desc:0x4403580 // $187
+        load.ugm.d32x4.a64 (16|M0)  r20:4       [r6:2+0x200]       {$7} // ex_desc:0x200000; desc:0x4403580 // $196
+(W)     mov (1|M0)               r27.9<1>:f    r27.5<0;1,0>:f                                        //  ALU pipe: float; $208
+(W)     mad (1|M0)               r33.0<1>:f    r2.5<0;0>:f       r33.0<0;0>:f      r27.4<0>:f        //  ALU pipe: float; $205
+        mul (16|M0)              acc0.0<1>:f   r2.5<0;1,0>:f     r8.0<1;1,0>:f    {$4.dst}           //  ALU pipe: float; $169
+        mul (16|M0)              r24.0<1>:f    r2.5<0;1,0>:f     r12.0<1;1,0>:f   {$5.dst}           //  ALU pipe: float; $179
+        mul (16|M0)              r26.0<1>:f    r2.5<0;1,0>:f     r13.0<1;1,0>:f                      //  ALU pipe: float; $180
+        mul (16|M0)              r28.0<1>:f    r2.5<0;1,0>:f     r14.0<1;1,0>:f                      //  ALU pipe: float; $181
+        mul (16|M0)              r30.0<1>:f    r2.5<0;1,0>:f     r15.0<1;1,0>:f                      //  ALU pipe: float; $182
+        mul (16|M0)              r32.0<1>:f    r2.5<0;1,0>:f     r16.0<1;1,0>:f   {$6.dst}           //  ALU pipe: float; $188
+        mul (16|M0)              r4.0<1>:f     r2.5<0;1,0>:f     r17.0<1;1,0>:f                      //  ALU pipe: float; $189
+        mul (16|M0)              r34.0<1>:f    r2.5<0;1,0>:f     r18.0<1;1,0>:f                      //  ALU pipe: float; $190
+        mul (16|M0)              r36.0<1>:f    r2.5<0;1,0>:f     r19.0<1;1,0>:f                      //  ALU pipe: float; $191
+        mul (16|M0)              r6.0<1>:f     r2.5<0;1,0>:f     r20.0<1;1,0>:f   {$7.dst}           //  ALU pipe: float; $197
+        mul (16|M0)              r38.0<1>:f    r2.5<0;1,0>:f     r21.0<1;1,0>:f                      //  ALU pipe: float; $198
+        mul (16|M0)              r40.0<1>:f    r2.5<0;1,0>:f     r22.0<1;1,0>:f                      //  ALU pipe: float; $199
+        mul (16|M0)              r8.0<1>:f     r2.5<0;1,0>:f     r23.0<1;1,0>:f                      //  ALU pipe: float; $200
+        mul (16|M0)              acc1.0<1>:f   r2.5<0;1,0>:f     r9.0<1;1,0>:f                       //  ALU pipe: float; $170
+        mul (16|M0)              acc2.0<1>:f   r2.5<0;1,0>:f     r10.0<1;1,0>:f                      //  ALU pipe: float; $171
+        mul (16|M0)              acc3.0<1>:f   r2.5<0;1,0>:f     r11.0<1;1,0>:f                      //  ALU pipe: float; $172
+        mad (16|M0)              r61.0<1>:f    r24.0<1;0>:f      r61.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $183
+        mad (16|M0)              r60.0<1>:f    r26.0<1;0>:f      r60.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $184
+        mad (16|M0)              r56.0<1>:f    r28.0<1;0>:f      r56.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $185
+        mad (16|M0)              r55.0<1>:f    r30.0<1;0>:f      r55.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $186
+        mad (16|M0)              r66.0<1>:f    r32.0<1;0>:f      r66.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $192
+        mad (16|M0)              r64.0<1>:f    r4.0<1;0>:f       r64.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $193
+        mad (16|M0)              r63.0<1>:f    r34.0<1;0>:f      r63.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $194
+        mad (16|M0)              r62.0<1>:f    r36.0<1;0>:f      r62.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $195
+        mad (16|M0)              r73.0<1>:f    r6.0<1;0>:f       r73.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $201
+        mad (16|M0)              r72.0<1>:f    r38.0<1;0>:f      r72.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $202
+        mad (16|M0)              r68.0<1>:f    r40.0<1;0>:f      r68.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $203
+        mad (16|M0)              r67.0<1>:f    r8.0<1;0>:f       r67.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $204
+        mad (16|M0)              r54.0<1>:f    acc0.0<1;0>:f     r54.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $173
+        mad (16|M0)              r52.0<1>:f    acc1.0<1;0>:f     r52.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $174
+        mad (16|M0)              r50.0<1>:f    acc2.0<1;0>:f     r50.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $175
+        mad (16|M0)              r48.0<1>:f    acc3.0<1;0>:f     r48.0<1;0>:f      r27.4<0>:f       {Compacted} //  ALU pipe: float; $176
+(W&~f3.0) jmpi                               _0_067                                                  //  ALU pipe: int; $209
+// B016: Preds:{B015},  Succs:{B009}
+_0_068:
+(W)     mov (1|M0)               r25.10<1>:f   r27.5<0;1,0>:f                                        //  ALU pipe: float; $211
+(W)     jmpi                                 _0_060                                                  // $212
+// B017: Preds:{B015},  Succs:{B018}
+_0_067:
+(W)     mov (1|M0)               r37.0<1>:f    r27.9<0;1,0>:f                                        //  ALU pipe: float; $214
+// B018: Preds:{B017, B007},  Succs:{B019, B020}
+_0_059:
+        cmp (16|M0)   (eq)f0.1   null<2>:w     r25.0<1;1,0>:w    0:w                                 //  ALU pipe: int; $216
+(~f0.1) goto (16|M0)                         _0_069            _0_069                                //  ALU pipe: int; $217
+// B019: [inDivergent],  Preds:{B018},  Succs:{B020}
+_0_070:
+(W)     shl (1|M0)               r1.0<1>:d     r27.10<0;1,0>:d   2:w               {Compacted}       //  ALU pipe: int; $219
+(W)     mov (1|M0)               r3.0<1>:f     r1.0<0;1,0>:f                    {Compacted,I@1}      //  ALU pipe: float; $220
+(W)     mov (1|M0)               r4.0<1>:f     r1.0<0;1,0>:f                                         //  ALU pipe: float; $222
+(W)     store.slm.d32x1t.a32 (1|M0)  [r3:1]     r37:1              {F@2,$8} // ex_desc:0x0; desc:0x2008504 // $221
+(W)     store.slm.d32x1t.a32 (1|M0)  [r4:1+0x40] r33:1             {F@1,$9} // ex_desc:0x40000; desc:0x2008504 // $223
+// B020: Preds:{B019, B018},  Succs:{B021, B049}
+_0_069:
+        join (16|M0)                         L2736                                                   // 
+L2736:
+(W)     shl (1|M0)               r1.0<1>:d     r27.10<0;1,0>:d   8:w               {Compacted}       //  ALU pipe: int; $225
+        mov (16|M0)              r3.0<1>:ud    r54.0<1;1,0>:ud                  {Compacted,$8.src}   //  ALU pipe: int; $228
+        or (16|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r47.0<1;1,0>:d   {I@2}              //  ALU pipe: int; $226
+        mov (16|M0)              r4.0<1>:f     r52.0<1;1,0>:f                   {Compacted,$9.src}   //  ALU pipe: float; $229
+        mov (16|M0)              r5.0<1>:f     r50.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $230
+        mov (16|M0)              r6.0<1>:f     r48.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $231
+        mov (16|M0)              r7.0<1>:f     r61.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $233
+        mov (16|M0)              r8.0<1>:f     r60.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $234
+        mov (16|M0)              r9.0<1>:f     r56.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $235
+        mov (16|M0)              r10.0<1>:f    r55.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $236
+        mov (16|M0)              r11.0<1>:f    r66.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $238
+        mov (16|M0)              r12.0<1>:f    r64.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $239
+        mov (16|M0)              r13.0<1>:f    r63.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $240
+        mov (16|M0)              r14.0<1>:f    r62.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $241
+        mov (16|M0)              r16.0<1>:f    r73.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $243
+        mov (16|M0)              r17.0<1>:f    r72.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $244
+        mov (16|M0)              r18.0<1>:f    r68.0<1;1,0>:f                   {Compacted}          //  ALU pipe: float; $245
+        mov (16|M0)              r19.0<1>:f    r67.0<1;1,0>:f                                        //  ALU pipe: float; $246
+        shl (16|M0)              r15.0<1>:d    acc0.0<1;1,0>:d   2:w                                 //  ALU pipe: int; $227
+        store.slm.d32x4.a32 (16|M0)  [r15:1+0x80] r3:4             {I@1,$10} // ex_desc:0x80000; desc:0x2003504 // $232
+        store.slm.d32x4.a32 (16|M0)  [r15:1+0x180] r7:4            {F@7,$11} // ex_desc:0x180000; desc:0x2003504 // $237
+        store.slm.d32x4.a32 (16|M0)  [r15:1+0x280] r11:4           {F@5,$12} // ex_desc:0x280000; desc:0x2003504 // $242
+        store.slm.d32x4.a32 (16|M0)  [r15:1+0x380] r16:4           {F@1,$13} // ex_desc:0x380000; desc:0x2003504 // $247
+(W)     send.slm (1|M0)          r20      r46  null:0  0x0            0x0210001F           {$14} // wr:1+0, rd:1; fence.slm.none.group // $248
+(W)     mov (1|M0)               r21.2<1>:ud   0x100:ud                                              //  signal barrier payload init (active only); ALU pipe: int; $249
+(W)     mov (2|M0)               r21.10<1>:ub  r46.11<0;1,0>:ub                 {I@1}                //  signal barrier payload (nprods, ncons); ALU pipe: int; $249
+(W)     mov (8|M0)               null<1>:ud    r20.0<1;1,0>:ud                  {$14.dst}            //  memory fence commit; ALU pipe: int; $249
+(W)     send.gtwy (1|M0)         null     r21  null:0  0x0            0x02000004           {I@2,$15} // wr:1+0, rd:0; signal barrier // $249
+(W)     sync.bar                             0x0                                                     // $249
+(W)     mov (1|M0)               r1.0<1>:w     r27.44<0;1,0>:ub                                      //  ALU pipe: int; $250
+(W)     cmp (16|M0)   (eq)f0.0   null<2>:w     r1.0<0;1,0>:w     0:w               {I@1}             //  ALU pipe: int; $251
+(W&~f0.0) jmpi                               _0_071                                                  //  ALU pipe: int; $252
+// B021: Preds:{B020},  Succs:{B022}
+_0_072:
+        mov (16|M0)              r92.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $254
+        mov (16|M0)              r91.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $255
+        mov (16|M0)              r90.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $256
+        mov (16|M0)              r89.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $257
+        mov (16|M0)              r88.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $258
+        mov (16|M0)              r87.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $259
+        mov (16|M0)              r86.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $260
+        mov (16|M0)              r85.0<1>:ud   0x0:ud                              {Compacted}       //  ALU pipe: int; $261
+        mov (16|M0)              r84.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $262
+        mov (16|M0)              r83.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $263
+        mov (16|M0)              r82.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $264
+        mov (16|M0)              r81.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $265
+        mov (16|M0)              r80.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $266
+        mov (16|M0)              r78.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $267
+        mov (16|M0)              r76.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $268
+        mov (16|M0)              r74.0<1>:f    0x0:f                               {Compacted}       //  ALU pipe: float; $269
+(W)     mov (1|M0)               r27.6<1>:f    0xFF800000:f                                          //  ALU pipe: float; $270
+(W)     mov (1|M0)               r27.5<1>:f    0x0:f                                                 //  ALU pipe: float; $271
+(W)     mov (1|M0)               r27.4<1>:d    0:w                               {Compacted}         //  ALU pipe: int; $272
+// B022: Preds:{B047, B021},  Succs:{B023, B024}
+_0_073:
+(W)     shl (1|M0)               r1.0<1>:d     r27.4<0;1,0>:d    2:w               {Compacted,I@1}   //  ALU pipe: int; $274
+(W)     cmp (16|M0)   (eq)f2.1   null<1>:f     r27.6<0;1,0>:f    0xFF800000:f               {F@2}    //  ALU pipe: float; $280
+        sync.nop                             null                             {Compacted,I@1}        // $275
+(W)     mov (1|M0)               r3.0<1>:f     r1.0<0;1,0>:f                    {Compacted,$10.src}  //  ALU pipe: float; $275
+(W)     add (1|M0)               r4.0<1>:d     r1.0<0;1,0>:d     64:w               {Compacted}      //  ALU pipe: int; $277
+        sync.nop                             null                             {Compacted,$11.src}    // $276
+(W)     load.slm.d32x1t.a32 (1|M0)  r8:1        [r3:1]             {F@1,$0} // ex_desc:0x0; desc:0x2108500 // $276
+(W)     load.slm.d32x1t.a32 (1|M0)  r9:1        [r4:1]             {I@1,$1} // ex_desc:0x0; desc:0x2108500 // $278
+(W)     sel (1|M0)    (ge)f0.0   r27.9<1>:f    r27.6<0;1,0>:f    r8.0<0;1,0>:f    {$0.dst}           //  ALU pipe: float; $279
+(W&~f2.1) jmpi                               _0_074                                                  //  ALU pipe: int; $281
+// B023: Preds:{B022},  Succs:{B025}
+_0_075:
+(W)     mov (1|M0)               r27.8<1>:f    0x0:f                                                 //  ALU pipe: float; $283
+(W)     jmpi                                 _0_076                                                  // $284
+// B024: Preds:{B022},  Succs:{B025}
+_0_074:
+(W)     add (1|M0)               r1.0<1>:f     r27.6<0;1,0>:f    -r27.9<0;1,0>:f  {F@2}              //  ALU pipe: float; $286
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $287
+(W)     cmp (1|M0)    (lt)f2.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $295
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {@2,$1.src}          //  ALU pipe: float; $288
+(W)     cmp (1|M0)    (gt)f1.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $297
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $289
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                                         //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $290
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $291
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $292
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $294
+(W&~f2.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $296
+(W&~f1.1) sel (1|M0)             r27.8<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $298
+// B025: Preds:{B024, B023},  Succs:{B026, B027}
+_0_076:
+(W)     cmp (16|M0)   (eq)f3.1   null<1>:f     r27.9<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $300
+(W&~f3.1) cmp (16|M0) (eq)f3.1   null<1>:f     r8.0<0;1,0>:f     0xFF800000:f                        //  ALU pipe: float; $301
+(W&~f3.1) jmpi                               _0_077                                                  //  ALU pipe: int; $303
+// B026: Preds:{B025},  Succs:{B028}
+_0_078:
+(W)     mov (1|M0)               r27.7<1>:f    0x0:f                                                 //  ALU pipe: float; $305
+(W)     jmpi                                 _0_079                                                  // $306
+// B027: Preds:{B025},  Succs:{B028}
+_0_077:
+(W)     add (1|M0)               r1.0<1>:f     r8.0<0;1,0>:f     -r27.9<0;1,0>:f                     //  ALU pipe: float; $308
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $309
+(W)     cmp (1|M0)    (lt)f1.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $317
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {@2,$1.src}          //  ALU pipe: float; $310
+(W)     cmp (1|M0)    (gt)f0.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $319
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $311
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                                         //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $312
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $313
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $314
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $316
+(W&~f1.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $318
+(W&~f0.1) sel (1|M0)             r27.7<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $320
+// B028: Preds:{B027, B026},  Succs:{B029, B030}
+_0_079:
+(W)     shl (1|M0)               r1.0<1>:d     r27.4<0;1,0>:d    8:w                                 //  ALU pipe: int; $323
+(W)     or (1|M0)                r27.11<1>:d   r27.4<0;1,0>:d    1:w                                 //  ALU pipe: int; $367
+        or (16|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r47.0<1;1,0>:d   {I@2}              //  ALU pipe: int; $324
+        shl (16|M0)              r3.0<1>:d     acc0.0<1;1,0>:d   2:w                                 //  ALU pipe: int; $325
+(W)     mul (1|M0)               r2.5<1>:f     r27.7<0;1,0>:f    r9.0<0;1,0>:f    {@1,$1.dst}        //  ALU pipe: float; $322
+        add (16|M0)              r6.0<1>:d     r3.0<1;1,0>:d     128:w               {Compacted,I@1} //  ALU pipe: int; $326
+        add (16|M0)              r7.0<1>:d     r3.0<1;1,0>:d     384:w               {Compacted}     //  ALU pipe: int; $336
+        add (16|M0)              r8.0<1>:d     r3.0<1;1,0>:d     640:w               {Compacted}     //  ALU pipe: int; $346
+        add (16|M0)              r9.0<1>:d     r3.0<1;1,0>:d     896:w               {Compacted,F@1} //  ALU pipe: int; $356
+(W)     shl (1|M0)               r2.6<1>:d     r27.11<0;1,0>:d   2:w                                 //  ALU pipe: int; $368
+        load.slm.d32x4.a32 (16|M0)  r10:4       [r6:1]             {I@5,$2} // ex_desc:0x0; desc:0x2403500 // $327
+        load.slm.d32x4.a32 (16|M0)  r14:4       [r7:1]             {I@4,$3} // ex_desc:0x0; desc:0x2403500 // $337
+        sync.nop                             null                             {Compacted,$15.src}    // $347
+        load.slm.d32x4.a32 (16|M0)  r18:4       [r8:1]             {I@3,$4} // ex_desc:0x0; desc:0x2403500 // $347
+        load.slm.d32x4.a32 (16|M0)  r22:4       [r9:1]             {I@2,$5} // ex_desc:0x0; desc:0x2403500 // $357
+(W)     mov (1|M0)               r4.0<1>:ud    r2.6<0;1,0>:ud                   {Compacted,I@1}      //  ALU pipe: int; $369
+(W)     add (1|M0)               r5.0<1>:d     r2.6<0;1,0>:d     64:w                                //  ALU pipe: int; $371
+(W)     load.slm.d32x1t.a32 (1|M0)  r31:1       [r4:1]             {I@2,$6} // ex_desc:0x0; desc:0x2108500 // $370
+(W)     load.slm.d32x1t.a32 (1|M0)  r33:1       [r5:1]             {I@1,$7} // ex_desc:0x0; desc:0x2108500 // $372
+(W)     cmp (16|M0)   (eq)f0.0   null<1>:f     r27.9<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $374
+        mul (16|M0)              acc0.0<1>:f   r27.7<0;1,0>:f    r10.0<1;1,0>:f   {$2.dst}           //  ALU pipe: float; $328
+        mul (16|M0)              r26.0<1>:f    r27.7<0;1,0>:f    r14.0<1;1,0>:f   {$3.dst}           //  ALU pipe: float; $338
+        mul (16|M0)              r28.0<1>:f    r27.7<0;1,0>:f    r16.0<1;1,0>:f                      //  ALU pipe: float; $340
+        mul (16|M0)              r30.0<1>:f    r27.7<0;1,0>:f    r17.0<1;1,0>:f                      //  ALU pipe: float; $341
+        mul (16|M0)              r4.0<1>:f     r27.7<0;1,0>:f    r15.0<1;1,0>:f   {$6.src}           //  ALU pipe: float; $339
+        mul (16|M0)              r6.0<1>:f     r27.7<0;1,0>:f    r18.0<1;1,0>:f   {$4.dst}           //  ALU pipe: float; $348
+        mul (16|M0)              r32.0<1>:f    r27.7<0;1,0>:f    r19.0<1;1,0>:f                      //  ALU pipe: float; $349
+        mul (16|M0)              r8.0<1>:f     r27.7<0;1,0>:f    r20.0<1;1,0>:f                      //  ALU pipe: float; $350
+        mul (16|M0)              r34.0<1>:f    r27.7<0;1,0>:f    r21.0<1;1,0>:f                      //  ALU pipe: float; $351
+        mul (16|M0)              r36.0<1>:f    r27.7<0;1,0>:f    r22.0<1;1,0>:f   {$5.dst}           //  ALU pipe: float; $358
+        mul (16|M0)              r38.0<1>:f    r27.7<0;1,0>:f    r23.0<1;1,0>:f                      //  ALU pipe: float; $359
+        mul (16|M0)              r40.0<1>:f    r27.7<0;1,0>:f    r24.0<1;1,0>:f                      //  ALU pipe: float; $360
+        mul (16|M0)              r10.0<1>:f    r27.7<0;1,0>:f    r25.0<1;1,0>:f                      //  ALU pipe: float; $361
+        mul (16|M0)              acc1.0<1>:f   r27.7<0;1,0>:f    r11.0<1;1,0>:f                      //  ALU pipe: float; $329
+        mul (16|M0)              acc2.0<1>:f   r27.7<0;1,0>:f    r12.0<1;1,0>:f                      //  ALU pipe: float; $330
+        mul (16|M0)              acc3.0<1>:f   r27.7<0;1,0>:f    r13.0<1;1,0>:f                      //  ALU pipe: float; $331
+        mad (16|M0)              r67.0<1>:f    r26.0<1;0>:f      r84.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $342
+        mad (16|M0)              r65.0<1>:f    r28.0<1;0>:f      r82.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $344
+        mad (16|M0)              r64.0<1>:f    r30.0<1;0>:f      r81.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $345
+        mad (16|M0)              r66.0<1>:f    r4.0<1;0>:f       r83.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $343
+        mad (16|M0)              r63.0<1>:f    r6.0<1;0>:f       r88.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $352
+        mad (16|M0)              r62.0<1>:f    r32.0<1;0>:f      r87.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $353
+        mad (16|M0)              r56.0<1>:f    r8.0<1;0>:f       r86.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $354
+        mad (16|M0)              r55.0<1>:f    r34.0<1;0>:f      r85.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $355
+        mad (16|M0)              r54.0<1>:f    r36.0<1;0>:f      r92.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $362
+        mad (16|M0)              r53.0<1>:f    r38.0<1;0>:f      r91.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $363
+        mad (16|M0)              r52.0<1>:f    r40.0<1;0>:f      r90.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $364
+        mad (16|M0)              r51.0<1>:f    r10.0<1;0>:f      r89.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $365
+        mad (16|M0)              r80.0<1>:f    acc0.0<1;0>:f     r80.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $332
+        mad (16|M0)              r72.0<1>:f    acc1.0<1;0>:f     r78.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $333
+        mad (16|M0)              r70.0<1>:f    acc2.0<1;0>:f     r76.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $334
+        mad (16|M0)              r68.0<1>:f    acc3.0<1;0>:f     r74.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $335
+(W)     mad (1|M0)               r27.12<1>:f   r2.5<0;0>:f       r27.5<0;0>:f      r27.8<0>:f        //  ALU pipe: float; $366
+(W)     sel (1|M0)    (ge)f0.0   r27.10<1>:f   r27.9<0;1,0>:f    r31.0<0;1,0>:f   {$6.dst}           //  ALU pipe: float; $373
+(W&~f0.0) jmpi                               _0_080                                                  //  ALU pipe: int; $375
+// B029: Preds:{B028},  Succs:{B031}
+_0_081:
+(W)     mov (1|M0)               r27.8<1>:f    0x0:f                                                 //  ALU pipe: float; $377
+(W)     jmpi                                 _0_082                                                  // $378
+// B030: Preds:{B028},  Succs:{B031}
+_0_080:
+(W)     add (1|M0)               r1.0<1>:f     r27.9<0;1,0>:f    -r27.10<0;1,0>:f {F@2}              //  ALU pipe: float; $380
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $381
+(W)     cmp (1|M0)    (lt)f3.1   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $389
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $382
+(W)     cmp (1|M0)    (gt)f3.0   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $391
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $383
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$7.src}             //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $384
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $385
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $386
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $388
+(W&~f3.1) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $390
+(W&~f3.0) sel (1|M0)             r27.8<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $392
+// B031: Preds:{B030, B029},  Succs:{B032, B033}
+_0_082:
+(W)     cmp (16|M0)   (eq)f3.0   null<1>:f     r27.10<0;1,0>:f   0xFF800000:f                        //  ALU pipe: float; $394
+(W&~f3.0) cmp (16|M0) (eq)f3.0   null<1>:f     r31.0<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $395
+(W&~f3.0) jmpi                               _0_083                                                  //  ALU pipe: int; $397
+// B032: Preds:{B031},  Succs:{B034}
+_0_084:
+(W)     mov (1|M0)               r27.7<1>:f    0x0:f                                                 //  ALU pipe: float; $399
+(W)     jmpi                                 _0_085                                                  // $400
+// B033: Preds:{B031},  Succs:{B034}
+_0_083:
+(W)     add (1|M0)               r1.0<1>:f     r31.0<0;1,0>:f    -r27.10<0;1,0>:f                    //  ALU pipe: float; $402
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $403
+(W)     cmp (1|M0)    (lt)f2.1   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $411
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $404
+(W)     cmp (1|M0)    (gt)f2.0   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $413
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $405
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$7.src}             //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $406
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $407
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $408
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {Compacted,M@1}    //  ALU pipe: float; $410
+(W&~f2.1) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $412
+(W&~f2.0) sel (1|M0)             r27.7<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $414
+// B034: Preds:{B033, B032},  Succs:{B035, B036}
+_0_085:
+(W)     shl (1|M0)               r1.0<1>:d     r27.11<0;1,0>:d   8:w               {Compacted}       //  ALU pipe: int; $417
+(W)     or (1|M0)                r27.11<1>:d   r27.4<0;1,0>:d    2:w                                 //  ALU pipe: int; $461
+        or (16|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r47.0<1;1,0>:d   {I@2}              //  ALU pipe: int; $418
+        shl (16|M0)              r3.0<1>:d     acc0.0<1;1,0>:d   2:w                                 //  ALU pipe: int; $419
+        add (16|M0)              r6.0<1>:d     r3.0<1;1,0>:d     128:w               {Compacted,I@1} //  ALU pipe: int; $420
+        add (16|M0)              r7.0<1>:d     r3.0<1;1,0>:d     384:w               {Compacted,F@1} //  ALU pipe: int; $430
+        add (16|M0)              r8.0<1>:d     r3.0<1;1,0>:d     640:w               {Compacted}     //  ALU pipe: int; $440
+        add (16|M0)              r9.0<1>:d     r3.0<1;1,0>:d     896:w               {Compacted}     //  ALU pipe: int; $450
+(W)     shl (1|M0)               r2.6<1>:d     r27.11<0;1,0>:d   2:w                                 //  ALU pipe: int; $462
+        load.slm.d32x4.a32 (16|M0)  r10:4       [r6:1]             {I@5,$8} // ex_desc:0x0; desc:0x2403500 // $421
+        load.slm.d32x4.a32 (16|M0)  r14:4       [r7:1]             {I@4,$9} // ex_desc:0x0; desc:0x2403500 // $431
+        load.slm.d32x4.a32 (16|M0)  r18:4       [r8:1]             {I@3,$10} // ex_desc:0x0; desc:0x2403500 // $441
+        load.slm.d32x4.a32 (16|M0)  r22:4       [r9:1]             {I@2,$11} // ex_desc:0x0; desc:0x2403500 // $451
+(W)     mov (1|M0)               r4.0<1>:ud    r2.6<0;1,0>:ud                   {Compacted,I@1}      //  ALU pipe: int; $463
+(W)     add (1|M0)               r5.0<1>:d     r2.6<0;1,0>:d     64:w               {Compacted,$7.src} //  ALU pipe: int; $465
+(W)     load.slm.d32x1t.a32 (1|M0)  r31:1       [r4:1]             {I@2,$14} // ex_desc:0x0; desc:0x2108500 // $464
+(W)     load.slm.d32x1t.a32 (1|M0)  r37:1       [r5:1]             {I@1,$15} // ex_desc:0x0; desc:0x2108500 // $466
+(W)     cmp (16|M0)   (eq)f1.1   null<1>:f     r27.10<0;1,0>:f   0xFF800000:f                        //  ALU pipe: float; $468
+        mul (16|M0)              acc0.0<1>:f   r27.7<0;1,0>:f    r10.0<1;1,0>:f   {$8.dst}           //  ALU pipe: float; $422
+        mul (16|M0)              r26.0<1>:f    r27.7<0;1,0>:f    r14.0<1;1,0>:f   {$9.dst}           //  ALU pipe: float; $432
+        mul (16|M0)              r28.0<1>:f    r27.7<0;1,0>:f    r16.0<1;1,0>:f                      //  ALU pipe: float; $434
+        mul (16|M0)              r30.0<1>:f    r27.7<0;1,0>:f    r17.0<1;1,0>:f                      //  ALU pipe: float; $435
+        mul (16|M0)              r4.0<1>:f     r27.7<0;1,0>:f    r15.0<1;1,0>:f   {$14.src}          //  ALU pipe: float; $433
+        mul (16|M0)              r6.0<1>:f     r27.7<0;1,0>:f    r18.0<1;1,0>:f   {$10.dst}          //  ALU pipe: float; $442
+        mul (16|M0)              r32.0<1>:f    r27.7<0;1,0>:f    r19.0<1;1,0>:f                      //  ALU pipe: float; $443
+        mul (16|M0)              r8.0<1>:f     r27.7<0;1,0>:f    r20.0<1;1,0>:f                      //  ALU pipe: float; $444
+        mul (16|M0)              r34.0<1>:f    r27.7<0;1,0>:f    r21.0<1;1,0>:f                      //  ALU pipe: float; $445
+        mul (16|M0)              r36.0<1>:f    r27.7<0;1,0>:f    r22.0<1;1,0>:f   {$11.dst}          //  ALU pipe: float; $452
+        mul (16|M0)              r38.0<1>:f    r27.7<0;1,0>:f    r23.0<1;1,0>:f                      //  ALU pipe: float; $453
+        mul (16|M0)              r40.0<1>:f    r27.7<0;1,0>:f    r24.0<1;1,0>:f                      //  ALU pipe: float; $454
+        mul (16|M0)              r10.0<1>:f    r27.7<0;1,0>:f    r25.0<1;1,0>:f                      //  ALU pipe: float; $455
+(W)     mul (1|M0)               r2.5<1>:f     r27.7<0;1,0>:f    r33.0<0;1,0>:f   {$7.dst}           //  ALU pipe: float; $416
+        mul (16|M0)              acc1.0<1>:f   r27.7<0;1,0>:f    r11.0<1;1,0>:f                      //  ALU pipe: float; $423
+        mul (16|M0)              acc2.0<1>:f   r27.7<0;1,0>:f    r12.0<1;1,0>:f                      //  ALU pipe: float; $424
+        mul (16|M0)              acc3.0<1>:f   r27.7<0;1,0>:f    r13.0<1;1,0>:f                      //  ALU pipe: float; $425
+        mad (16|M0)              r41.0<1>:f    r26.0<1;0>:f      r67.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $436
+        mad (16|M0)              r35.0<1>:f    r28.0<1;0>:f      r65.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $438
+        mad (16|M0)              r39.0<1>:f    r4.0<1;0>:f       r66.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $437
+        mad (16|M0)              r127.0<1>:f   r6.0<1;0>:f       r63.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $446
+        mad (16|M0)              r126.0<1>:f   r32.0<1;0>:f      r62.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $447
+        mad (16|M0)              r120.0<1>:f   r8.0<1;0>:f       r56.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $448 R{r27,} IR{}{E:4,E:4,},  {BC=1}
+        mad (16|M0)              r119.0<1>:f   r34.0<1;0>:f      r55.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $449
+        mad (16|M0)              r118.0<1>:f   r36.0<1;0>:f      r54.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $456
+        mad (16|M0)              r117.0<1>:f   r38.0<1;0>:f      r53.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $457
+        mad (16|M0)              r116.0<1>:f   r40.0<1;0>:f      r52.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $458
+        mad (16|M0)              r115.0<1>:f   r10.0<1;0>:f      r51.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $459
+        mad (16|M0)              r33.0<1>:f    r30.0<1;0>:f      r64.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $439
+        mad (16|M0)              r50.0<1>:f    acc0.0<1;0>:f     r80.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $426
+        mad (16|M0)              r48.0<1>:f    acc1.0<1;0>:f     r72.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $427
+        mad (16|M0)              r44.0<1>:f    acc2.0<1;0>:f     r70.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $428
+        mad (16|M0)              r42.0<1>:f    acc3.0<1;0>:f     r68.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $429
+(W)     sel (1|M0)    (ge)f0.0   r27.9<1>:f    r27.10<0;1,0>:f   r31.0<0;1,0>:f   {$14.dst}          //  ALU pipe: float; $467
+(W)     mad (1|M0)               r27.12<1>:f   r2.5<0;0>:f       r27.12<0;0>:f     r27.8<0>:f        //  ALU pipe: float; $460
+(W&~f1.1) jmpi                               _0_086                                                  //  ALU pipe: int; $469
+// B035: Preds:{B034},  Succs:{B037}
+_0_087:
+(W)     mov (1|M0)               r27.8<1>:f    0x0:f                                                 //  ALU pipe: float; $471
+(W)     jmpi                                 _0_088                                                  // $472
+// B036: Preds:{B034},  Succs:{B037}
+_0_086:
+(W)     add (1|M0)               r1.0<1>:f     r27.10<0;1,0>:f   -r27.9<0;1,0>:f  {F@3}              //  ALU pipe: float; $474
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $475
+(W)     cmp (1|M0)    (lt)f1.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $483
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $476
+(W)     cmp (1|M0)    (gt)f0.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $485
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $477
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$15.src}            //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $478
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $479
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $480
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $482
+(W&~f1.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $484
+(W&~f0.1) sel (1|M0)             r27.8<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $486
+// B037: Preds:{B036, B035},  Succs:{B038, B039}
+_0_088:
+(W)     cmp (16|M0)   (eq)f2.1   null<1>:f     r27.9<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $488
+(W&~f2.1) cmp (16|M0) (eq)f2.1   null<1>:f     r31.0<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $489
+(W&~f2.1) jmpi                               _0_089                                                  //  ALU pipe: int; $491
+// B038: Preds:{B037},  Succs:{B040}
+_0_090:
+(W)     mov (1|M0)               r27.7<1>:f    0x0:f                                                 //  ALU pipe: float; $493
+(W)     jmpi                                 _0_091                                                  // $494
+// B039: Preds:{B037},  Succs:{B040}
+_0_089:
+(W)     add (1|M0)               r1.0<1>:f     r31.0<0;1,0>:f    -r27.9<0;1,0>:f                     //  ALU pipe: float; $496
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $497
+(W)     cmp (1|M0)    (lt)f0.0   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $505
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $498
+(W)     cmp (1|M0)    (gt)f3.1   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $507
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $499
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$15.src}            //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $500
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $501
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $502
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $504
+(W&~f0.0) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $506
+(W&~f3.1) sel (1|M0)             r27.7<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $508
+// B040: Preds:{B039, B038},  Succs:{B041, B042}
+_0_091:
+(W)     shl (1|M0)               r1.0<1>:d     r27.11<0;1,0>:d   8:w                                 //  ALU pipe: int; $511
+(W)     or (1|M0)                r27.10<1>:d   r27.4<0;1,0>:d    3:w                                 //  ALU pipe: int; $555
+        or (16|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r47.0<1;1,0>:d   {I@2}              //  ALU pipe: int; $512
+        shl (16|M0)              r3.0<1>:d     acc0.0<1;1,0>:d   2:w                                 //  ALU pipe: int; $513
+        add (16|M0)              r6.0<1>:d     r3.0<1;1,0>:d     128:w               {Compacted,I@1} //  ALU pipe: int; $514
+        add (16|M0)              r7.0<1>:d     r3.0<1;1,0>:d     384:w               {Compacted,F@1} //  ALU pipe: int; $524
+        add (16|M0)              r8.0<1>:d     r3.0<1;1,0>:d     640:w               {Compacted}     //  ALU pipe: int; $534
+        add (16|M0)              r9.0<1>:d     r3.0<1;1,0>:d     896:w               {Compacted}     //  ALU pipe: int; $544
+(W)     shl (1|M0)               r2.6<1>:d     r27.10<0;1,0>:d   2:w                                 //  ALU pipe: int; $556
+        load.slm.d32x4.a32 (16|M0)  r10:4       [r6:1]             {I@5,$0} // ex_desc:0x0; desc:0x2403500 // $515
+        load.slm.d32x4.a32 (16|M0)  r14:4       [r7:1]             {I@4,$1} // ex_desc:0x0; desc:0x2403500 // $525
+        load.slm.d32x4.a32 (16|M0)  r18:4       [r8:1]             {I@3,$2} // ex_desc:0x0; desc:0x2403500 // $535
+        load.slm.d32x4.a32 (16|M0)  r22:4       [r9:1]             {I@2,$3} // ex_desc:0x0; desc:0x2403500 // $545
+(W)     mov (1|M0)               r4.0<1>:ud    r2.6<0;1,0>:ud                   {Compacted,I@1}      //  ALU pipe: int; $557
+(W)     add (1|M0)               r5.0<1>:d     r2.6<0;1,0>:d     64:w               {Compacted,$15.src} //  ALU pipe: int; $559
+(W)     load.slm.d32x1t.a32 (1|M0)  r31:1       [r4:1]             {I@2,$4} // ex_desc:0x0; desc:0x2108500 // $558
+(W)     mul (1|M0)               r2.5<1>:f     r27.7<0;1,0>:f    r37.0<0;1,0>:f   {$15.dst}          //  ALU pipe: float; $510
+(W)     load.slm.d32x1t.a32 (1|M0)  r37:1       [r5:1]             {A@1,$5} // ex_desc:0x0; desc:0x2108500 // $560
+(W)     cmp (16|M0)   (eq)f3.0   null<1>:f     r27.9<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $562
+        mul (16|M0)              acc0.0<1>:f   r27.7<0;1,0>:f    r10.0<1;1,0>:f   {$0.dst}           //  ALU pipe: float; $516
+        mul (16|M0)              r26.0<1>:f    r27.7<0;1,0>:f    r14.0<1;1,0>:f   {$1.dst}           //  ALU pipe: float; $526
+        mul (16|M0)              r28.0<1>:f    r27.7<0;1,0>:f    r16.0<1;1,0>:f                      //  ALU pipe: float; $528
+        mul (16|M0)              r30.0<1>:f    r27.7<0;1,0>:f    r17.0<1;1,0>:f                      //  ALU pipe: float; $529
+        mul (16|M0)              r4.0<1>:f     r27.7<0;1,0>:f    r15.0<1;1,0>:f   {$4.src}           //  ALU pipe: float; $527
+        mul (16|M0)              r6.0<1>:f     r27.7<0;1,0>:f    r18.0<1;1,0>:f   {$2.dst}           //  ALU pipe: float; $536
+        mul (16|M0)              r32.0<1>:f    r27.7<0;1,0>:f    r19.0<1;1,0>:f                      //  ALU pipe: float; $537
+        mul (16|M0)              r8.0<1>:f     r27.7<0;1,0>:f    r20.0<1;1,0>:f                      //  ALU pipe: float; $538
+        mul (16|M0)              r34.0<1>:f    r27.7<0;1,0>:f    r21.0<1;1,0>:f                      //  ALU pipe: float; $539
+        mul (16|M0)              r36.0<1>:f    r27.7<0;1,0>:f    r22.0<1;1,0>:f   {$3.dst}           //  ALU pipe: float; $546
+        mul (16|M0)              r38.0<1>:f    r27.7<0;1,0>:f    r23.0<1;1,0>:f                      //  ALU pipe: float; $547
+        mul (16|M0)              r40.0<1>:f    r27.7<0;1,0>:f    r24.0<1;1,0>:f                      //  ALU pipe: float; $548
+        mul (16|M0)              r10.0<1>:f    r27.7<0;1,0>:f    r25.0<1;1,0>:f                      //  ALU pipe: float; $549
+        mul (16|M0)              acc1.0<1>:f   r27.7<0;1,0>:f    r11.0<1;1,0>:f                      //  ALU pipe: float; $517
+        mul (16|M0)              acc2.0<1>:f   r27.7<0;1,0>:f    r12.0<1;1,0>:f                      //  ALU pipe: float; $518
+        mul (16|M0)              acc3.0<1>:f   r27.7<0;1,0>:f    r13.0<1;1,0>:f                      //  ALU pipe: float; $519
+        mad (16|M0)              r107.0<1>:f   r26.0<1;0>:f      r41.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $530
+        mad (16|M0)              r105.0<1>:f   r28.0<1;0>:f      r35.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $532
+        mad (16|M0)              r104.0<1>:f   r30.0<1;0>:f      r33.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $533
+        mad (16|M0)              r106.0<1>:f   r4.0<1;0>:f       r39.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $531
+        mad (16|M0)              r103.0<1>:f   r6.0<1;0>:f       r127.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $540
+        mad (16|M0)              r102.0<1>:f   r32.0<1;0>:f      r126.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $541
+        mad (16|M0)              r100.0<1>:f   r8.0<1;0>:f       r120.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $542 R{r27,} IR{}{E:4,E:4,},  {BC=1}
+        mad (16|M0)              r98.0<1>:f    r34.0<1;0>:f      r119.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $543
+        mad (16|M0)              r97.0<1>:f    r36.0<1;0>:f      r118.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $550
+        mad (16|M0)              r96.0<1>:f    r38.0<1;0>:f      r117.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $551
+        mad (16|M0)              r95.0<1>:f    r40.0<1;0>:f      r116.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $552
+        mad (16|M0)              r94.0<1>:f    r10.0<1;0>:f      r115.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $553
+        mad (16|M0)              r114.0<1>:f   acc0.0<1;0>:f     r50.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $520
+        mad (16|M0)              r112.0<1>:f   acc1.0<1;0>:f     r48.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $521
+        mad (16|M0)              r110.0<1>:f   acc2.0<1;0>:f     r44.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $522
+        mad (16|M0)              r108.0<1>:f   acc3.0<1;0>:f     r42.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $523
+(W)     mad (1|M0)               r27.11<1>:f   r2.5<0;0>:f       r27.12<0;0>:f     r27.8<0>:f        //  ALU pipe: float; $554
+(W)     sel (1|M0)    (ge)f0.0   r27.6<1>:f    r27.9<0;1,0>:f    r31.0<0;1,0>:f   {$4.dst}           //  ALU pipe: float; $561
+(W&~f3.0) jmpi                               _0_092                                                  //  ALU pipe: int; $563
+// B041: Preds:{B040},  Succs:{B043}
+_0_093:
+(W)     mov (1|M0)               r27.8<1>:f    0x0:f                                                 //  ALU pipe: float; $565
+(W)     jmpi                                 _0_094                                                  // $566
+// B042: Preds:{B040},  Succs:{B043}
+_0_092:
+(W)     add (1|M0)               r1.0<1>:f     r27.9<0;1,0>:f    -r27.6<0;1,0>:f  {F@2}              //  ALU pipe: float; $568
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $569
+(W)     cmp (1|M0)    (lt)f2.1   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $577
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $570
+(W)     cmp (1|M0)    (gt)f2.0   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $579
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $571
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$5.src}             //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $572
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $573
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $574
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $576
+(W&~f2.1) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $578
+(W&~f2.0) sel (1|M0)             r27.8<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $580
+// B043: Preds:{B042, B041},  Succs:{B044, B045}
+_0_094:
+(W)     cmp (16|M0)   (eq)f2.0   null<1>:f     r27.6<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $582
+(W&~f2.0) cmp (16|M0) (eq)f2.0   null<1>:f     r31.0<0;1,0>:f    0xFF800000:f                        //  ALU pipe: float; $583
+(W&~f2.0) jmpi                               _0_095                                                  //  ALU pipe: int; $585
+// B044: Preds:{B043},  Succs:{B046}
+_0_096:
+(W)     mov (1|M0)               r27.7<1>:f    0x0:f                                                 //  ALU pipe: float; $587
+(W)     jmpi                                 _0_097                                                  // $588
+// B045: Preds:{B043},  Succs:{B046}
+_0_095:
+(W)     add (1|M0)               r1.0<1>:f     r31.0<0;1,0>:f    -r27.6<0;1,0>:f                     //  ALU pipe: float; $590
+(W)     mul (1|M0)               r1.1<1>:f     r1.0<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $591
+(W)     cmp (1|M0)    (lt)f1.1   null<1>:f     r1.0<0;1,0>:f     0xC2D20000:f                        //  ALU pipe: float; $599
+(W)     rndz (1|M0)              r4.0<1>:f     r1.1<0;1,0>:f                    {F@2}                //  ALU pipe: float; $592
+(W)     cmp (1|M0)    (gt)f1.0   null<1>:f     r1.0<0;1,0>:f     0x42D20000:f                        //  ALU pipe: float; $601
+(W)     mad (1|M0)               r3.0<1>:f     r1.0<0;0>:f       r27.2<0;0>:f      r4.0<0>:f        {F@2} //  ALU pipe: float; $593
+(W)     math.exp (1|M0)          r5.0<1>:f     r4.0<0;1,0>:f                    {$5.src}             //  ALU pipe: math; $691
+(W)     mad (1|M0)               r2.5<1>:f     r3.0<0;0>:f       r27.3<0;0>:f      r4.0<0>:f        {F@1} //  ALU pipe: float; $594
+(W)     mul (1|M0)               r4.1<1>:f     r2.5<0;1,0>:f     0x3FB8AA3B:f               {F@1}    //  ALU pipe: float; $595
+(W)     math.exp (1|M0)          r5.1<1>:f     r4.1<0;1,0>:f                    {F@1}                //  ALU pipe: math; $596
+(W)     mul (1|M0)               r6.0<1>:f     r5.0<0;1,0>:f     r5.1<0;1,0>:f    {M@1}              //  ALU pipe: float; $598
+(W&~f1.1) sel (1|M0)             r7.0<1>:f     r6.0<0;1,0>:f     0x0:f               {F@1}           //  ALU pipe: float; $600
+(W&~f1.0) sel (1|M0)             r27.7<1>:f    r7.0<0;1,0>:f     0x7F800000:f               {F@1}    //  ALU pipe: float; $602
+// B046: Preds:{B045, B044},  Succs:{B047, B048}
+_0_097:
+(W)     shl (1|M0)               r1.0<1>:d     r27.10<0;1,0>:d   8:w                                 //  ALU pipe: int; $605
+(W)     cmp (16|M0)   (lt)f0.1   null<1>:d     r27.10<0;1,0>:ud  0xF:uw                              //  ALU pipe: int; $649
+        or (16|M0)               acc0.0<1>:d   r1.0<0;1,0>:d     r47.0<1;1,0>:d   {I@2}              //  ALU pipe: int; $606
+        shl (16|M0)              r3.0<1>:d     acc0.0<1;1,0>:d   2:w                                 //  ALU pipe: int; $607
+        add (16|M0)              r4.0<1>:d     r3.0<1;1,0>:d     128:w               {Compacted,I@1} //  ALU pipe: int; $608
+        add (16|M0)              r5.0<1>:d     r3.0<1;1,0>:d     384:w               {Compacted,$5.src} //  ALU pipe: int; $618
+        add (16|M0)              r6.0<1>:d     r3.0<1;1,0>:d     640:w               {Compacted}     //  ALU pipe: int; $628
+        add (16|M0)              r7.0<1>:d     r3.0<1;1,0>:d     896:w               {Compacted,F@1} //  ALU pipe: int; $638
+        load.slm.d32x4.a32 (16|M0)  r8:4        [r4:1]             {I@4,$6} // ex_desc:0x0; desc:0x2403500 // $609
+        load.slm.d32x4.a32 (16|M0)  r12:4       [r5:1]             {I@3,$7} // ex_desc:0x0; desc:0x2403500 // $619
+        load.slm.d32x4.a32 (16|M0)  r16:4       [r6:1]             {I@2,$8} // ex_desc:0x0; desc:0x2403500 // $629
+        load.slm.d32x4.a32 (16|M0)  r20:4       [r7:1]             {I@1,$9} // ex_desc:0x0; desc:0x2403500 // $639
+        mul (16|M0)              acc0.0<1>:f   r27.7<0;1,0>:f    r8.0<1;1,0>:f    {$6.dst}           //  ALU pipe: float; $610
+        mul (16|M0)              r24.0<1>:f    r27.7<0;1,0>:f    r12.0<1;1,0>:f   {$7.dst}           //  ALU pipe: float; $620
+        mul (16|M0)              r26.0<1>:f    r27.7<0;1,0>:f    r13.0<1;1,0>:f                      //  ALU pipe: float; $621
+        mul (16|M0)              r28.0<1>:f    r27.7<0;1,0>:f    r14.0<1;1,0>:f                      //  ALU pipe: float; $622
+        mul (16|M0)              r30.0<1>:f    r27.7<0;1,0>:f    r15.0<1;1,0>:f                      //  ALU pipe: float; $623
+        mul (16|M0)              r32.0<1>:f    r27.7<0;1,0>:f    r16.0<1;1,0>:f   {$8.dst}           //  ALU pipe: float; $630
+        mul (16|M0)              r4.0<1>:f     r27.7<0;1,0>:f    r17.0<1;1,0>:f                      //  ALU pipe: float; $631
+        mul (16|M0)              r34.0<1>:f    r27.7<0;1,0>:f    r18.0<1;1,0>:f                      //  ALU pipe: float; $632
+        mul (16|M0)              r6.0<1>:f     r27.7<0;1,0>:f    r19.0<1;1,0>:f                      //  ALU pipe: float; $633
+        mul (16|M0)              r36.0<1>:f    r27.7<0;1,0>:f    r20.0<1;1,0>:f   {$9.dst}           //  ALU pipe: float; $640
+        mul (16|M0)              r38.0<1>:f    r27.7<0;1,0>:f    r21.0<1;1,0>:f                      //  ALU pipe: float; $641
+        mul (16|M0)              r40.0<1>:f    r27.7<0;1,0>:f    r22.0<1;1,0>:f                      //  ALU pipe: float; $642
+        mul (16|M0)              r8.0<1>:f     r27.7<0;1,0>:f    r23.0<1;1,0>:f                      //  ALU pipe: float; $643
+(W)     mul (1|M0)               r2.5<1>:f     r27.7<0;1,0>:f    r37.0<0;1,0>:f   {$5.dst}           //  ALU pipe: float; $604
+        mul (16|M0)              acc1.0<1>:f   r27.7<0;1,0>:f    r9.0<1;1,0>:f                       //  ALU pipe: float; $611
+        mul (16|M0)              acc2.0<1>:f   r27.7<0;1,0>:f    r10.0<1;1,0>:f                      //  ALU pipe: float; $612
+        mul (16|M0)              acc3.0<1>:f   r27.7<0;1,0>:f    r11.0<1;1,0>:f                      //  ALU pipe: float; $613
+        mad (16|M0)              r84.0<1>:f    r24.0<1;0>:f      r107.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $624 R{} IR{}{E:4,O:5,O:5,},  {BC=1}
+        mad (16|M0)              r83.0<1>:f    r26.0<1;0>:f      r106.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $625 R{r27,} IR{}{E:5,E:5,},  {BC=1}
+        mad (16|M0)              r82.0<1>:f    r28.0<1;0>:f      r105.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $626
+        mad (16|M0)              r81.0<1>:f    r30.0<1;0>:f      r104.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $627
+        mad (16|M0)              r88.0<1>:f    r32.0<1;0>:f      r103.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $634
+        mad (16|M0)              r87.0<1>:f    r4.0<1;0>:f       r102.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $635
+        mad (16|M0)              r86.0<1>:f    r34.0<1;0>:f      r100.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $636
+        mad (16|M0)              r85.0<1>:f    r6.0<1;0>:f       r98.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $637
+        mad (16|M0)              r92.0<1>:f    r36.0<1;0>:f      r97.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $644
+        mad (16|M0)              r91.0<1>:f    r38.0<1;0>:f      r96.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $645
+        mad (16|M0)              r90.0<1>:f    r40.0<1;0>:f      r95.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $646
+        mad (16|M0)              r89.0<1>:f    r8.0<1;0>:f       r94.0<1;0>:f      r27.8<0>:f       {Compacted} //  ALU pipe: float; $647
+        mad (16|M0)              r80.0<1>:f    acc0.0<1;0>:f     r114.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $614
+        mad (16|M0)              r78.0<1>:f    acc1.0<1;0>:f     r112.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $615
+        mad (16|M0)              r76.0<1>:f    acc2.0<1;0>:f     r110.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $616
+        mad (16|M0)              r74.0<1>:f    acc3.0<1;0>:f     r108.0<1;0>:f     r27.8<0>:f       {Compacted} //  ALU pipe: float; $617
+(W)     mad (1|M0)               r27.5<1>:f    r2.5<0;0>:f       r27.11<0;0>:f     r27.8<0>:f        //  ALU pipe: float; $648
+(W&~f0.1) jmpi                               _0_098                                                  //  ALU pipe: int; $650
+// B047: Preds:{B046},  Succs:{B022}
+_0_099:
+(W)     add (1|M0)               r27.4<1>:d    r27.4<0;1,0>:d    4:w                                 //  ALU pipe: int; $652
+(W)     jmpi                                 _0_073                                                  // $653
+// B048: Preds:{B046},  Succs:{B049}
+_0_098:
+(W)     mul (1|M0)               r2.6<1>:d     r27.1<0;1,0>:d    24:w                                //  ALU pipe: int; $657
+(W)     sel (1|M0)    (ge)f0.0   r1.0<1>:f     r27.5<0;1,0>:f    0x1E3CE508:f               {F@1}    //  ALU pipe: float; $655
+(W)     add (1|M0)               r3.0<1>:q     r2.6<0;1,0>:ud    r27.0<0;1,0>:d   {I@1}              //  ALU pipe: int; $660
+        mov (16|M0)              r10.0<4>:uw   r29.0<1;1,0>:uw                  {$12.src}            //  ALU pipe: int; $665
+        shl (16|M0)              r20.0<1>:d    r47.0<1;1,0>:d    2:w               {Compacted}       //  ALU pipe: int; $672
+(W)     math.inv (1|M0)          r2.5<1>:f     r1.0<0;1,0>:f                    {F@1}                //  ALU pipe: math; $656
+(W)     shl (1|M0)               r4.0<1>:q     r3.0<0;1,0>:q     10:w               {Compacted,I@3}  //  ALU pipe: int; $661
+        shl (16|M0)              r12.0<1>:q    r10.0<4;1,0>:uw   2:w               {I@3}             //  ALU pipe: int; $665
+        add (16|M0)              r20.0<1>:d    r20.0<1;1,0>:d    256:w               {Compacted,I@3} //  ALU pipe: int; $673
+(W)     add (1|M0)               r5.0<1>:q     r4.0<0;1,0>:q     r2.1<0;1,0>:q    {Compacted,I@3}    //  ALU pipe: int; $662
+        mul (16|M0)              r6.0<1>:f     r80.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted,M@1}    //  ALU pipe: float; $663
+        mul (16|M0)              r7.0<1>:f     r78.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $667
+        mul (16|M0)              r8.0<1>:f     r76.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $668
+        mul (16|M0)              r9.0<1>:f     r74.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $669
+        mov (16|M0)              r3.0<2>:ud    r20.0<1;1,0>:ud                  {Compacted,I@2}      //  ALU pipe: int; $675
+        add (16|M0)              r14.0<1>:q    r5.0<0;1,0>:q     r12.0<1;1,0>:q   {Compacted,@2,$13.src} //  ALU pipe: int; $666
+        store.ugm.d32x4.a64 (16|M0)  [r14:2]    r6:4               {A@1,$10} // ex_desc:0x0; desc:0x4003584 // $670
+        mul (16|M0)              r16.0<1>:f    r84.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $671
+        mul (16|M0)              r17.0<1>:f    r83.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $676
+        mul (16|M0)              r18.0<1>:f    r82.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $677
+        mul (16|M0)              r19.0<1>:f    r81.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $678
+        mul (16|M0)              r10.0<1>:f    r88.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $680
+        mul (16|M0)              r11.0<1>:f    r87.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $681
+        add (16|M0)              r22.0<1>:q    r5.0<0;1,0>:q     r3.0<2;1,0>:ud                      //  ALU pipe: int; $675
+        mul (16|M0)              r12.0<1>:f    r86.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $682
+        mul (16|M0)              r13.0<1>:f    r85.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $683
+        mul (16|M0)              r6.0<1>:f     r92.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted,$10.src} //  ALU pipe: float; $685
+        mul (16|M0)              r7.0<1>:f     r91.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $686
+        mul (16|M0)              r8.0<1>:f     r90.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $687
+        mul (16|M0)              r9.0<1>:f     r89.0<1;1,0>:f    r2.5<0;1,0>:f    {Compacted}        //  ALU pipe: float; $688
+        store.ugm.d32x4.a64 (16|M0)  [r22:2]    r16:4              {A@1,$11} // ex_desc:0x0; desc:0x4003584 // $679
+        store.ugm.d32x4.a64 (16|M0)  [r22:2+0x100] r10:4           {F@5,$12} // ex_desc:0x100000; desc:0x4003584 // $684
+        store.ugm.d32x4.a64 (16|M0)  [r22:2+0x200] r6:4            {F@1,$13} // ex_desc:0x200000; desc:0x4003584 // $689
+// B049: Preds:{B048, B020},  Succs:{}
+_0_071:
+(W)     mov (16|M0)              r127.0<1>:f   r46.0<1;1,0>:f                                        //  ALU pipe: float; $691
+(W)     send.gtwy (1|M0)         null     r127  null:0  0x0            0x02000010           {EOT,F@1,$14} // wr:1+0, rd:0; end of thread // $691
+L8592:
+(W)     mov (16|M0)              null<1>:ud    0x8B54A0EB:ud                                         // 
+(W)     mov (16|M0)              null<1>:ud    0x7B79F18D:ud                                         // 
+(W)     mov (16|M0)              null<1>:ud    0x0:ud                                                // 
+(W)     mov (16|M0)              null<1>:ud    0x6:ud                                                // 
+
+
+//.BankConflicts: 4
+//.ByteRMWs: 1
+//
+
+
+//.numALUInst: 573
+//.accSubDef: 25
+//.accSubUse: 25
+//.accSubCandidateDef: 85
+//.accSubCandidateUse: 85
+//
+//
+//.singlePipeAtOneDistNum: 117
+//.allAtOneDistNum: 7
+//.syncInstCount: 5
+//.tokenReuseCount: 0
+//.AfterWriteTokenDepCount: 33
+//.AfterReadTokenDepCount: 24

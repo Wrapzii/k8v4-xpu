@@ -1,0 +1,22 @@
+Intel(R) oneAPI DPC++/C++ Compiler 2025.3.2 (2025.3.2.20260112)
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/Context.h:5:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/CPUGeneratorImpl.h:4:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/ATen/core/Generator.h:19:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/GeneratorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/TensorImpl.h:9:
+In file included from /opt/venv/lib/python3.12/site-packages/torch/include/c10/core/InferenceMode.h:4:
+   89 |   bool view_replay_enabled_ : 1 = false;
+      |                                 ^
+   90 |   bool grad_layout_enforcement_enabled_ : 1 = true;
+      |                                             ^
+Compilation from IR - skipping loading of FCL
+Build succeeded.
+Compilation from IR - skipping loading of FCL
+Build succeeded.
+Compilation from IR - skipping loading of FCL
+
+
+Build succeeded.
+Compilation from IR - skipping loading of FCL
+Build succeeded.
+AOT_DONE
