@@ -40,6 +40,8 @@ def build(info, rate, on, gmu=None):
     swapped = False
     for bnd in h.get("Binds") or []:
         parts = bnd.split(":")
+        if len(parts) >= 2 and parts[1] == "/ops/attn-profile":
+            continue  # re-added below
         if len(parts) >= 2 and parts[1] == "/opt/k8v4-casc":
             parts[0] = STAGED; swapped = True
         a += ["-v", ":".join(parts)]
