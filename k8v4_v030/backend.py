@@ -23,6 +23,9 @@ except Exception:
     pass
 
 from k8v4_v030.attn_time import attention_span
+from k8v4_v030 import attn_profile as _attn_profile
+
+_ATTN_PROFILE = _attn_profile.ENABLED  # cached once; off => one bool test per call
 from k8v4_v030 import cascade as _cascade
 
 
@@ -387,7 +390,13 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                 meta.pages_per_block,
             )
 
-        attention_span("decode", _decode_attn)
+        if _ATTN_PROFILE:
+            tok = _attn_profile.get().begin(meta, first, count, q_len, casc is not None)
+            attention_span("decode", _decode_attn)
+            if tok is not None:
+                _attn_profile.get().end(tok)
+        else:
+            attention_span("decode", _decode_attn)
         output.narrow(0, tok0, width).copy_(out_buf)
 
     def _eager(
