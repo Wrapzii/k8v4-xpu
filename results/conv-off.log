@@ -1,0 +1,37 @@
+outside load before: {'running': 0.0, 'waiting': 0.0, 'kv_usage': 0.0}
+{"warmup": 2000, "prompt_tokens": 1947, "cached_tokens": null, "ttft_s": 1.6339250949968118}
+{"warmup": 8000, "prompt_tokens": 8019, "cached_tokens": null, "ttft_s": 3.61382343499281}
+{"warmup": 16000, "prompt_tokens": 16134, "cached_tokens": null, "ttft_s": 5.707292460007011}
+{"warmup": 32000, "prompt_tokens": 32762, "cached_tokens": null, "ttft_s": 11.076824421994388}
+{"warmup": 64000, "prompt_tokens": 66611, "cached_tokens": null, "ttft_s": 24.48496569400595}
+{"warmup": 128000, "prompt_tokens": 134319, "cached_tokens": null, "ttft_s": 64.24639456201112}
+{"warmup": 200000, "prompt_tokens": 210480, "cached_tokens": null, "ttft_s": 99.82562812499236}
+{"target": 2000, "conc": 1, "rep": 1, "prompt_tokens": 1947, "cached": null, "ttft_s": 0.937, "tpot_ms": 5.92, "agg_decode_tok_s": 168.8, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 2000, "conc": 1, "rep": 2, "prompt_tokens": 1947, "cached": null, "ttft_s": 0.907, "tpot_ms": 5.93, "agg_decode_tok_s": 168.8, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 2000, "conc": 4, "rep": 1, "prompt_tokens": 1947, "cached": null, "ttft_s": 2.645, "tpot_ms": 13.48, "agg_decode_tok_s": 304.1, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 2000, "conc": 4, "rep": 2, "prompt_tokens": 1947, "cached": null, "ttft_s": 2.57, "tpot_ms": 13.52, "agg_decode_tok_s": 326.8, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 8000, "conc": 1, "rep": 1, "prompt_tokens": 8019, "cached": null, "ttft_s": 1.776, "tpot_ms": 6.31, "agg_decode_tok_s": 158.5, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 8000, "conc": 1, "rep": 2, "prompt_tokens": 8019, "cached": null, "ttft_s": 1.769, "tpot_ms": 6.46, "agg_decode_tok_s": 154.9, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 8000, "conc": 4, "rep": 1, "prompt_tokens": 8019, "cached": null, "ttft_s": 4.421, "tpot_ms": 22.54, "agg_decode_tok_s": 227.6, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 8000, "conc": 4, "rep": 2, "prompt_tokens": 8019, "cached": null, "ttft_s": 4.42, "tpot_ms": 22.66, "agg_decode_tok_s": 229.5, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 16000, "conc": 1, "rep": 1, "prompt_tokens": 16134, "cached": null, "ttft_s": 1.779, "tpot_ms": 6.45, "agg_decode_tok_s": 155.1, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 16000, "conc": 1, "rep": 2, "prompt_tokens": 16134, "cached": null, "ttft_s": 1.779, "tpot_ms": 6.05, "agg_decode_tok_s": 165.3, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 16000, "conc": 4, "rep": 1, "prompt_tokens": 16134, "cached": null, "ttft_s": 4.448, "tpot_ms": 23.8, "agg_decode_tok_s": 212.5, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 16000, "conc": 4, "rep": 2, "prompt_tokens": 16134, "cached": null, "ttft_s": 4.451, "tpot_ms": 23.37, "agg_decode_tok_s": 220.1, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 32000, "conc": 1, "rep": 1, "prompt_tokens": 32762, "cached": null, "ttft_s": 1.909, "tpot_ms": 6.86, "agg_decode_tok_s": 145.7, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 32000, "conc": 1, "rep": 2, "prompt_tokens": 32762, "cached": null, "ttft_s": 1.908, "tpot_ms": 6.66, "agg_decode_tok_s": 150.2, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 32000, "conc": 4, "rep": 1, "prompt_tokens": 32762, "cached": null, "ttft_s": 4.767, "tpot_ms": 26.61, "agg_decode_tok_s": 188.5, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 32000, "conc": 4, "rep": 2, "prompt_tokens": 32762, "cached": null, "ttft_s": 4.775, "tpot_ms": 27.06, "agg_decode_tok_s": 185.8, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 64000, "conc": 1, "rep": 1, "prompt_tokens": 66611, "cached": null, "ttft_s": 2.546, "tpot_ms": 8.84, "agg_decode_tok_s": 113.2, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 64000, "conc": 1, "rep": 2, "prompt_tokens": 66611, "cached": null, "ttft_s": 2.534, "tpot_ms": 8.83, "agg_decode_tok_s": 113.2, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 64000, "conc": 4, "rep": 1, "prompt_tokens": 66611, "cached": null, "ttft_s": 6.2, "tpot_ms": 34.01, "agg_decode_tok_s": 145.3, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 64000, "conc": 4, "rep": 2, "prompt_tokens": 66611, "cached": null, "ttft_s": 6.233, "tpot_ms": 34.59, "agg_decode_tok_s": 144.1, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 128000, "conc": 1, "rep": 1, "prompt_tokens": 134319, "cached": null, "ttft_s": 4.049, "tpot_ms": 8.93, "agg_decode_tok_s": 112.0, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 128000, "conc": 1, "rep": 2, "prompt_tokens": 134319, "cached": null, "ttft_s": 4.064, "tpot_ms": 8.96, "agg_decode_tok_s": 111.6, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 128000, "conc": 4, "rep": 1, "prompt_tokens": 134319, "cached": null, "ttft_s": 9.784, "tpot_ms": 49.49, "agg_decode_tok_s": 104.2, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 128000, "conc": 4, "rep": 2, "prompt_tokens": 134319, "cached": null, "ttft_s": 9.793, "tpot_ms": 49.98, "agg_decode_tok_s": 103.7, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 200000, "conc": 1, "rep": 1, "prompt_tokens": 210480, "cached": null, "ttft_s": 5.662, "tpot_ms": 11.9, "agg_decode_tok_s": 84.0, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 200000, "conc": 1, "rep": 2, "prompt_tokens": 210480, "cached": null, "ttft_s": 5.689, "tpot_ms": 11.23, "agg_decode_tok_s": 89.1, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 200000, "conc": 4, "rep": 1, "prompt_tokens": 210480, "cached": null, "ttft_s": 13.51, "tpot_ms": 67.47, "agg_decode_tok_s": 77.4, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+{"target": 200000, "conc": 4, "rep": 2, "prompt_tokens": 210480, "cached": null, "ttft_s": 13.499, "tpot_ms": 67.79, "agg_decode_tok_s": 74.4, "load_before": {"running": 0.0, "waiting": 0.0, "kv_usage": 0.0}}
+wrote results/conv-off-1793819629.json
