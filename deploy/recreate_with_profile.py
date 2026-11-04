@@ -15,7 +15,7 @@ STAGED = "/mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-202611
 OUTDIR = os.path.expanduser("~/ops/vllm-telemetry/attn-profile")
 
 
-def build(info, rate, on):
+def build(info, rate, on, gmu=None):
     c, h = info["Config"], info["HostConfig"]
     a = ["docker", "run", "-d", "--name", NAME]
     rp = h.get("RestartPolicy") or {}
@@ -54,7 +54,13 @@ def build(info, rate, on):
     if c.get("Entrypoint"):
         a += ["--entrypoint", c["Entrypoint"][0]]
     a.append(c["Image"])
-    a += (c["Entrypoint"][1:] if c.get("Entrypoint") else []) + (c.get("Cmd") or [])
+    cmd = list(c.get("Cmd") or [])
+    if gmu:
+        n = sum(x.startswith("--gpu-memory-utilization=") for x in cmd)
+        if n != 1:
+            sys.exit("expected one --gpu-memory-utilization= arg, found %d" % n)
+        cmd = ["--gpu-memory-utilization=%s" % gmu if x.startswith("--gpu-memory-utilization=") else x for x in cmd]
+    a += (c["Entrypoint"][1:] if c.get("Entrypoint") else []) + cmd
     return a
 
 
@@ -75,22 +81,25 @@ def main():
     ap.add_argument("--rate", default="0.01")
     ap.add_argument("--off", action="store_true")
     ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--gmu", default=None, help="override --gpu-memory-utilization")
+    ap.add_argument("--backup-tag", default="before-attnprof")
+    ap.add_argument("--health-timeout", type=int, default=1800)
     o = ap.parse_args()
     info = json.loads(subprocess.check_output(["docker", "inspect", NAME]))[0]
     if not os.path.isdir(STAGED + "/k8v4_v030"):
         sys.exit("run deploy/stage.sh first")
     os.makedirs(OUTDIR, exist_ok=True)
-    cmd = build(info, o.rate, not o.off)
+    cmd = build(info, o.rate, not o.off, o.gmu)
     print(masked(cmd))
     if not o.apply:
         print("\n(dry run; nothing changed)"); return
-    bak = "%s-before-attnprof-%s" % (NAME, time.strftime("%Y%m%dT%H%M%S"))
+    bak = "%s-%s-%s" % (NAME, o.backup_tag, time.strftime("%Y%m%dT%H%M%S"))
     subprocess.check_call(["docker", "stop", "-t", "30", NAME])
     subprocess.check_call(["docker", "rename", NAME, bak])
     subprocess.check_call(["docker", "update", "--restart=no", bak])
     subprocess.check_call(cmd, stdout=subprocess.DEVNULL)
     print("backup container:", bak, "(rollback: deploy/rollback.sh %s)" % bak)
-    for _ in range(180):
+    for _ in range(o.health_timeout // 10):
         try:
             if b'"object":"list"' in urllib.request.urlopen("http://127.0.0.1:8100/v1/models", timeout=5).read():
                 print("healthy"); return
