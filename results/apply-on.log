@@ -2,3 +2,4 @@ docker run -d --name vllm-k8v4-tp2 --restart unless-stopped --ipc=host --shm-siz
 vllm-k8v4-tp2
 vllm-k8v4-tp2-before-attnprof-20261104T184500
 backup container: vllm-k8v4-tp2-before-attnprof-20261104T184500 (rollback: deploy/rollback.sh vllm-k8v4-tp2-before-attnprof-20261104T184500)
+healthy

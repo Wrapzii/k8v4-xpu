@@ -14,7 +14,10 @@ cp -p "$SRC/k8v4_v030/backend.py" "$SRC/k8v4_v030/attn_profile.py" "$D/k8v4-opt/
 cp -p "$SRC/k8v4_v030/tests/test_attn_profile.py" "$D/k8v4-opt/k8v4_v030/tests/"
 chmod -R a+rX "$D"
 # Only backend.py may differ from live (besides the new files).
-diff -rq --exclude=__pycache__ "$LIVE/k8v4_v030" "$D/k8v4-opt/k8v4_v030" | tee "$D/receipts/diff-vs-live.txt"
+diff -rq --exclude=__pycache__ "$LIVE/k8v4_v030" "$D/k8v4-opt/k8v4_v030" > "$D/receipts/diff-vs-live.txt" || true
+cat "$D/receipts/diff-vs-live.txt"
 (cd "$D" && sha256sum k8v4-opt/k8v4_v030/backend.py k8v4-opt/k8v4_v030/attn_profile.py > receipts/sha256.txt)
-docker inspect vllm-k8v4-tp2 > "$D/receipts/docker-inspect-before.json"
+# Env is stripped (it holds secrets); only names are kept.
+docker inspect vllm-k8v4-tp2 | python3 -c 'import json,sys; d=json.load(sys.stdin); [c["Config"].__setitem__("Env",[e.split("=",1)[0] for e in c["Config"].get("Env") or []]) for c in d]; json.dump(d,sys.stdout,indent=1)' > "$D/receipts/docker-inspect-before.noenv.json"
+chmod 600 "$D/receipts/docker-inspect-before.noenv.json"
 echo "staged at $D"

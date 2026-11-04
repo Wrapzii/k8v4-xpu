@@ -1,0 +1,3 @@
+982cad72de5e5892b3f226a247c30b11d377381370bd15aabc84a20c05ad0c70  /home/dan/agent-work/k8v4-attnprof-20261104/kstudy/src/xe2_kv_ops_c4.cpp
+f1565f8415f4b09834ac514460881bb9bb70f2bd98a00af4e222e453013b3b95  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-cascade-deploy-20261015/libxe2_kv_cascade.so
+2d3ecfd133e49d2cd528214589d1c7d1b32fb8fa573e75323eac4020a1087c00  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-cascade-deploy-20261015/k8v4-opt/k8v4_v030/native/xe2_kv_ops.cpp
