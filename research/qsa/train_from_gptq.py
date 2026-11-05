@@ -102,6 +102,7 @@ def _batch(blob: dict, device: str) -> tuple[torch.Tensor, torch.Tensor, torch.T
 
 
 class DiskActivations:
+    """Cycle packs, retaining only one at a time to fit the host RAM budget."""
     def __init__(self, activations_dir: Path, layers: list[int], overfit: bool):
         self.layers = layers
         self.overfit = overfit
@@ -111,14 +112,23 @@ class DiskActivations:
                 raise SystemExit(
                     f"no {activations_dir}/step_N packs; pass --overfit to reuse layer_*.pt"
                 )
-            self.packs = [_load_pack(activations_dir, layers)]
+            self.dirs = [activations_dir]
             self.flat = True
         else:
-            dirs = _step_dirs(activations_dir)
-            self.packs = [_load_pack(path, layers) for path in dirs]
+            self.dirs = _step_dirs(activations_dir)
+        self.packs = [_load_pack(self.dirs[0], layers)]
+        self.loaded = 0
 
     def for_step(self, step: int) -> dict[int, dict]:
-        return self.packs[(step - 1) % len(self.packs)]
+        index = (step - 1) % len(self.dirs)
+        if index != self.loaded:
+            # Drop all host references before reading the next ~6 GB pack.
+            self.packs = []
+            import gc
+            gc.collect()
+            self.packs = [_load_pack(self.dirs[index], self.layers)]
+            self.loaded = index
+        return self.packs[0]
 
 
 class OnTheFly:
@@ -276,7 +286,7 @@ def train(args: argparse.Namespace) -> Path:
                 cap_count += part_count
                 ent_sum += ent
                 std_sum += std
-                del scores, loss, hidden, target
+                del scores, loss, hidden, target, cos, sin
             synchronize()
             torch.nn.utils.clip_grad_norm_(
                 [param for module in indexers.values() for param in module.parameters()],
