@@ -18,3 +18,9 @@
 - With the flag on, Qwen3NextAttention.forward stashes the post-norm hidden state for full-attention layers. Gated DeltaNet is not wrapped. copy_kv_cache_blocks_inplace also copies the indexer blocks, expanding a scheduler id into kernel pages when the cache was split.
 - A short context writes raw keys and pooled blocks, then returns false so the dense kernel still produces the output. Decode (q_len 1) and a verifier tile (q_len 7) with a token budget of 8 match the quantized page reader. Mutating a key outside the selected set does not change decode output. K8V4_QSA_FORCE_ALL matches a full causal allow-set at 4 KV heads.
 - CPU tests, ephemeral container, no GPU: runtime 6 tests OK, plus the earlier 12. No production kernel, container, or image changes.
+
+2026-11-05T19:16Z qsa: XPU indexer score, top-k, and sparse attention
+- libxe2_qsa.so built with the 2026 compiler in an ephemeral container from the serving image. The compile did not use a GPU. The library is in the QSA build directory on the large disk, sha256 e5c5de13169b3e245c48902aaeea84700f78d9e161f092647f407d41ad42dfaf. The ESIMD score path is in that library and runs only when QSA_SCORE_ESIMD=1. The default score path is the subgroup kernel. sycl::fmax is not legal in ESIMD, so that path uses a compare.
+- CPU, same ephemeral container, no GPU: 23 tests OK, 2 device tests skipped. A CPU attend does not open a missing library. customize_spec stays 396 bytes per head.
+- GPU through bench-hold, no model loaded, serving container stayed up. Score and top-k match the reference, and ties keep the lower block id. Sparse attention on packed pages matches the Python page reader. Largest absolute gap was 1.2e-7 for fp32 and 2.5e-4 for fp16, across decode, a q_len 7 verifier tile, a 4-query subset, 2 and 4 KV heads, and a 2-page block table. ESIMD scores match the same reference within 1e-4. No speedup was measured.
+- No production kernel, container, or image changes.

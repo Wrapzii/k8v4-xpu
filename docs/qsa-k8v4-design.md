@@ -81,13 +81,13 @@ Weights load from `K8V4_QSA_WEIGHTS` (a torch state dict or a safetensors file).
 
 ## Kernels
 
-New library `libxe2_qsa.so`, built by `k8v4_v030/compile_qsa.sh` into `/mnt/hdd-500gb/model-validation/qsa-k8v4/`. It does not replace `libxe2_kv.so`. `XE2_QSA_LIB` overrides the path. If the library is absent, or the tensors are on CPU, the same op contract runs in Python.
+New library `libxe2_qsa.so`, built by `k8v4_v030/compile_qsa.sh` into `/mnt/hdd-500gb/model-validation/qsa-k8v4/`. It does not replace `libxe2_kv.so`. `XE2_QSA_LIB` overrides the path. If the library is absent, or the tensors are on CPU, the same op contract runs in Python. A CPU call does not load the library.
 
 Three device ops, registered on `torch.ops.xe2_qsa`:
 
-1. **Indexer score** (`qsa_score`). One subgroup per `(query, block)`, subgroup size 16, 8 fp32s per lane, covering the 128-d dot. Sum `relu(dot)` over 4 heads. An ESIMD variant computes the same dot with `sycl::ext::intel::esimd` and is selected at compile time when the header builds. The numeric contract is the PyTorch reference, not a tuned throughput claim.
-2. **Top-k** (`qsa_topk`). One work-item per query keeps the `k` largest `(score, block_id)` pairs. Ties keep the smaller block id. Invisible blocks are not passed in (the host/reference masks them before the call). Correct for the budget of 512. Not a radix select.
-3. **Sparse K8V4 attention** (`qsa_sparse_attn`). For each query head, walk the selected logical tokens in increasing order. Read INT8 K and INT4 V from the existing region views (low nibble is the even dimension, affine zero and scale, symmetric int8 K with scale `amax/127`). Quantize Q per head with the same round-half-away-from-zero / round-half-up rule as `oracle.quant_k`. Score is `int_dot(q8, k8) * q_scale * k_scale * (1/16)`. Online softmax, then the dequantized V mix. Supports one query (decode), a packed multi-query verifier (`q_len` up to the K8V4 tile of 10), and a chunk of prefill queries. Each query has its own causal end `seq_len - q_len + q_tok + 1` and its own selection. Head counts 2 and 4 match the dense library.
+1. **Indexer score** (`qsa_score`). One subgroup per `(query, block)`, subgroup size 16, 8 fp32s per lane, covering the 128-d dot. Sum `relu(dot)` over 4 heads. An ESIMD variant uses `sycl::ext::intel::esimd` `block_load` of 8 floats. It is compiled when that header builds, and it runs only when `QSA_SCORE_ESIMD=1`. Otherwise the subgroup kernel runs. The numeric contract is the PyTorch reference, not a tuned throughput claim.
+2. **Top-k** (`qsa_topk`). One work-item per query keeps the `k` largest scores, best first. A candidate replaces the current best only when its score is strictly greater, and the scan walks block ids upward, so ties keep the smaller block id. `k` is at most the block count. Invisible blocks are not passed in. Correct for the budget of 512. Not a radix select.
+3. **Sparse K8V4 attention** (`qsa_sparse_attn`). For each query head, walk the selected logical tokens in the order given. The Python wrapper sorts that list, drops duplicates, and drops tokens at or past the causal end `seq_len - q_len + q_tok + 1` before the launch. The kernel reads INT8 K and INT4 V through the region strides, so K of page `p+1` is not assumed to sit next to K of page `p`. Low nibble is the even dimension. Q is quantized per head with `sycl::rint` and clamp `[-127, 127]`, the same call the dense kernel uses. The Python spec uses round-half-away-from-zero, so an exact halfway value can differ; a GPU compare uses a tolerance. Score is `int_dot(q8, k8) * q_scale * k_scale * (1/16)`. Online softmax in fp32, then the affine int4 V mix. Supports one query (decode), a packed multi-query verifier (`q_len` up to the K8V4 tile of 10), and a chunk of prefill queries. Head counts 2 and 4 match the dense library.
 
 The Python quantized loop in `qsa_quant_attn.py` is the spec for that kernel. With the allow-set equal to every causal token, the loop is the same arithmetic as `oracle.causal_gqa`, in the same token order, so the outputs match exactly (not within a tolerance).
 
@@ -106,7 +106,7 @@ On:
 - Backend install wraps Qwen attention modules and the block-copy helper if those symbols exist.
 - `forward` asks `try_sparse_forward`. That updates the indexer cache from the stashed hidden state, pools completed micro-blocks, and either runs sparse attention into `output` and returns, or returns false. False means the existing packed decode, cascade, or eager prefill runs, unchanged.
 - Dense is taken when there is no bank, the layer is not a full-attention layer, the stash is missing, or every query still sees at most 512 complete blocks (unless `K8V4_QSA_FORCE_ALL=1`).
-- An XPU graph capture does not run the Python sparse loop. Until `libxe2_qsa.so` supplies the captured op, capture stays on dense K8/V4 and does not write the indexer cache. Eager forwards use the Python path, which is the numeric contract.
+- An XPU graph capture does not run the Python sparse loop. Capture stays on dense K8/V4 and does not write the indexer cache. Eager forwards on CPU use the Python path, which is the numeric contract. Eager forwards whose query and KV views are on XPU call `qsa_sparse_attn` when `libxe2_qsa.so` loads.
 
 ## Tests
 
