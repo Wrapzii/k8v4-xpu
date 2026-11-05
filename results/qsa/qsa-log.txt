@@ -4,3 +4,11 @@
 - Algorithm taken from qwen35.cpp build_qsa_mask and qwen4exp.cpp build_qsa_blk_select / build_attn_qsa_blk. Fast path: mean-pool 4 raw keys, block RMSNorm, MRoPE at the first token, sum of ReLU dots over 4 heads, top 512 blocks plus the own block. No 1/sqrt(128) on that path.
 - HF tensor names: layers.{i}._qsa_indexer.{q_proj.weight,k_proj.weight,q_norm,k_norm,k_block_norm}. 16 layers * 3,277,184 params = 52,434,944.
 - Wrote docs/qsa-k8v4-design.md. Flag K8V4_QSA defaults off. No production kernel, container, or image changes.
+
+2026-11-05T18:33Z qsa: reference indexer and quantized sparse attention
+- CPU tests in an ephemeral container from the serving image, no GPU, image unchanged: 12 tests OK.
+- Reference covers RMSNorm, interleaved MRoPE, 4-token mean, ReLU sum, top-k ties, own-block inclusion, and a full bank of 52,434,944 parameters. Missing tensors yield no bank. A partial layer raises.
+- sparse_causal_gqa with every causal token allowed matches oracle.causal_gqa for q_len 1, q_len 7, and a short chunk, at 2 and 4 KV heads.
+- A packed page stores float32 scales. Integer K and INT4 nibbles match the oracle. Attention on the stored scales matches the page reader.
+- QsaBlockCache publishes a pooled row only after four raw keys. copy_blocks copies raw keys and pooled rows.
+- No production kernel, container, or image changes.

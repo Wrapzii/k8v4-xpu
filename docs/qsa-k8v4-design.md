@@ -114,7 +114,7 @@ CPU, no GPU, no second model:
 - Indexer math against a naive loop: RMSNorm, interleaved MRoPE, 4-token mean, ReLU sum, top-k tie break, own-block inclusion, dedup.
 - Parameter count of a full bank is 52,434,944. Missing tensors yield no bank. A partial layer raises.
 - Block copy copies raw and pooled rows. A micro-block stays invalid until the fourth raw key lands.
-- `sparse_causal_gqa` with every causal token allowed matches `oracle.causal_gqa` for decode (`q_len = 1`), a verifier tile (`q_len = 7`), and a short chunk (`q_len > 1` with `seq_len` longer than the query). The same match holds when K and V are read back from a packed K8V4 page (`paged.write_token`) as INT8 / INT4.
+- `sparse_causal_gqa` with every causal token allowed matches `oracle.causal_gqa` for decode (`q_len = 1`), a verifier tile (`q_len = 7`), and a short chunk (`q_len > 1` with `seq_len` longer than the query). Reading the same tokens back from a packed page (`paged.write_token`) reproduces the integer K and the INT4 nibbles. Scales on the page are float32, so the page reader matches attention that uses those stored scales, which is what the dense kernel reads.
 - A proper subset of blocks matches the oracle with the dropped positions forced to `-inf`.
 - The flag default is off, and `state_content_bytes` stays 396 when the flag is on.
 
