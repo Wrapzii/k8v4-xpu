@@ -2748,7 +2748,7 @@ SYCL_ESIMD_FUNCTION es::simd<float, 16> gather_ksc(const float *base, int tbase,
 }
 
 // 8 query rows x 32 dims. Rows are stride BK apart, dims contiguous, so one
-// load_2d returns row-major A with no transpose. Not yet on the timed path.
+// load_2d returns row-major A with no transpose. MODE 3 QK uses this.
 SYCL_ESIMD_FUNCTION es::simd<std::int8_t, TM * 32> load_q_tile_2d(const std::int8_t *qbase, int kdim) {
   return es::load_2d<std::int8_t, 32, TM>(qbase, BK - 1, TM - 1, BK - 1, kdim, 0);
 }
@@ -2976,6 +2976,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
               for (int i = 0; i < TM * BM; i += 16)
                 esimd::slm_block_store<sycl::half, 16>(kSlmP + static_cast<std::uint32_t>(i * 2), z);
             }
+            if constexpr ((MODE & 1) == 0) {
 #pragma unroll 1
             for (int tbase = 0; tbase < n_valid; tbase += 32) {
               const bool second = tbase + 16 < n_valid;
@@ -2989,10 +2990,10 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                   a.template select<32, 1>(r * 32) = esimd::block_load<std::int8_t, 32>(
                       qbase + static_cast<size_t>(r) * BK + kdim);
                 esimd::simd<std::int8_t, 32 * 16> b =
-                    esimd_dpas::load_k_tile_vnni<(MODE & 1) != 0>(k_head, k_tok_stride, tbase, kdim);
+                    esimd_dpas::load_k_tile_vnni<false>(k_head, k_tok_stride, tbase, kdim);
                 acc0 = xmx::dpas<8, TM, std::int32_t>(acc0, b, a);
                 if (second) {
-                  b = esimd_dpas::load_k_tile_vnni<(MODE & 1) != 0>(k_head, k_tok_stride, tbase + 16, kdim);
+                  b = esimd_dpas::load_k_tile_vnni<false>(k_head, k_tok_stride, tbase + 16, kdim);
                   acc1 = xmx::dpas<8, TM, std::int32_t>(acc1, b, a);
                 }
               }
@@ -3017,6 +3018,43 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                   esimd_dpas::slm_store_qk(r, tbase + 16, ar1, qs, ksc1, n_valid, page_base, q_end, dense);
                 }
               }
+            }
+            } else {
+            // MODE 3: one load_2d for Q, one for K, next tile issued before dpas.
+#pragma unroll 1
+            for (int tbase = 0; tbase < n_valid; tbase += 16) {
+              esimd::simd<std::int32_t, TM * 16> acc(0);
+              esimd::simd<std::int8_t, TM * 32> a = esimd_dpas::load_q_tile_2d(qbase, 0);
+              esimd::simd<std::int8_t, 32 * 16> b =
+                  esimd_dpas::load_k_tile_vnni<true>(k_head, k_tok_stride, tbase, 0);
+#pragma unroll
+              for (int step = 0; step < 8; ++step) {
+                esimd::simd<std::int8_t, TM * 32> a_n(0);
+                esimd::simd<std::int8_t, 32 * 16> b_n(0);
+                if (step + 1 < 8) {
+                  const int next = (step + 1) * 32;
+                  a_n = esimd_dpas::load_q_tile_2d(qbase, next);
+                  b_n = esimd_dpas::load_k_tile_vnni<true>(k_head, k_tok_stride, tbase, next);
+                }
+                acc = xmx::dpas<8, TM, std::int32_t>(acc, b, a);
+                a = a_n;
+                b = b_n;
+              }
+              esimd::simd<float, 16> ksc = esimd_dpas::gather_ksc(ksc_base, tbase, sc_tok_stride);
+#pragma unroll
+              for (int r = 0; r < TM; ++r) {
+                const int row = row0 + r;
+                if (row >= q_len * GQA) continue;
+                const int q_tok = row / GQA;
+                const int q_end = static_cast<int>(visible_lens
+                    ? visible_lens[1 + q_tok]
+                    : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1);
+                const bool dense = n_valid == BM && page_base + BM <= q_end;
+                const float qs = qsc[r] * INV_SQRT_D;
+                esimd::simd<std::int32_t, 16> ar = acc.template select<16, 1>(r * 16);
+                esimd_dpas::slm_store_qk(r, tbase, ar, qs, ksc, n_valid, page_base, q_end, dense);
+              }
+            }
             }
 #pragma unroll
             for (int r = 0; r < TM; ++r) {
