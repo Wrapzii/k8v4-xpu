@@ -33,3 +33,35 @@ PV is xmx::dpas<8,8,float> on nibbles unpacked in registers (low nibble = even
 col) into two N=16 panels per 32 columns. Invalid V tokens stay zero.
 XF=296 MODE 0 block_load; XF=808 (296|512) MODE 1 load_2d.
 Lib target: mp-libs/libxe2_kv_tI1d_jit.so (does not replace libxe2_kv_tI1_jit.so).
+
+Step 1 result (lib tI1d, ctx 2048, q_len 7, batch 1). Cleanest gpubench attempt
+(sentinel 118 vs floor 114, s2 matched lo): 
+  lo  p50 116.5  s1 44.4  s2 16.9
+  d0  p50 317.3  s1 263.1 s2 18.1  maxabs_vs_lo 7.63e-6  finite
+dpas math matches lo. Stage 1 is ~6x lo at 2K. 32 pages of K are ~0.5 MB, so
+263 us is instruction/spill overhead, not HBM. gpubench exited 4 because CI
+containers stayed visible; attempts 1 and 3 had sentinel 2-3 ms and are discarded.
+
+Step 2 (lib tI1e, not yet timed): 256-GRF, scores/P kept in simd instead of
+C arrays, K load overlapped with dpas, MODE 1 also load_2d's the V nibble tile.
+
+Step 2 result (lib tI1e, ctx 2048, q_len 7, batch 1). Math is good on two
+gpubench attempts. maxabs_vs_lo 7.63e-6 and finite for both MODE 0 (XF=296)
+and MODE 1 (XF=808). load_2d of K (pitch=k_tok_stride, X=kdim) and of V
+(16 uint8 bytes, X=nbase/2) did not fault. No clean timing: only attempt 1's
+lo row has s2~17 and a sentinel near 120 us (lo p50 119.3, s1 43.7, s2 16.7).
+d0/d2 sentinels were 0.8-3.3 ms and s2 was 259-1115 us, so those p50s
+(d0 ~1290-1300, d2 ~920-1270) are discarded. GPU was at 123 W / 2400 MHz
+during the reruns. CI containers stayed visible, so gpubench exited 4.
+Closest attempt-3 rows still have s2 ~31 us (clean lo s2 is ~17): 
+  d0 p50 395.8 s1 313.6 s2 31.0 sentinel 123.8
+  d2 p50 358.3 s1 279.4 s2 32.5 sentinel 116.0
+Not a speed claim. They are not faster than tI1d's clean s1 263. lo in that
+attempt was dirty (sentinel 338, s2 75, vllm_running_after 1).
+
+Step 3: MODE 2/3 (XF&1024) keep the 64-wide scores and P in per-thread SLM
+(slm_init 3072). QK walks 32 tokens at a time so one Q tile feeds two int8
+dpas. Masked lanes use a simd compare. GRF-256 property is still on.
+XF=1320 is MODE 2 (block_load), XF=1832 is MODE 3 (load_2d K and V).
+Compiled to libxe2_kv_tI1f_jit.so (COMPILE_RC 0). 2048 bench is in flight
+(lo, s0, s2). A load_2d of the 8x32 Q tile is in the source and not called.

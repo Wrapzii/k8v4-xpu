@@ -11,6 +11,7 @@
 #include <sycl/ext/intel/esimd.hpp>
 #include <sycl/ext/intel/esimd/xmx/dpas.hpp>
 #include <sycl/ext/intel/experimental/esimd/memory.hpp>
+#include <sycl/ext/intel/experimental/grf_size_properties.hpp>
 
 #include <c10/xpu/XPUStream.h>
 #include <ATen/ATen.h>
@@ -2679,8 +2680,7 @@ load_k_tile_vnni(const std::int8_t *k_head, int k_tok_stride, int tbase, int kdi
 }
 
 // Unpack 16 packed int4 bytes (32 columns, low nibble = even col) to fp16.
-SYCL_ESIMD_FUNCTION es::simd<sycl::half, 32> dequant_v32(const std::uint8_t *src, float scale, float zero) {
-  es::simd<std::uint8_t, 16> raw = es::block_load<std::uint8_t, 16>(src);
+SYCL_ESIMD_FUNCTION es::simd<sycl::half, 32> dequant_bytes(es::simd<std::uint8_t, 16> raw, float scale, float zero) {
   es::simd<std::uint16_t, 16> w = raw;
   es::simd<std::uint16_t, 16> mask4(static_cast<std::uint16_t>(0x0f));
   es::simd<std::uint16_t, 16> lo = w & mask4;
@@ -2693,6 +2693,64 @@ SYCL_ESIMD_FUNCTION es::simd<sycl::half, 32> dequant_v32(const std::uint8_t *src
   out.template select<16, 2>(0) = hlo;   // even cols
   out.template select<16, 2>(1) = hhi;   // odd cols
   return out;
+}
+
+SYCL_ESIMD_FUNCTION es::simd<sycl::half, 32> dequant_v32(const std::uint8_t *src, float scale, float zero) {
+  return dequant_bytes(es::block_load<std::uint8_t, 16>(src), scale, zero);
+}
+
+// 16 tokens x 32 fp16 columns. USE2D gathers the 16 packed bytes of every token in one load_2d.
+// Tokens at or past n_valid stay zero so a NaN scale cannot poison the dot.
+template <bool USE2D>
+SYCL_ESIMD_FUNCTION es::simd<sycl::half, 16 * 32>
+load_v_tile(const std::uint8_t *v_head, int v_tok_stride, int tbase, int byte_x, const float *vs_head,
+            const float *vz_head, int sc_stride, int n_valid) {
+  es::simd<sycl::half, 16 * 32> vt(sycl::half(0.f));
+  es::simd<std::uint8_t, 16 * 16> raw(0);
+  if constexpr (USE2D) {
+    raw = es::load_2d<std::uint8_t, 16, 16>(v_head, /*width-1*/ 128 - 1, /*height-1*/ 64 - 1,
+                                            static_cast<unsigned>(v_tok_stride) - 1, byte_x, tbase);
+  }
+#pragma unroll
+  for (int t = 0; t < 16; ++t) {
+    const int tok = tbase + t;
+    if (tok >= n_valid) continue;
+    const float scale = vs_head[static_cast<size_t>(tok) * sc_stride];
+    const float zero = vz_head[static_cast<size_t>(tok) * sc_stride];
+    es::simd<std::uint8_t, 16> bytes(0);
+    if constexpr (USE2D)
+      bytes = raw.template select<16, 1>(t * 16);
+    else
+      bytes = es::block_load<std::uint8_t, 16>(v_head + static_cast<size_t>(tok) * v_tok_stride + byte_x);
+    vt.template select<32, 1>(t * 32) = dequant_bytes(bytes, scale, zero);
+  }
+  return vt;
+}
+
+// One QK tile's int32 acc row -> fp32 scores in SLM. dense: every token is in-range.
+// Otherwise lanes with tok>=n_valid or k_abs>=q_end become -inf (same rule as lo).
+SYCL_ESIMD_FUNCTION void slm_store_qk(int r, int tbase, es::simd<std::int32_t, 16> acc, float qs,
+                                      es::simd<float, 16> ksc, int n_valid, int page_base, int q_end, bool dense) {
+  es::simd<float, 16> s = es::convert<float>(acc) * ksc * qs;
+  if (!dense) {
+    es::simd<int, 16> tok(tbase, 1);
+    es::simd<int, 16> kabs = page_base + tok;
+    es::simd_mask<16> ok = (tok < n_valid) & (kabs < q_end);
+    s.merge(es::simd<float, 16>(-INFINITY), !ok);
+  }
+  es::slm_block_store<float, 16>(static_cast<std::uint32_t>((r * 64 + tbase) * 4), s);
+}
+
+SYCL_ESIMD_FUNCTION es::simd<float, 16> gather_ksc(const float *base, int tbase, int sc_stride) {
+  es::simd<std::uint32_t, 16> offs(static_cast<std::uint32_t>(tbase * sc_stride * 4),
+                                   static_cast<std::uint32_t>(sc_stride * 4));
+  return es::gather<float, 16, 1>(base, offs);
+}
+
+// 8 query rows x 32 dims. Rows are stride BK apart, dims contiguous, so one
+// load_2d returns row-major A with no transpose. Not yet on the timed path.
+SYCL_ESIMD_FUNCTION es::simd<std::int8_t, TM * 32> load_q_tile_2d(const std::int8_t *qbase, int kdim) {
+  return es::load_2d<std::int8_t, 32, TM>(qbase, BK - 1, TM - 1, BK - 1, kdim, 0);
 }
 
 // tokens x 16 fp16 cols, token-major, packed to DPAS B (fp16 VNNI, K=16, N=16).
@@ -2728,7 +2786,12 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
   sycl::range<1> l(1);
   q.submit([&](sycl::handler &h) {
     h.parallel_for<Xe2KvTorchAbiS1PagedReuseEsimdKernel<HKV, MODE>>(
-        sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) SYCL_ESIMD_KERNEL {
+        sycl::nd_range<1>(g, l),
+        sycl::ext::oneapi::experimental::properties{sycl::ext::intel::experimental::grf_size<256>},
+        [=](sycl::nd_item<1> item) SYCL_ESIMD_KERNEL {
+          // MODE 2/3: scores (2KB) and P (1KB) live in this work-item's SLM, not GRF.
+          if constexpr (MODE >= 2)
+            esimd::slm_init<3072>();
           const int tid = static_cast<int>(item.get_global_id(0));
           const int prog = tid / ESG;
           const int sg_id = tid - prog * ESG;
@@ -2753,40 +2816,46 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
 
           // dpas QK (int8 M8xN16xK32) + softmax + dpas PV (fp16 M8xN16xK16).
           // P is fp16(exp/L) so the partial is already divided by L, matching lo.
-          // MODE 0: K via block_load. MODE 1: K via lsc load_2d. Same .so, XF&512 picks 1.
+          // MODE 0/2: K via block_load. MODE 1/3: K via lsc load_2d (XF&512).
+          // MODE 0/1 keep scores in GRF. MODE 2/3 (XF&1024) park scores and P in SLM.
           if (!sg_live) {
 #pragma unroll
             for (int r = 0; r < TM; ++r) {
               M[static_cast<size_t>(prog_x) * BM + row0 + r] = -INFINITY;
               L[static_cast<size_t>(prog_x) * BM + row0 + r] = 0.f;
             }
-          } else {
+          } else if constexpr (MODE < 2) {
             const std::int8_t *qbase = Q8 + (static_cast<size_t>(kv_head) * BM + row0) * BK;
             const float *qsc = Qsc + static_cast<size_t>(kv_head) * BM + row0;
             const std::int8_t *k_head = K8 + k_head_off;
-            float scores[TM][BM];
-            sycl::half P[TM][BM];
-#pragma unroll
-            for (int r = 0; r < TM; ++r)
-#pragma unroll
-              for (int t = 0; t < BM; ++t) {
-                scores[r][t] = -INFINITY;
-                P[r][t] = sycl::half(0.f);
-              }
+            // Scores and P live in GRF (256-GRF kernel). A C array here spills the dpas acc.
+            esimd::simd<float, TM * BM> scores(-INFINITY);
+            esimd::simd<sycl::half, TM * BM> P(sycl::half(0.f));
 
 #pragma unroll 1
             for (int tbase = 0; tbase < n_valid; tbase += 16) {
               esimd::simd<std::int32_t, TM * 16> acc(0);
-#pragma unroll 1
-              for (int kdim = 0; kdim < BK; kdim += 32) {
-                esimd::simd<std::int8_t, 32 * 16> b =
-                    esimd_dpas::load_k_tile_vnni<(MODE == 1)>(k_head, k_tok_stride, tbase, kdim);
-                esimd::simd<std::int8_t, TM * 32> a(0);
+              esimd::simd<std::int8_t, 32 * 16> b =
+                  esimd_dpas::load_k_tile_vnni<(MODE == 1)>(k_head, k_tok_stride, tbase, 0);
+              esimd::simd<std::int8_t, TM * 32> a(0);
 #pragma unroll
-                for (int r = 0; r < TM; ++r)
-                  a.template select<32, 1>(r * 32) =
-                      esimd::block_load<std::int8_t, 32>(qbase + static_cast<size_t>(r) * BK + kdim);
+              for (int r = 0; r < TM; ++r)
+                a.template select<32, 1>(r * 32) =
+                    esimd::block_load<std::int8_t, 32>(qbase + static_cast<size_t>(r) * BK);
+#pragma unroll
+              for (int kdim = 0; kdim < BK; kdim += 32) {
+                esimd::simd<std::int8_t, 32 * 16> b_next(0);
+                esimd::simd<std::int8_t, TM * 32> a_next(0);
+                if (kdim + 32 < BK) {
+                  b_next = esimd_dpas::load_k_tile_vnni<(MODE == 1)>(k_head, k_tok_stride, tbase, kdim + 32);
+#pragma unroll
+                  for (int r = 0; r < TM; ++r)
+                    a_next.template select<32, 1>(r * 32) = esimd::block_load<std::int8_t, 32>(
+                        qbase + static_cast<size_t>(r) * BK + (kdim + 32));
+                }
                 acc = xmx::dpas<8, TM, std::int32_t>(acc, b, a);
+                b = b_next;
+                a = a_next;
               }
               float kscv[16];
 #pragma unroll
@@ -2803,15 +2872,15 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                     ? static_cast<std::int64_t>(visible_lens[1 + q_tok])
                     : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1;
                 const float qs = qsc[r] * INV_SQRT_D;
+                esimd::simd<float, 16> tile(-INFINITY);
 #pragma unroll
                 for (int t = 0; t < 16; ++t) {
                   const int tok = tbase + t;
                   const std::int64_t k_abs = static_cast<std::int64_t>(logical) * BM + tok;
-                  float s = -INFINITY;
                   if (tok < n_valid && k_abs < q_end)
-                    s = static_cast<float>(acc[r * 16 + t]) * qs * kscv[t];
-                  scores[r][tok] = s;
+                    tile[t] = static_cast<float>(acc[r * 16 + t]) * qs * kscv[t];
                 }
+                scores.template select<16, 1>(r * BM + tbase) = tile;
               }
             }
 
@@ -2819,36 +2888,38 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
             for (int r = 0; r < TM; ++r) {
               const int row = row0 + r;
               if (row >= q_len * GQA) continue;
-              float mx = -INFINITY;
-              for (int t = 0; t < n_valid; ++t) {
-                const float s = scores[r][t];
-                mx = (s > mx) ? s : mx;
-              }
+              esimd::simd<float, BM> srow = scores.template select<BM, 1>(r * BM);
+              const float mx = esimd::hmax<float>(srow);
               float sm = 0.f;
               if (mx != -INFINITY) {
                 for (int t0 = 0; t0 < BM; t0 += 16) {
-                  esimd::simd<float, 16> chunk(0.f);
+                  esimd::simd<float, 16> chunk = srow.template select<16, 1>(t0);
 #pragma unroll
                   for (int t = 0; t < 16; ++t) {
                     const int tok = t0 + t;
-                    const float s = (tok < n_valid) ? scores[r][tok] : -INFINITY;
-                    // Finite gap only. Masked keys use a hard underflow so exp(-inf) cannot NaN.
+                    const float s = chunk[t];
                     chunk[t] = (tok < n_valid && s > -1.0e20f) ? (s - mx) : -100.f;
                   }
                   esimd::simd<float, 16> ev = esimd::exp(chunk);
 #pragma unroll
                   for (int t = 0; t < 16; ++t) {
                     const int tok = t0 + t;
-                    const float e = (tok < n_valid && scores[r][tok] > -1.0e20f) ? ev[t] : 0.f;
-                    if (tok < BM) scores[r][tok] = e;
+                    const float e = (tok < n_valid && srow[t0 + t] > -1.0e20f) ? ev[t] : 0.f;
                     sm += e;
+                    ev[t] = e;
                   }
+                  srow.template select<16, 1>(t0) = ev;
                 }
               }
               const float inv = (sm == 0.f) ? 0.f : (1.f / sm);
-              for (int t = 0; t < BM; ++t) {
-                const float e = (mx != -INFINITY && t < n_valid) ? scores[r][t] : 0.f;
-                P[r][t] = static_cast<sycl::half>(e * inv);
+              if (mx != -INFINITY) {
+                for (int t0 = 0; t0 < BM; t0 += 16) {
+                  esimd::simd<float, 16> ev = srow.template select<16, 1>(t0);
+                  esimd::simd<sycl::half, 16> ph(sycl::half(0.f));
+#pragma unroll
+                  for (int t = 0; t < 16; ++t) ph[t] = static_cast<sycl::half>(ev[t] * inv);
+                  P.template select<16, 1>(r * BM + t0) = ph;
+                }
               }
               M[static_cast<size_t>(prog_x) * BM + row] = mx;
               L[static_cast<size_t>(prog_x) * BM + row] = sm;
@@ -2861,24 +2932,15 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
               esimd::simd<float, TM * 16> c1(0.f);
 #pragma unroll 1
               for (int tbase = 0; tbase < n_valid; tbase += 16) {
-                esimd::simd<sycl::half, 16 * 32> vt(sycl::half(0.f));
-#pragma unroll
-                for (int t = 0; t < 16; ++t) {
-                  const int tok = tbase + t;
-                  if (tok >= n_valid) continue;
-                  const float v_scale = VS[sc_head_off + static_cast<size_t>(tok) * sc_tok_stride];
-                  const float v_zero = VZ[sc_head_off + static_cast<size_t>(tok) * sc_tok_stride];
-                  const std::uint8_t *vsrc =
-                      V4 + v_head_off + static_cast<size_t>(tok) * v_tok_stride + (nbase >> 1);
-                  vt.template select<32, 1>(t * 32) = esimd_dpas::dequant_v32(vsrc, v_scale, v_zero);
-                }
+                esimd::simd<sycl::half, 16 * 32> vt = esimd_dpas::load_v_tile<(MODE == 1)>(
+                    V4 + v_head_off, v_tok_stride, tbase, nbase >> 1, VS + sc_head_off, VZ + sc_head_off,
+                    sc_tok_stride, n_valid);
                 esimd::simd<sycl::half, 16 * 16> b0 = esimd_dpas::vnni_f16_panel(vt, 0);
                 esimd::simd<sycl::half, 16 * 16> b1 = esimd_dpas::vnni_f16_panel(vt, 1);
                 esimd::simd<sycl::half, TM * 16> a(sycl::half(0.f));
 #pragma unroll
                 for (int r = 0; r < TM; ++r)
-#pragma unroll
-                  for (int t = 0; t < 16; ++t) a[r * 16 + t] = P[r][tbase + t];
+                  a.template select<16, 1>(r * 16) = P.template select<16, 1>(r * BM + tbase);
                 c0 = xmx::dpas<8, TM, float>(c0, b0, a);
                 c1 = xmx::dpas<8, TM, float>(c1, b1, a);
               }
@@ -2894,6 +2956,134 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                 }
                 esimd::block_store(pOh + static_cast<size_t>(r) * BV + nbase, h0, esimd::overaligned_tag<16>{});
                 esimd::block_store(pOh + static_cast<size_t>(r) * BV + nbase + 16, h1, esimd::overaligned_tag<16>{});
+              }
+            }
+          } else {
+            // SLM scores: the dpas loop only holds acc/A/B. 64-wide scores stay out of GRF.
+            constexpr std::uint32_t kSlmP = 2048;
+            const std::int8_t *qbase = Q8 + (static_cast<size_t>(kv_head) * BM + row0) * BK;
+            const float *qsc = Qsc + static_cast<size_t>(kv_head) * BM + row0;
+            const std::int8_t *k_head = K8 + k_head_off;
+            const float *ksc_base = Ksc + sc_head_off;
+            const int page_base = logical * BM;
+            {
+              esimd::simd<float, 16> ninf(-INFINITY);
+#pragma unroll
+              for (int i = 0; i < TM * BM; i += 16)
+                esimd::slm_block_store<float, 16>(static_cast<std::uint32_t>(i * 4), ninf);
+              esimd::simd<sycl::half, 16> z(sycl::half(0.f));
+#pragma unroll
+              for (int i = 0; i < TM * BM; i += 16)
+                esimd::slm_block_store<sycl::half, 16>(kSlmP + static_cast<std::uint32_t>(i * 2), z);
+            }
+#pragma unroll 1
+            for (int tbase = 0; tbase < n_valid; tbase += 32) {
+              const bool second = tbase + 16 < n_valid;
+              esimd::simd<std::int32_t, TM * 16> acc0(0);
+              esimd::simd<std::int32_t, TM * 16> acc1(0);
+#pragma unroll
+              for (int kdim = 0; kdim < BK; kdim += 32) {
+                esimd::simd<std::int8_t, TM * 32> a(0);
+#pragma unroll
+                for (int r = 0; r < TM; ++r)
+                  a.template select<32, 1>(r * 32) = esimd::block_load<std::int8_t, 32>(
+                      qbase + static_cast<size_t>(r) * BK + kdim);
+                esimd::simd<std::int8_t, 32 * 16> b =
+                    esimd_dpas::load_k_tile_vnni<(MODE & 1) != 0>(k_head, k_tok_stride, tbase, kdim);
+                acc0 = xmx::dpas<8, TM, std::int32_t>(acc0, b, a);
+                if (second) {
+                  b = esimd_dpas::load_k_tile_vnni<(MODE & 1) != 0>(k_head, k_tok_stride, tbase + 16, kdim);
+                  acc1 = xmx::dpas<8, TM, std::int32_t>(acc1, b, a);
+                }
+              }
+              esimd::simd<float, 16> ksc0 = esimd_dpas::gather_ksc(ksc_base, tbase, sc_tok_stride);
+              esimd::simd<float, 16> ksc1(0.f);
+              if (second)
+                ksc1 = esimd_dpas::gather_ksc(ksc_base, tbase + 16, sc_tok_stride);
+#pragma unroll
+              for (int r = 0; r < TM; ++r) {
+                const int row = row0 + r;
+                if (row >= q_len * GQA) continue;
+                const int q_tok = row / GQA;
+                const int q_end = static_cast<int>(visible_lens
+                    ? visible_lens[1 + q_tok]
+                    : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1);
+                const bool dense = n_valid == BM && page_base + BM <= q_end;
+                const float qs = qsc[r] * INV_SQRT_D;
+                esimd::simd<std::int32_t, 16> ar0 = acc0.template select<16, 1>(r * 16);
+                esimd_dpas::slm_store_qk(r, tbase, ar0, qs, ksc0, n_valid, page_base, q_end, dense);
+                if (second) {
+                  esimd::simd<std::int32_t, 16> ar1 = acc1.template select<16, 1>(r * 16);
+                  esimd_dpas::slm_store_qk(r, tbase + 16, ar1, qs, ksc1, n_valid, page_base, q_end, dense);
+                }
+              }
+            }
+#pragma unroll
+            for (int r = 0; r < TM; ++r) {
+              const int row = row0 + r;
+              if (row >= q_len * GQA) continue;
+              esimd::simd<float, BM> srow(0.f);
+#pragma unroll
+              for (int t0 = 0; t0 < BM; t0 += 16)
+                srow.template select<16, 1>(t0) =
+                    esimd::slm_block_load<float, 16>(static_cast<std::uint32_t>((r * BM + t0) * 4));
+              const float mx = esimd::hmax<float>(srow);
+              float sm = 0.f;
+              if (mx != -INFINITY) {
+#pragma unroll
+                for (int t0 = 0; t0 < BM; t0 += 16) {
+                  esimd::simd<float, 16> chunk = srow.template select<16, 1>(t0);
+                  esimd::simd_mask<16> finite = chunk > -1.0e20f;
+                  esimd::simd<float, 16> centered = chunk - mx;
+                  centered.merge(esimd::simd<float, 16>(-100.f), !finite);
+                  esimd::simd<float, 16> ev = esimd::exp(centered);
+                  ev.merge(esimd::simd<float, 16>(0.f), !finite);
+                  sm += esimd::reduce<float>(ev, std::plus<>{});
+                  srow.template select<16, 1>(t0) = ev;
+                }
+              }
+              const float inv = (sm == 0.f) ? 0.f : (1.f / sm);
+              if (mx != -INFINITY) {
+#pragma unroll
+                for (int t0 = 0; t0 < BM; t0 += 16) {
+                  esimd::simd<float, 16> ev = srow.template select<16, 1>(t0) * inv;
+                  esimd::slm_block_store<sycl::half, 16>(kSlmP + static_cast<std::uint32_t>((r * BM + t0) * 2),
+                                                         esimd::convert<sycl::half>(ev));
+                }
+              }
+              M[static_cast<size_t>(prog_x) * BM + row] = mx;
+              L[static_cast<size_t>(prog_x) * BM + row] = sm;
+            }
+#pragma unroll 1
+            for (int nbase = 0; nbase < BV; nbase += 32) {
+              esimd::simd<float, TM * 16> c0(0.f);
+              esimd::simd<float, TM * 16> c1(0.f);
+#pragma unroll 1
+              for (int tbase = 0; tbase < n_valid; tbase += 16) {
+                esimd::simd<sycl::half, 16 * 32> vt = esimd_dpas::load_v_tile<(MODE & 1) != 0>(
+                    V4 + v_head_off, v_tok_stride, tbase, nbase >> 1, VS + sc_head_off, VZ + sc_head_off,
+                    sc_tok_stride, n_valid);
+                esimd::simd<sycl::half, 16 * 16> b0 = esimd_dpas::vnni_f16_panel(vt, 0);
+                esimd::simd<sycl::half, 16 * 16> b1 = esimd_dpas::vnni_f16_panel(vt, 1);
+                esimd::simd<sycl::half, TM * 16> a(sycl::half(0.f));
+#pragma unroll
+                for (int r = 0; r < TM; ++r) {
+                  if (row0 + r >= q_len * GQA) continue;
+                  a.template select<16, 1>(r * 16) = esimd::slm_block_load<sycl::half, 16>(
+                      kSlmP + static_cast<std::uint32_t>((r * BM + tbase) * 2));
+                }
+                c0 = xmx::dpas<8, TM, float>(c0, b0, a);
+                c1 = xmx::dpas<8, TM, float>(c1, b1, a);
+              }
+#pragma unroll
+              for (int r = 0; r < TM; ++r) {
+                if (row0 + r >= q_len * GQA) continue;
+                esimd::simd<float, 16> f0 = c0.template select<16, 1>(r * 16);
+                esimd::simd<float, 16> f1 = c1.template select<16, 1>(r * 16);
+                esimd::block_store(pOh + static_cast<size_t>(r) * BV + nbase, esimd::convert<sycl::half>(f0),
+                                   esimd::overaligned_tag<16>{});
+                esimd::block_store(pOh + static_cast<size_t>(r) * BV + nbase + 16, esimd::convert<sycl::half>(f1),
+                                   esimd::overaligned_tag<16>{});
               }
             }
           }
@@ -4675,7 +4865,8 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
       }
     }
     if (tq == 7 && env_is_1("XE2_KV_COMPACT_SLM") && reuse_var != 0 && (xf & 256) != 0) {
-      // Track I ESIMD dpas stage-1. XF&512 selects load_2d K (MODE 1); else block_load.
+      // Track I ESIMD dpas stage-1.
+      // XF&512: load_2d. XF&1024: SLM scores (MODE 2/3) instead of GRF scores (MODE 0/1).
       auto goe = [&](auto mode) {
         launch_int8k_int4v_s1_paged_reuse_esimd<HKV, decltype(mode)::value>(current_xpu_queue(), q8.data_ptr<int8_t>(),
             q_scale.data_ptr<float>(), k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
@@ -4685,8 +4876,14 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
             static_cast<size_t>(k_cache.stride(0)), static_cast<size_t>(v_cache.stride(0)),
             static_cast<size_t>(k_scale.stride(0)), visible_ptr, ratio);
       };
-      if ((xf & 512) != 0) goe(std::integral_constant<int, 1>{});
-      else goe(std::integral_constant<int, 0>{});
+      if ((xf & 1024) != 0) {
+        if ((xf & 512) != 0) goe(std::integral_constant<int, 3>{});
+        else goe(std::integral_constant<int, 2>{});
+      } else if ((xf & 512) != 0) {
+        goe(std::integral_constant<int, 1>{});
+      } else {
+        goe(std::integral_constant<int, 0>{});
+      }
       return;
     }
     if (tq == 7 && env_is_1("XE2_KV_COMPACT_SLM") && reuse_var != 0) {
