@@ -8,6 +8,7 @@ This module is not the old sidecar overlay.
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 
 import torch
@@ -134,6 +135,10 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         # The spec carries this rank's KV head count (2 on a TP2 rank, 4 on
         # one GPU); scratch geometry follows it instead of a module constant.
         self.layout = PageLayout(kv_cache_spec.num_kv_heads)
+        if os.environ.get("K8V4_QSA", "0") == "1":
+            from k8v4_v030.qsa_runtime import install_if_requested
+
+            install_if_requested()
         logger.info_once(
             "K8/V4 local heads: %d KV / %d Q", self.layout.hkv, self.layout.hq
         )
@@ -233,6 +238,10 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         self.scale = float(scale)
         self.kv_cache_dtype = kv_cache_dtype
         self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
+        if os.environ.get("K8V4_QSA", "0") == "1":
+            from k8v4_v030.qsa_runtime import install_if_requested
+
+            install_if_requested()
 
     def do_kv_cache_update(
         self,
@@ -276,7 +285,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        del layer, key, value
+        del key, value
         if output_scale is not None or output_block_scale is not None:
             raise RuntimeError("K8/V4 does not take an output scale")
         cache = _one_cache(kv_cache)
@@ -295,6 +304,12 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                     self.layout.hq,
                 )
             )
+        # Read live. Off does not import the QSA runtime.
+        if os.environ.get("K8V4_QSA", "0") == "1":
+            from k8v4_v030.qsa_runtime import try_sparse_forward
+
+            if try_sparse_forward(self, layer, query, cache, attn_metadata, output):
+                return output
         if attn_metadata.packed_q_len:
             self._packed(query, cache, attn_metadata, output)
             return output

@@ -12,3 +12,9 @@
 - A packed page stores float32 scales. Integer K and INT4 nibbles match the oracle. Attention on the stored scales matches the page reader.
 - QsaBlockCache publishes a pooled row only after four raw keys. copy_blocks copies raw keys and pooled rows.
 - No production kernel, container, or image changes.
+
+2026-11-05T18:54Z qsa: optional sparse forward
+- K8V4_QSA defaults off. Importing the backend with the flag unset does not import the QSA runtime. customize_spec stays at 396 bytes per head with the flag on.
+- With the flag on, Qwen3NextAttention.forward stashes the post-norm hidden state for full-attention layers. Gated DeltaNet is not wrapped. copy_kv_cache_blocks_inplace also copies the indexer blocks, expanding a scheduler id into kernel pages when the cache was split.
+- A short context writes raw keys and pooled blocks, then returns false so the dense kernel still produces the output. Decode (q_len 1) and a verifier tile (q_len 7) with a token budget of 8 match the quantized page reader. Mutating a key outside the selected set does not change decode output. K8V4_QSA_FORCE_ALL matches a full causal allow-set at 4 KV heads.
+- CPU tests, ephemeral container, no GPU: runtime 6 tests OK, plus the earlier 12. No production kernel, container, or image changes.
