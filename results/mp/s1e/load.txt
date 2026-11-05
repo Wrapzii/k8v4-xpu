@@ -1,0 +1,9 @@
+22:46:36 rep1 prod:prod:2:1 root=88% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=52857.0
+22:51:55 rep1 mp3p2:libxe2_kv_mp3_jit.so:3:2 root=89% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=59687.0
+22:52:29 rep1 mp3p4:libxe2_kv_mp3_jit.so:3:4 root=90% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=61431.0
+22:57:13 rep1 mp3p8:libxe2_kv_mp3_jit.so:3:8 root=90% vllm_running=0.0
+  rc=0 vllm_running_after=2.0 gen_tokens=73481.0
+23:00:15 rep1 mp2p4:libxe2_kv_mp2_jit.so:2:4 root=93% vllm_running=0.0

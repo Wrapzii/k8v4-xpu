@@ -1,0 +1,239 @@
+mem_get_info (1154875392, 25669140480)
+[xe2_kv_time] s1_us=1642353.1 s2_us=82.1 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=12391932.0 s2_us=294.6 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=132.1 s2_us=120.2 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=110.7 s2_us=131.6 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=140.0 s2_us=121.7 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 1000, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 0.00013224594295024872, "relrms_pf32_vs_fp32": 0.004632081836462021, "maxabs_p1_vs_fp32": 0.00013224594295024872, "relrms_p1_vs_fp32": 0.004628726746886969, "maxabs_p2_vs_fp32": 0.00013224594295024872, "relrms_p2_vs_fp32": 0.004628726746886969, "maxabs_p4_vs_fp32": 0.00013224594295024872, "relrms_p4_vs_fp32": 0.004628726746886969, "maxabs_p8_vs_fp32": 0.00013224594295024872, "relrms_p8_vs_fp32": 0.004628726746886969}
+[xe2_kv_time] s1_us=195.8 s2_us=70.6 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=118.0 s2_us=106.9 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=144.2 s2_us=133.5 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=181.1 s2_us=148.9 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=247.5 s2_us=114.9 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 1000, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 1.52587890625e-05, "finite_p4": true, "maxabs_p4_vs_p1": 1.52587890625e-05, "finite_p8": true, "maxabs_p8_vs_p1": 1.52587890625e-05, "maxabs_pf32_vs_fp32": 0.0002036739606410265, "relrms_pf32_vs_fp32": 0.0043025631457567215, "maxabs_p1_vs_fp32": 0.000201766612008214, "relrms_p1_vs_fp32": 0.004304953385144472, "maxabs_p2_vs_fp32": 0.00020653498359024525, "relrms_p2_vs_fp32": 0.004308886360377073, "maxabs_p4_vs_fp32": 0.000205581309273839, "relrms_p4_vs_fp32": 0.004312209784984589, "maxabs_p8_vs_fp32": 0.0002036739606410265, "relrms_p8_vs_fp32": 0.004308951552957296}
+[xe2_kv_time] s1_us=135.6 s2_us=71.6 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=67.1 s2_us=69.4 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=118.3 s2_us=175.1 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=113.2 s2_us=122.4 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=110.2 s2_us=166.0 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=131.7 s2_us=110.4 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=114.2 s2_us=139.1 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=113.0 s2_us=129.1 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=110.1 s2_us=170.0 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=117.4 s2_us=124.5 n_splits=16 seq0=1000 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 1000, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 0.00013819895684719086, "relrms_pf32_vs_fp32": 0.004448547028005123, "maxabs_p1_vs_fp32": 0.00013819895684719086, "relrms_p1_vs_fp32": 0.0044493344612419605, "maxabs_p2_vs_fp32": 0.00013819895684719086, "relrms_p2_vs_fp32": 0.0044493344612419605, "maxabs_p4_vs_fp32": 0.00013819895684719086, "relrms_p4_vs_fp32": 0.0044493344612419605, "maxabs_p8_vs_fp32": 0.00013819895684719086, "relrms_p8_vs_fp32": 0.0044493344612419605}
+[xe2_kv_time] s1_us=80.7 s2_us=132.7 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=100.5 s2_us=74.1 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=166.4 s2_us=123.2 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=125.1 s2_us=111.3 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=359.0 s2_us=120.7 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=155.1 s2_us=90.0 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=185.9 s2_us=124.8 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=204.6 s2_us=114.0 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=245.1 s2_us=223.3 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=295.9 s2_us=131.1 n_splits=16 seq0=1000 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 1000, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 1.52587890625e-05, "finite_p4": true, "maxabs_p4_vs_p1": 1.52587890625e-05, "finite_p8": true, "maxabs_p8_vs_p1": 1.52587890625e-05, "maxabs_pf32_vs_fp32": 0.0002036739606410265, "relrms_pf32_vs_fp32": 0.0044465879909694195, "maxabs_p1_vs_fp32": 0.000201766612008214, "relrms_p1_vs_fp32": 0.004446616396307945, "maxabs_p2_vs_fp32": 0.00020653498359024525, "relrms_p2_vs_fp32": 0.004449968226253986, "maxabs_p4_vs_fp32": 0.000205581309273839, "relrms_p4_vs_fp32": 0.0044538346119225025, "maxabs_p8_vs_fp32": 0.0002036739606410265, "relrms_p8_vs_fp32": 0.0044508506543934345}
+[xe2_kv_time] s1_us=124.4 s2_us=114.0 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=120.2 s2_us=163.0 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=128.4 s2_us=120.9 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=145.6 s2_us=156.2 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=123.0 s2_us=115.4 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=120.2 s2_us=77.7 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+{"ctx": 2085, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 9.264564141631126e-05, "relrms_pf32_vs_fp32": 0.0035051628947257996, "maxabs_p1_vs_fp32": 9.264564141631126e-05, "relrms_p1_vs_fp32": 0.003502646228298545, "maxabs_p2_vs_fp32": 9.264564141631126e-05, "relrms_p2_vs_fp32": 0.003502646228298545, "maxabs_p4_vs_fp32": 9.264564141631126e-05, "relrms_p4_vs_fp32": 0.003502646228298545, "maxabs_p8_vs_fp32": 9.264564141631126e-05, "relrms_p8_vs_fp32": 0.003502646228298545}
+[xe2_kv_time] s1_us=136.1 s2_us=138.1 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=769.3 s2_us=147.1 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=213.7 s2_us=105.8 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=238.3 s2_us=97.4 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 2085, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 1.52587890625e-05, "finite_p4": true, "maxabs_p4_vs_p1": 1.52587890625e-05, "finite_p8": true, "maxabs_p8_vs_p1": 1.52587890625e-05, "maxabs_pf32_vs_fp32": 0.00012039393186569214, "relrms_pf32_vs_fp32": 0.0032933359034359455, "maxabs_p1_vs_fp32": 0.00012802332639694214, "relrms_p1_vs_fp32": 0.003297408577054739, "maxabs_p2_vs_fp32": 0.00012802332639694214, "relrms_p2_vs_fp32": 0.0033006651792675257, "maxabs_p4_vs_fp32": 0.00012039393186569214, "relrms_p4_vs_fp32": 0.0032981501426547766, "maxabs_p8_vs_fp32": 0.00012802332639694214, "relrms_p8_vs_fp32": 0.0032995378132909536}
+[xe2_kv_time] s1_us=77.4 s2_us=74.9 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=81.2 s2_us=129.5 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=107.4 s2_us=161.5 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=130.9 s2_us=113.7 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=166.0 s2_us=114.1 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=122.8 s2_us=117.5 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=118.2 s2_us=123.4 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=141.4 s2_us=125.8 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=123.9 s2_us=223.9 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=164.1 s2_us=133.2 n_splits=33 seq0=2085 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 2085, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 0.00010698940604925156, "relrms_pf32_vs_fp32": 0.003448107047006488, "maxabs_p1_vs_fp32": 0.00010698940604925156, "relrms_p1_vs_fp32": 0.0034455347340554, "maxabs_p2_vs_fp32": 0.00010698940604925156, "relrms_p2_vs_fp32": 0.0034455347340554, "maxabs_p4_vs_fp32": 0.00010698940604925156, "relrms_p4_vs_fp32": 0.0034455347340554, "maxabs_p8_vs_fp32": 0.00010698940604925156, "relrms_p8_vs_fp32": 0.0034455347340554}
+[xe2_kv_time] s1_us=90.9 s2_us=77.0 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=93.4 s2_us=79.2 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=136.6 s2_us=141.7 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=136.9 s2_us=129.1 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=142.3 s2_us=144.9 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=147.6 s2_us=147.6 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=181.7 s2_us=124.2 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=164.3 s2_us=157.1 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=246.8 s2_us=119.5 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=260.2 s2_us=121.7 n_splits=33 seq0=2085 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 2085, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 1.52587890625e-05, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 1.52587890625e-05, "finite_p4": true, "maxabs_p4_vs_p1": 1.52587890625e-05, "finite_p8": true, "maxabs_p8_vs_p1": 1.52587890625e-05, "maxabs_pf32_vs_fp32": 0.0001924131065607071, "relrms_pf32_vs_fp32": 0.003470564028248191, "maxabs_p1_vs_fp32": 0.0001924131065607071, "relrms_p1_vs_fp32": 0.0034740769769996405, "maxabs_p2_vs_fp32": 0.0001993142068386078, "relrms_p2_vs_fp32": 0.0034830153454095125, "maxabs_p4_vs_fp32": 0.0001962278038263321, "relrms_p4_vs_fp32": 0.003484746441245079, "maxabs_p8_vs_fp32": 0.0001948866993188858, "relrms_p8_vs_fp32": 0.003484141081571579}
+[xe2_kv_time] s1_us=115.8 s2_us=242.4 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=108.2 s2_us=119.7 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=123.0 s2_us=161.8 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=127.8 s2_us=121.5 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=143.7 s2_us=165.0 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 4160, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 6.661005318164825e-05, "relrms_pf32_vs_fp32": 0.0024687028490006924, "maxabs_p1_vs_fp32": 6.661005318164825e-05, "relrms_p1_vs_fp32": 0.0024659002665430307, "maxabs_p2_vs_fp32": 6.661005318164825e-05, "relrms_p2_vs_fp32": 0.0024659002665430307, "maxabs_p4_vs_fp32": 6.661005318164825e-05, "relrms_p4_vs_fp32": 0.0024659002665430307, "maxabs_p8_vs_fp32": 6.661005318164825e-05, "relrms_p8_vs_fp32": 0.0024659002665430307}
+[xe2_kv_time] s1_us=180.8 s2_us=80.2 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=139.7 s2_us=139.1 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=984.7 s2_us=122.9 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=241.9 s2_us=52.6 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=267.0 s2_us=93.8 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 4160, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 7.62939453125e-06, "finite_p4": true, "maxabs_p4_vs_p1": 7.62939453125e-06, "finite_p8": true, "maxabs_p8_vs_p1": 7.62939453125e-06, "maxabs_pf32_vs_fp32": 8.315220475196838e-05, "relrms_pf32_vs_fp32": 0.002493826439604163, "maxabs_p1_vs_fp32": 8.315220475196838e-05, "relrms_p1_vs_fp32": 0.002495551249012351, "maxabs_p2_vs_fp32": 8.315220475196838e-05, "relrms_p2_vs_fp32": 0.0024944711476564407, "maxabs_p4_vs_fp32": 8.315220475196838e-05, "relrms_p4_vs_fp32": 0.0024953847751021385, "maxabs_p8_vs_fp32": 8.315220475196838e-05, "relrms_p8_vs_fp32": 0.0024931244552135468}
+[xe2_kv_time] s1_us=127.7 s2_us=76.0 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=76.9 s2_us=138.7 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=127.0 s2_us=113.7 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=120.2 s2_us=117.9 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=138.3 s2_us=114.5 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=129.4 s2_us=114.5 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=122.9 s2_us=117.9 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=139.0 s2_us=112.4 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=125.8 s2_us=224.1 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=168.2 s2_us=129.5 n_splits=65 seq0=4160 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 4160, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 7.232557982206345e-05, "relrms_pf32_vs_fp32": 0.002485065022483468, "maxabs_p1_vs_fp32": 7.232557982206345e-05, "relrms_p1_vs_fp32": 0.002485478762537241, "maxabs_p2_vs_fp32": 7.232557982206345e-05, "relrms_p2_vs_fp32": 0.002485478762537241, "maxabs_p4_vs_fp32": 7.232557982206345e-05, "relrms_p4_vs_fp32": 0.002485478762537241, "maxabs_p8_vs_fp32": 7.232557982206345e-05, "relrms_p8_vs_fp32": 0.002485478762537241}
+[xe2_kv_time] s1_us=90.4 s2_us=93.1 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=106.9 s2_us=161.3 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=143.0 s2_us=140.8 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=137.0 s2_us=227.8 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=205.5 s2_us=142.2 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=269.5 s2_us=32.7 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=134.9 s2_us=121.0 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=181.0 s2_us=126.7 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=727.2 s2_us=341.4 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=250.9 s2_us=94.6 n_splits=65 seq0=4160 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 4160, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 7.62939453125e-06, "finite_p4": true, "maxabs_p4_vs_p1": 7.62939453125e-06, "finite_p8": true, "maxabs_p8_vs_p1": 7.62939453125e-06, "maxabs_pf32_vs_fp32": 0.00011240504682064056, "relrms_pf32_vs_fp32": 0.0025468915700912476, "maxabs_p1_vs_fp32": 0.00011240504682064056, "relrms_p1_vs_fp32": 0.0025472771376371384, "maxabs_p2_vs_fp32": 0.00011775549501180649, "relrms_p2_vs_fp32": 0.002551777521148324, "maxabs_p4_vs_fp32": 0.00011601205915212631, "relrms_p4_vs_fp32": 0.0025523665826767683, "maxabs_p8_vs_fp32": 0.00011345488019287586, "relrms_p8_vs_fp32": 0.002550328616052866}
+[xe2_kv_time] s1_us=259.1 s2_us=158.0 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=261.0 s2_us=152.8 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=224.1 s2_us=136.2 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=213.3 s2_us=133.3 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=255.8 s2_us=131.2 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 32868, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 3.0804891139268875e-05, "relrms_pf32_vs_fp32": 0.0010359609732404351, "maxabs_p1_vs_fp32": 3.0804891139268875e-05, "relrms_p1_vs_fp32": 0.0010367156937718391, "maxabs_p2_vs_fp32": 3.0804891139268875e-05, "relrms_p2_vs_fp32": 0.0010367156937718391, "maxabs_p4_vs_fp32": 3.0804891139268875e-05, "relrms_p4_vs_fp32": 0.0010367156937718391, "maxabs_p8_vs_fp32": 3.0804891139268875e-05, "relrms_p8_vs_fp32": 0.0010367156937718391}
+[xe2_kv_time] s1_us=374.7 s2_us=226.0 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=324.5 s2_us=318.8 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=366.2 s2_us=172.9 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=503.9 s2_us=221.2 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=1289.6 s2_us=134.5 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 32868, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 7.62939453125e-06, "finite_p4": true, "maxabs_p4_vs_p1": 7.62939453125e-06, "finite_p8": true, "maxabs_p8_vs_p1": 7.62939453125e-06, "maxabs_pf32_vs_fp32": 4.519801586866379e-05, "relrms_pf32_vs_fp32": 0.0010219562100246549, "maxabs_p1_vs_fp32": 4.519801586866379e-05, "relrms_p1_vs_fp32": 0.0010219074320048094, "maxabs_p2_vs_fp32": 4.519801586866379e-05, "relrms_p2_vs_fp32": 0.0010219232644885778, "maxabs_p4_vs_fp32": 4.519801586866379e-05, "relrms_p4_vs_fp32": 0.001023047138005495, "maxabs_p8_vs_fp32": 4.519801586866379e-05, "relrms_p8_vs_fp32": 0.0010225349105894566}
+[xe2_kv_time] s1_us=147.8 s2_us=99.1 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=167.6 s2_us=94.2 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=259.3 s2_us=135.2 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=207.5 s2_us=135.4 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=253.8 s2_us=127.8 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=205.9 s2_us=127.3 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=252.6 s2_us=126.3 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=204.5 s2_us=134.0 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=243.9 s2_us=126.9 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=218.4 s2_us=132.9 n_splits=514 seq0=32868 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 32868, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 3.803009167313576e-05, "relrms_pf32_vs_fp32": 0.0010835429420694709, "maxabs_p1_vs_fp32": 3.803009167313576e-05, "relrms_p1_vs_fp32": 0.0010824481723830104, "maxabs_p2_vs_fp32": 3.803009167313576e-05, "relrms_p2_vs_fp32": 0.0010824481723830104, "maxabs_p4_vs_fp32": 3.803009167313576e-05, "relrms_p4_vs_fp32": 0.0010824481723830104, "maxabs_p8_vs_fp32": 3.803009167313576e-05, "relrms_p8_vs_fp32": 0.0010824481723830104}
+[xe2_kv_time] s1_us=299.5 s2_us=239.6 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=295.1 s2_us=290.2 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=331.8 s2_us=215.9 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=304.2 s2_us=228.0 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=373.1 s2_us=211.7 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=348.9 s2_us=183.0 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=489.4 s2_us=147.5 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=715.9 s2_us=139.2 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=1277.2 s2_us=116.5 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=1322.6 s2_us=120.5 n_splits=514 seq0=32868 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 32868, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 7.62939453125e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 7.62939453125e-06, "finite_p4": true, "maxabs_p4_vs_p1": 7.62939453125e-06, "finite_p8": true, "maxabs_p8_vs_p1": 7.62939453125e-06, "maxabs_pf32_vs_fp32": 5.749310366809368e-05, "relrms_pf32_vs_fp32": 0.0010493353474885225, "maxabs_p1_vs_fp32": 5.69978728890419e-05, "relrms_p1_vs_fp32": 0.0010496154427528381, "maxabs_p2_vs_fp32": 5.69978728890419e-05, "relrms_p2_vs_fp32": 0.0010487820254638791, "maxabs_p4_vs_fp32": 5.69978728890419e-05, "relrms_p4_vs_fp32": 0.0010489121777936816, "maxabs_p8_vs_fp32": 5.749310366809368e-05, "relrms_p8_vs_fp32": 0.001048934180289507}
+[xe2_kv_time] s1_us=574.7 s2_us=201.0 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=560.9 s2_us=165.6 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=593.8 s2_us=181.4 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=589.0 s2_us=177.1 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=559.1 s2_us=167.4 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 131135, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.4336779713630676e-05, "relrms_pf32_vs_fp32": 0.0005735077429562807, "maxabs_p1_vs_fp32": 1.4336779713630676e-05, "relrms_p1_vs_fp32": 0.0005741168279200792, "maxabs_p2_vs_fp32": 1.4336779713630676e-05, "relrms_p2_vs_fp32": 0.0005741168279200792, "maxabs_p4_vs_fp32": 1.4336779713630676e-05, "relrms_p4_vs_fp32": 0.0005741168279200792, "maxabs_p8_vs_fp32": 1.4336779713630676e-05, "relrms_p8_vs_fp32": 0.0005741168279200792}
+[xe2_kv_time] s1_us=965.9 s2_us=642.5 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=917.2 s2_us=507.1 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1034.8 s2_us=412.2 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=1607.8 s2_us=234.0 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=4188.9 s2_us=176.5 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 131135, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 3.814697265625e-06, "finite_p4": true, "maxabs_p4_vs_p1": 3.814697265625e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.9407831132411957e-05, "relrms_pf32_vs_fp32": 0.0005403906689025462, "maxabs_p1_vs_fp32": 1.9407831132411957e-05, "relrms_p1_vs_fp32": 0.0005406007985584438, "maxabs_p2_vs_fp32": 1.9407831132411957e-05, "relrms_p2_vs_fp32": 0.0005419721710495651, "maxabs_p4_vs_fp32": 1.9407831132411957e-05, "relrms_p4_vs_fp32": 0.000540376640856266, "maxabs_p8_vs_fp32": 1.9407831132411957e-05, "relrms_p8_vs_fp32": 0.000541399116627872}
+[xe2_kv_time] s1_us=498.8 s2_us=159.9 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=541.8 s2_us=171.0 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=552.2 s2_us=131.8 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=546.4 s2_us=152.8 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=566.3 s2_us=157.7 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=553.0 s2_us=157.9 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=590.4 s2_us=153.7 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=547.8 s2_us=188.1 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=578.2 s2_us=153.7 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=543.0 s2_us=186.6 n_splits=2049 seq0=131135 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 131135, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.612165942788124e-05, "relrms_pf32_vs_fp32": 0.000579889165237546, "maxabs_p1_vs_fp32": 1.612165942788124e-05, "relrms_p1_vs_fp32": 0.0005804762477055192, "maxabs_p2_vs_fp32": 1.612165942788124e-05, "relrms_p2_vs_fp32": 0.0005804762477055192, "maxabs_p4_vs_fp32": 1.612165942788124e-05, "relrms_p4_vs_fp32": 0.0005804762477055192, "maxabs_p8_vs_fp32": 1.612165942788124e-05, "relrms_p8_vs_fp32": 0.0005804762477055192}
+[xe2_kv_time] s1_us=965.8 s2_us=644.1 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=968.9 s2_us=682.0 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=977.1 s2_us=525.7 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=853.6 s2_us=492.6 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1043.8 s2_us=312.6 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=1014.1 s2_us=332.1 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=1611.1 s2_us=233.8 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=1606.3 s2_us=189.7 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=4018.9 s2_us=152.0 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=3929.9 s2_us=131.1 n_splits=2049 seq0=131135 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 131135, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 7.62939453125e-06, "finite_p4": true, "maxabs_p4_vs_p1": 7.62939453125e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.9407831132411957e-05, "relrms_pf32_vs_fp32": 0.0005485742585733533, "maxabs_p1_vs_fp32": 1.9407831132411957e-05, "relrms_p1_vs_fp32": 0.0005487841553986073, "maxabs_p2_vs_fp32": 1.9407831132411957e-05, "relrms_p2_vs_fp32": 0.0005493289791047573, "maxabs_p4_vs_fp32": 1.9407831132411957e-05, "relrms_p4_vs_fp32": 0.0005490627372637391, "maxabs_p8_vs_fp32": 1.9407831132411957e-05, "relrms_p8_vs_fp32": 0.0005494740325957537}
+[xe2_kv_time] s1_us=840.0 s2_us=241.7 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=814.8 s2_us=192.2 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=834.4 s2_us=196.4 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=803.6 s2_us=199.2 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=832.3 s2_us=198.6 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 204800, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.0439194738864899e-05, "relrms_pf32_vs_fp32": 0.00045901036355644464, "maxabs_p1_vs_fp32": 1.1486001312732697e-05, "relrms_p1_vs_fp32": 0.0004591557662934065, "maxabs_p2_vs_fp32": 1.1486001312732697e-05, "relrms_p2_vs_fp32": 0.0004591557662934065, "maxabs_p4_vs_fp32": 1.1486001312732697e-05, "relrms_p4_vs_fp32": 0.0004591557662934065, "maxabs_p8_vs_fp32": 1.1486001312732697e-05, "relrms_p8_vs_fp32": 0.0004591557662934065}
+[xe2_kv_time] s1_us=1592.8 s2_us=931.6 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1445.4 s2_us=735.6 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1741.4 s2_us=408.5 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=2625.6 s2_us=287.0 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=6044.2 s2_us=182.6 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 204800, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 3.814697265625e-06, "finite_p4": true, "maxabs_p4_vs_p1": 3.814697265625e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.4077872037887573e-05, "relrms_pf32_vs_fp32": 0.0004436523886397481, "maxabs_p1_vs_fp32": 1.4077872037887573e-05, "relrms_p1_vs_fp32": 0.00044284239993430674, "maxabs_p2_vs_fp32": 1.4077872037887573e-05, "relrms_p2_vs_fp32": 0.00044409706606529653, "maxabs_p4_vs_fp32": 1.4077872037887573e-05, "relrms_p4_vs_fp32": 0.0004436763992998749, "maxabs_p8_vs_fp32": 1.4077872037887573e-05, "relrms_p8_vs_fp32": 0.0004444725636858493}
+[xe2_kv_time] s1_us=801.4 s2_us=189.7 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=757.9 s2_us=242.9 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=790.0 s2_us=208.2 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=796.9 s2_us=186.3 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=836.1 s2_us=655.9 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=784.6 s2_us=169.7 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=833.9 s2_us=180.9 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=793.9 s2_us=193.5 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=812.1 s2_us=187.5 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=785.1 s2_us=260.3 n_splits=3200 seq0=204800 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 204800, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.2347009032964706e-05, "relrms_pf32_vs_fp32": 0.0004656985402107239, "maxabs_p1_vs_fp32": 1.2347009032964706e-05, "relrms_p1_vs_fp32": 0.0004647424793802202, "maxabs_p2_vs_fp32": 1.2347009032964706e-05, "relrms_p2_vs_fp32": 0.0004647424793802202, "maxabs_p4_vs_fp32": 1.2347009032964706e-05, "relrms_p4_vs_fp32": 0.0004647424793802202, "maxabs_p8_vs_fp32": 1.2347009032964706e-05, "relrms_p8_vs_fp32": 0.0004647424793802202}
+[xe2_kv_time] s1_us=1720.4 s2_us=928.7 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1614.6 s2_us=948.0 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1431.3 s2_us=767.6 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1404.2 s2_us=727.1 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1746.9 s2_us=410.4 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=1687.7 s2_us=408.9 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=2428.7 s2_us=282.4 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=2471.0 s2_us=251.7 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=6089.5 s2_us=154.4 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=5967.1 s2_us=153.7 n_splits=3200 seq0=204800 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 204800, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 3.814697265625e-06, "finite_p4": true, "maxabs_p4_vs_p1": 3.814697265625e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.4077872037887573e-05, "relrms_pf32_vs_fp32": 0.00044658308615908027, "maxabs_p1_vs_fp32": 1.4077872037887573e-05, "relrms_p1_vs_fp32": 0.00044644277659244835, "maxabs_p2_vs_fp32": 1.4077872037887573e-05, "relrms_p2_vs_fp32": 0.00044697648263536394, "maxabs_p4_vs_fp32": 1.4077872037887573e-05, "relrms_p4_vs_fp32": 0.00044689641799777746, "maxabs_p8_vs_fp32": 1.4077872037887573e-05, "relrms_p8_vs_fp32": 0.00044763783807866275}
+[xe2_kv_time] s1_us=828.4 s2_us=253.6 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=871.0 s2_us=188.1 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=811.8 s2_us=193.8 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=828.2 s2_us=205.1 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=809.0 s2_us=207.0 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 204863, "batch": 1, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.0860152542591095e-05, "relrms_pf32_vs_fp32": 0.00046643748646602035, "maxabs_p1_vs_fp32": 1.0860152542591095e-05, "relrms_p1_vs_fp32": 0.0004654620715882629, "maxabs_p2_vs_fp32": 1.0860152542591095e-05, "relrms_p2_vs_fp32": 0.0004654620715882629, "maxabs_p4_vs_fp32": 1.0860152542591095e-05, "relrms_p4_vs_fp32": 0.0004654620715882629, "maxabs_p8_vs_fp32": 1.0860152542591095e-05, "relrms_p8_vs_fp32": 0.0004654620715882629}
+[xe2_kv_time] s1_us=1625.4 s2_us=925.0 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1434.9 s2_us=732.7 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1720.3 s2_us=415.8 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=2491.3 s2_us=291.9 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=6319.0 s2_us=156.3 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 204863, "batch": 1, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 3.814697265625e-06, "finite_p4": true, "maxabs_p4_vs_p1": 3.814697265625e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.3866927474737167e-05, "relrms_pf32_vs_fp32": 0.0004424290673341602, "maxabs_p1_vs_fp32": 1.3866927474737167e-05, "relrms_p1_vs_fp32": 0.0004422163765411824, "maxabs_p2_vs_fp32": 1.3866927474737167e-05, "relrms_p2_vs_fp32": 0.00044190403423272073, "maxabs_p4_vs_fp32": 1.3866927474737167e-05, "relrms_p4_vs_fp32": 0.0004431095439940691, "maxabs_p8_vs_fp32": 1.358427107334137e-05, "relrms_p8_vs_fp32": 0.00044263742165639997}
+[xe2_kv_time] s1_us=753.1 s2_us=190.9 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=756.1 s2_us=197.4 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=794.6 s2_us=183.3 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=806.5 s2_us=196.9 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=817.6 s2_us=179.1 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=789.7 s2_us=227.2 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=797.4 s2_us=208.6 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=783.8 s2_us=196.2 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=794.5 s2_us=202.8 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+[xe2_kv_time] s1_us=799.1 s2_us=204.1 n_splits=3201 seq0=204863 tq=1 parallel=1 nsg=32 vpp=1 impl=3
+{"ctx": 204863, "batch": 2, "q_len": 1, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 0.0, "finite_p4": true, "maxabs_p4_vs_p1": 0.0, "finite_p8": true, "maxabs_p8_vs_p1": 0.0, "maxabs_pf32_vs_fp32": 1.2585427612066269e-05, "relrms_pf32_vs_fp32": 0.00046771444613114, "maxabs_p1_vs_fp32": 1.2585427612066269e-05, "relrms_p1_vs_fp32": 0.00046677456703037024, "maxabs_p2_vs_fp32": 1.2585427612066269e-05, "relrms_p2_vs_fp32": 0.00046677456703037024, "maxabs_p4_vs_fp32": 1.2585427612066269e-05, "relrms_p4_vs_fp32": 0.00046677456703037024, "maxabs_p8_vs_fp32": 1.2585427612066269e-05, "relrms_p8_vs_fp32": 0.00046677456703037024}
+[xe2_kv_time] s1_us=1629.5 s2_us=972.9 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1660.8 s2_us=927.0 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1466.6 s2_us=734.7 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1407.2 s2_us=716.4 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=1 impl=3
+[xe2_kv_time] s1_us=1773.1 s2_us=432.3 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=1645.2 s2_us=377.3 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=2 impl=3
+[xe2_kv_time] s1_us=2417.4 s2_us=281.7 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=3087.3 s2_us=281.6 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=4 impl=3
+[xe2_kv_time] s1_us=6202.9 s2_us=213.4 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+[xe2_kv_time] s1_us=5956.4 s2_us=175.6 n_splits=3201 seq0=204863 tq=7 parallel=1 nsg=8 vpp=8 impl=3
+{"ctx": 204863, "batch": 2, "q_len": 7, "finite_pf32": true, "maxabs_pf32_vs_p1": 3.814697265625e-06, "finite_p1": true, "finite_p2": true, "maxabs_p2_vs_p1": 3.814697265625e-06, "finite_p4": true, "maxabs_p4_vs_p1": 3.814697265625e-06, "finite_p8": true, "maxabs_p8_vs_p1": 3.814697265625e-06, "maxabs_pf32_vs_fp32": 1.3966578990221024e-05, "relrms_pf32_vs_fp32": 0.00044670372153632343, "maxabs_p1_vs_fp32": 1.3966578990221024e-05, "relrms_p1_vs_fp32": 0.00044675107346847653, "maxabs_p2_vs_fp32": 1.3966578990221024e-05, "relrms_p2_vs_fp32": 0.0004464919911697507, "maxabs_p4_vs_fp32": 1.3966578990221024e-05, "relrms_p4_vs_fp32": 0.00044751210953108966, "maxabs_p8_vs_fp32": 1.3966578990221024e-05, "relrms_p8_vs_fp32": 0.0004474187735468149}

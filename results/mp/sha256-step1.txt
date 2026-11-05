@@ -1,0 +1,5 @@
+ebaead32280a668e958118c57a77cb3153638dff0cfc5cf2d6bdce82b66af75e  kstudy/src/xe2_kv_ops_mp.cpp
+f2411faf8e8582b08ef5c4e075e554db04845fa2913467155d52759ba5afd18f  /path/to/workspace/agent-work/k8v4-attnprof-20261104/kstudy/out-mp/libxe2_kv_mp_jit.so
+25ac704b94fda031d95fe334c91e5d9a315262c146980dd8f769c0d61e363879  tools/k8v4_mp_check.py
+f4429877b04687403534546ca4837cc29290726029406b5e32edf854d7e934f1  tools/k8v4_kernel_sweep.py
+f1565f8415f4b09834ac514460881bb9bb70f2bd98a00af4e222e453013b3b95  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-cascade-deploy-20261015/libxe2_kv_cascade.so
