@@ -53,6 +53,25 @@ class CacheTest(unittest.TestCase):
         self.assertTrue(torch.allclose(copied, expect))
         self.assertIsNone(cache.pooled_row(row, 4, pages_per_block=1))
 
+    def test_write_tokens_matches_the_per_slot_loop(self):
+        hyper = QsaHyper()
+        norm = torch.randn(hyper.dim)
+        keys = torch.randn(6, hyper.dim)
+        pos = torch.arange(24, dtype=torch.int64).reshape(6, 4)
+        slots = torch.tensor([0, 1, 2, 3, -1, 5])
+        one = QsaBlockCache(num_blocks=1, block_size=64, hyper=hyper)
+        two = QsaBlockCache(num_blocks=1, block_size=64, hyper=hyper)
+        for slot, key, one_pos in zip(slots.tolist(), keys, pos):
+            if int(slot) < 0:
+                continue
+            one.write_token(int(slot), key, one_pos, norm)
+        two.write_tokens(slots, keys, pos, norm)
+        self.assertTrue(torch.equal(one.raw, two.raw))
+        self.assertTrue(torch.equal(one.pos, two.pos))
+        self.assertTrue(torch.equal(one.filled, two.filled))
+        self.assertTrue(torch.equal(one.pooled, two.pooled))
+        self.assertTrue(torch.equal(one.pool_valid, two.pool_valid))
+
     def test_gather_follows_a_swapped_block_table(self):
         cache = QsaBlockCache(num_blocks=4, block_size=64)
         norm = torch.ones(cache.hyper.dim)

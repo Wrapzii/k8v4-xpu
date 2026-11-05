@@ -79,6 +79,46 @@ class QsaBlockCache:
         self.filled[slot] = True
         self._maybe_pool(slot // self.hyper.ratio, block_norm)
 
+    def write_tokens(
+        self,
+        slots: torch.Tensor,
+        keys: torch.Tensor,
+        positions: torch.Tensor,
+        block_norm: torch.Tensor,
+    ) -> None:
+        """Store many raw keys. Negative slots are padding and are skipped.
+
+        The pooled rows match ``write_token`` called in order. Duplicate slots
+        take the last write, which is the same rule as that loop.
+        """
+        slots = slots.to(dtype=torch.int64, device=self.raw.device).reshape(-1)
+        if keys.ndim != 2 or int(keys.shape[0]) != int(slots.shape[0]):
+            raise ValueError("indexer keys are [tokens, dim]")
+        if int(keys.shape[1]) != self.hyper.dim:
+            raise ValueError("indexer key shape %s" % (tuple(keys.shape),))
+        pos = positions.to(dtype=torch.int32, device=self.pos.device)
+        if pos.ndim != 2 or int(pos.shape[0]) != int(slots.shape[0]) or int(pos.shape[1]) != 4:
+            raise ValueError("indexer positions are [tokens, 4]")
+        valid = slots >= 0
+        idx = slots[valid]
+        if int(idx.numel()) == 0:
+            return
+        if int(idx.max()) >= self.num_slots:
+            raise IndexError("indexer slot")
+        key_rows = keys.to(dtype=self.raw.dtype, device=self.raw.device)[valid]
+        pos_rows = pos[valid]
+        if int(torch.unique(idx).numel()) != int(idx.numel()):
+            for slot, key, one_pos in zip(idx.tolist(), key_rows, pos_rows):
+                self.write_token(int(slot), key, one_pos, block_norm)
+            return
+        self.raw.index_copy_(0, idx, key_rows)
+        self.pos.index_copy_(0, idx, pos_rows)
+        self.filled.index_fill_(0, idx, True)
+        ratio = self.hyper.ratio
+        micros = torch.unique(torch.div(idx, ratio, rounding_mode="floor"))
+        for micro in micros.tolist():
+            self._maybe_pool(int(micro), block_norm)
+
     def _maybe_pool(self, micro: int, block_norm: torch.Tensor) -> None:
         ratio = self.hyper.ratio
         start = int(micro) * ratio

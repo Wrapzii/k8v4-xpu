@@ -209,12 +209,8 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     # Default hyper shares one bank per KV-head count. A fresh QsaHyper()
     # each forward must not allocate a new bank.
     cache = bank_for(layout.hkv).layer(layer_idx, num_blocks, block_size, hidden.device)
-    slots = meta.slot_mapping.detach().to(device="cpu", dtype=torch.int64)
-    for token in range(n):
-        slot = int(slots[token])
-        if slot < 0:
-            continue
-        cache.write_token(slot, k_raw[token], pos4[token], weights.k_block_norm)
+    slots = meta.slot_mapping.detach().to(dtype=torch.int64)
+    cache.write_tokens(slots[:n], k_raw, pos4, weights.k_block_norm)
     # Every query with count <= n_sel keeps every causal block. Scoring cannot
     # change that, so the packed dense kernel still produces the output.
     # count == n_sel + 1 can collapse back to a full set once the own block is
