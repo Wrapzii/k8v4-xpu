@@ -24,6 +24,8 @@ import time
 import torch
 import torch.nn.functional as F
 
+from qsa.device import empty_cache, resolve_device, synchronize, to_device
+
 
 @torch.inference_mode()
 def perplexity(model, blocks, chunk: int = 512) -> tuple[float, int]:
@@ -31,7 +33,7 @@ def perplexity(model, blocks, chunk: int = 512) -> tuple[float, int]:
 
     total_nll, total_tokens = 0.0, 0
     for ids in blocks:
-        ids = ids[None].cuda()
+        ids = to_device(ids[None])
         hidden = text_model(model)(input_ids=ids).last_hidden_state
         length = ids.shape[1]
         for start in range(0, length - 1, chunk):
@@ -44,6 +46,7 @@ def perplexity(model, blocks, chunk: int = 512) -> tuple[float, int]:
             ).item()
             total_tokens += end - start
         del hidden
+        empty_cache()
     return math.exp(total_nll / max(total_tokens, 1)), total_tokens
 
 
@@ -101,9 +104,11 @@ def distill_step(model, layers, ids, cfg, optimizer) -> tuple[float, float, dict
             cap_count += int(mask.sum())
         del scores, loss, target, target32, hidden
 
+    synchronize()
     torch.nn.utils.clip_grad_norm_(params, 1.0)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
+    empty_cache()
     stats = {
         "teacher_entropy": ent_sum / max(used, 1),
         "score_std": std_sum / max(used, 1),
@@ -161,6 +166,10 @@ def upload_files(api, repo: str, paths: list[str], prefix: str = "pilot") -> Non
 
 
 def run_distillation(cfg: dict) -> None:
+    device = resolve_device()
+    if device == "cpu":
+        raise SystemExit("distillation requires an XPU or CUDA accelerator")
+
     from transformers import AutoTokenizer, Qwen3_5ForConditionalGeneration
 
     from qsa.data import iter_token_blocks
@@ -168,14 +177,10 @@ def run_distillation(cfg: dict) -> None:
 
     hub = check_hub(cfg)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device != "cuda":
-        raise SystemExit("distillation requires a CUDA GPU")
-
     tokenizer = AutoTokenizer.from_pretrained(cfg["model"])
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         cfg["model"], dtype=torch.bfloat16, attn_implementation="sdpa",
-        device_map="cuda",
+        device_map=device,
     ).eval()
 
     install(
@@ -222,11 +227,11 @@ def run_distillation(cfg: dict) -> None:
         print(f"[p1] dense ppl {dense_ppl:.4f} ({dense_tokens} tokens)", flush=True)
 
     if overfit:
-        fixed = next(iter(iter_token_blocks(
+        fixed = to_device(next(iter(iter_token_blocks(
             tokenizer, cfg["seq_len"], 1,
             dataset=cfg["dataset"], subset=cfg.get("subset", "sample-10BT"),
             skip_docs=cfg.get("skip_docs", 0),
-        )))[None].cuda()
+        )))[None])
         train_iter = iter([fixed] * cfg["steps"])
     else:
         train_iter = iter(iter_token_blocks(
@@ -243,7 +248,7 @@ def run_distillation(cfg: dict) -> None:
     prefix = cfg.get("upload_prefix", "pilot")
     for ids in train_iter:
         if not overfit:
-            ids = ids[None].cuda()
+            ids = to_device(ids[None])
         loss, capture, stats = distill_step(model, layers, ids, cfg, optimizer)
         step += 1
         save_every = cfg.get("save_every", 0)

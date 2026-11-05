@@ -16,6 +16,8 @@ import time
 
 import torch
 
+from qsa.device import empty_cache, resolve_device, synchronize, to_device
+
 
 def _sha256(path: str) -> str:
     import hashlib
@@ -24,10 +26,6 @@ def _sha256(path: str) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
-
-
-def _to_cuda(inputs: dict) -> dict:
-    return {k: (v.cuda() if torch.is_tensor(v) else v) for k, v in inputs.items()}
 
 
 def filler_pool(tokenizer, n_tokens: int, count: int, dataset: str, revision: str,
@@ -55,6 +53,10 @@ def _capture(scores, target, valid, eligible, kb) -> float:
 
 
 def run_mm1(cfg: dict) -> None:
+    device = resolve_device()
+    if device == "cpu":
+        raise SystemExit("MM1 requires an XPU or CUDA accelerator")
+
     from transformers import AutoProcessor, Qwen3_5ForConditionalGeneration
 
     from qsa.data import iter_token_blocks
@@ -64,10 +66,6 @@ def run_mm1(cfg: dict) -> None:
     from qsa.mm_capture import MMCapture, merge_summaries
     from qsa.train_indexer import check_hub, save_indexers, upload_files
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    if device != "cuda":
-        raise SystemExit("MM1 requires a CUDA GPU")
-
     hub = check_hub(cfg)
     from huggingface_hub import hf_hub_download
 
@@ -75,7 +73,7 @@ def run_mm1(cfg: dict) -> None:
     tokenizer = processor.tokenizer
     model = Qwen3_5ForConditionalGeneration.from_pretrained(
         cfg["model"], revision=cfg["model_revision"], dtype=torch.bfloat16,
-        attn_implementation="sdpa", device_map="cuda",
+        attn_implementation="sdpa", device_map=device,
     ).eval()
 
     install(model, block_size=cfg["block_size"], budget=cfg["budget"])
@@ -137,7 +135,7 @@ def run_mm1(cfg: dict) -> None:
     started = time.time()
     for step in range(1, cfg["steps"] + 1):
         inputs, is_mm = build_step()
-        inputs = _to_cuda(inputs)
+        inputs = to_device(inputs)
         configure(collect=True, budget=cfg["budget"])
         with torch.no_grad():
             model(**inputs, logits_to_keep=1)
@@ -175,9 +173,11 @@ def run_mm1(cfg: dict) -> None:
             caps.append(_capture(scores, target32, valid, eligible, kb))
             del scores, loss, target, target32, hidden
 
+        synchronize()
         torch.nn.utils.clip_grad_norm_(params, 1.0)
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
+        empty_cache()
 
         rec = {"step": step, "kind": "mm" if is_mm else "text",
                "tokens": int(inputs["input_ids"].shape[1]),
@@ -222,7 +222,7 @@ def run_mm1(cfg: dict) -> None:
     for spec in eval_specs[: cfg.get("eval_cases", 2)]:
         inputs, _ = build_inputs(processor, spec, fillers[0], image_position="late",
                                       image_fraction=cfg.get("image_fraction", 0.72))
-        inputs = _to_cuda(inputs)
+        inputs = to_device(inputs)
         image = (inputs["input_ids"][0] == cfg["image_token_id"])
         qmask = torch.zeros_like(image)
         qmask[max(0, image.shape[0] - cfg.get("question_span", 96)):] = True
