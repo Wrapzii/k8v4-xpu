@@ -799,7 +799,7 @@ class FrozenGPTQSwift:
                     h = kwargs.get("hidden_states", args[0] if args else None)
                     c, s = kwargs["position_embeddings"]
                     # Weights may be GPTQLinearXPU (no .weight) — project via forward.
-                    if hasattr(mod.q_proj, "weight"):
+                    if getattr(mod.q_proj, "weight", None) is not None and getattr(mod.k_proj, "weight", None) is not None:
                         q_w, k_w = mod.q_proj.weight, mod.k_proj.weight
                         packed = project_qk_teacher(
                             h, q_w, k_w, mod.q_norm.weight, mod.k_norm.weight, c, s,
