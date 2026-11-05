@@ -56,3 +56,21 @@ docker stop FORGEJO-ACTIONS-TASK-29120_WORKFLOW-d9c8eaad9e67344d0d358601f12c66be
 docker stop FORGEJO-ACTIONS-TASK-29119_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
 docker stop FORGEJO-ACTIONS-TASK-29118_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
 docker stop FORGEJO-ACTIONS-TASK-29117_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T01:36:47Z gpubench: CI containers (7) appeared during run attempt 1 -> contaminated, rerun
+2026-11-05T01:37:08Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29123_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T01:37:29Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29124_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T01:37:49Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29127_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T01:37:58Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29122_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T01:37:58Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29125_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T01:37:59Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29126_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T01:38:21Z gpubench: docker stop wrapzii-server-runner
+2026-11-05T01:40:12Z gpubench: CI containers (3) appeared during run attempt 2 -> contaminated, rerun
+2026-11-05T01:40:33Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29130_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T01:40:53Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29131_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T01:40:56Z gpubench: docker stop wrapzii-server-runner
+2026-11-05T01:43:03Z gpubench: CI containers (2) appeared during run attempt 3 -> contaminated, rerun
+2026-11-05T01:43:11Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29132_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T01:43:12Z gpubench: docker stop wrapzii-server-runner
+2026-11-05T03:00:18Z gpubench: CI containers (2) appeared during run attempt 1 -> contaminated, rerun
+2026-11-05T03:00:39Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29134_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T03:00:42Z gpubench: docker stop wrapzii-server-runner

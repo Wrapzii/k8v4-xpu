@@ -1,0 +1,30 @@
+{"round": 0, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 2203.7, "s1_us": 1307.0, "s2_us": 717.8, "draft_sentinel_us": 1096.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 1.0, "maxabs_vs_P1": 0.0, "finite": true}
+CONTAMINATED lo try=0 sentinel 1441.8/815.3 floor 815.3 -> retry
+CONTAMINATED lo try=1 sentinel 3500.6/4068.6 floor 815.3 -> retry
+CONTAMINATED lo try=2 sentinel 4126.0/4071.5 floor 815.3 -> retry
+CONTAMINATED lo try=3 sentinel 4125.0/4124.6 floor 815.3 -> retry
+{"round": 0, "name": "lo", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=40", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 5698.7, "s1_us": 2810.5, "s2_us": 1515.2, "draft_sentinel_us": 4125.0, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+CONTAMINATED dbc try=0 sentinel 4120.6/3588.6 floor 815.3 -> retry
+CONTAMINATED dbc try=1 sentinel 4119.6/3321.8 floor 815.3 -> retry
+CONTAMINATED dbc try=2 sentinel 3680.8/4126.4 floor 815.3 -> retry
+CONTAMINATED dbc try=3 sentinel 3349.8/3133.8 floor 815.3 -> retry
+{"round": 0, "name": "dbc", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=72", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 6413.6, "s1_us": 3556.0, "s2_us": 1747.9, "draft_sentinel_us": 3349.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+CONTAMINATED lodbc try=0 sentinel 4126.6/3757.0 floor 815.3 -> retry
+CONTAMINATED lodbc try=1 sentinel 3048.9/3592.1 floor 815.3 -> retry
+CONTAMINATED lodbc try=2 sentinel 4125.7/4124.6 floor 815.3 -> retry
+CONTAMINATED lodbc try=3 sentinel 4126.1/1048.2 floor 815.3 -> retry
+{"round": 0, "name": "lodbc", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=104", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 2414.3, "s1_us": 1425.3, "s2_us": 716.9, "draft_sentinel_us": 4126.1, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 1.0, "maxabs_vs_P1": 0.0, "finite": true}
+DROP lo best=5698.7 base=2203.7
+DROP dbc best=6413.6 base=2203.7
+DROP lodbc best=2414.3 base=2203.7
+{"round": 1, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 1517.2, "s1_us": 1087.7, "s2_us": 405.2, "draft_sentinel_us": 857.1, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+CONTAMINATED wg6 try=0 sentinel 1050.7/815.8 floor 809.7 -> retry
+{"round": 2, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 1525.3, "s1_us": 1087.0, "s2_us": 409.8, "draft_sentinel_us": 857.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 3, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 1518.6, "s1_us": 1084.3, "s2_us": 404.6, "draft_sentinel_us": 856.6, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 4, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 1515.1, "s1_us": 1083.0, "s2_us": 404.1, "draft_sentinel_us": 855.4, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 5, "name": "wg6", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2+XE2_KV_XF=8", "ctx": 204800, "q_len": 7, "batch": 1, "p50_us": 1519.0, "s1_us": 1085.3, "s2_us": 404.5, "draft_sentinel_us": 857.1, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+SUMMARY
+wg6      n=6 best=1515.1 (s1 1083.0 / s2 404.1) median=1518.8 x1.000 vs wg6 draft_at_best=855.4
+lo       n=1 best=5698.7 (s1 2810.5 / s2 1515.2) median=5698.7 x0.266 vs wg6 draft_at_best=4125.0
+dbc      n=1 best=6413.6 (s1 3556.0 / s2 1747.9) median=6413.6 x0.236 vs wg6 draft_at_best=3349.8
+lodbc    n=1 best=2414.3 (s1 1425.3 / s2 716.9) median=2414.3 x0.628 vs wg6 draft_at_best=4126.1

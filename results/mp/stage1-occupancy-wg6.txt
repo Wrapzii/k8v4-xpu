@@ -1,0 +1,9 @@
+wg6 (Xe2KvTorchAbiS1PagedReuseVWKernel<..,COLS32,VW8,0,0,XF=8>), IGC AOT dump aot-tD1 / zeinfo:
+ GRF mode 128 (numGRF=128), SIMD16, eu_thread_count 8, spill 0, instCount 3488, barrier_count 1 (named barriers unused)
+ SLM per WG 8 KB (local accessor), WG = 6 sub-groups (96 WI)
+ Occupancy (B60/BMG-G21: 20 Xe cores x 8 XVE x 8 threads @128 GRF = 64 HW threads/Xe core):
+   thread-limited: floor(64/6)=10 WGs/Xe core (60/64 threads, 94%); SLM 10x8KB=80KB < 128KB -> SLM not the limiter
+   GRF256 -> 4 thr/XVE -> 5 WGs/core (half occupancy)
+ WG barriers per page: 1 (after QK/K-scale) + 3 (softmax->P store->P load) + 7 (4 V col-chunks x2 -1) = 11; sub-group barriers 2
+ Stall (xpu-smi EU metrics, sudo, 1 s samples, steady verifier soak 200K): EU active 31%, stall 52%, idle 17%
+   -> latency/stall bound (memory-latency + barrier waits), not issue- or bandwidth-bound
