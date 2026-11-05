@@ -47,7 +47,16 @@ def call(q, o, ql):
                                  bt, sl, s.visible, part, m, l, merged, o, ql, 1)
 errf = tempfile.TemporaryFile(mode="w+"); saved = os.dup(2); os.dup2(errf.fileno(), 2)
 def log(x): os.write(saved, (x + "\n").encode())
-def measure(impl, vpp, ql=7):
+BASE_ENV = {k: os.environ.get(k) for k in ("XE2_KV_COMPACT_SLM", "XE2_KV_S2_NSG_VERIFY")}
+def set_extra(extra):
+    for k in ("XE2_KV_TEAM_MODE", "XE2_KV_REUSE_VAR"): os.environ.pop(k, None)
+    for k, val in BASE_ENV.items():
+        if val is None: os.environ.pop(k, None)
+        else: os.environ[k] = val
+    for kv in filter(None, extra.split("+")):
+        k, val = kv.split("="); os.environ[k] = val
+def measure(impl, vpp, ql=7, extra=""):
+    set_extra(extra if ql == 7 else "")
     os.environ["XE2_KV_VERIFY_MP_IMPL"] = str(impl); os.environ["XE2_KV_VERIFY_PAGES"] = str(vpp)
     q, o = QV if ql == 7 else QD
     for _ in range(3): call(q, o, ql)
@@ -62,19 +71,19 @@ def measure(impl, vpp, ql=7):
     sp = RE.findall(errf.read())
     return st.median(ts), st.median(float(x[0]) for x in sp), st.median(float(x[1]) for x in sp), out
 QD = mk(1)
-variants = [tuple(x.split(":")) for x in a.variants.split(",")]  # name:impl:vpp
+variants = [tuple((x.split(":") + [""])[:4]) for x in a.variants.split(",")]  # name:impl:vpp[:K=V+K=V]
 alive = [vv for vv in variants]; res = {vv[0]: [] for vv in variants}
 outf = open(a.out, "a"); ref = None
 for rnd in range(a.rounds):
     for vv in list(alive):
         idle = wait_idle(); vr0 = vllm_running()
         d = measure(1, 1, ql=1)[0]                      # draft sentinel
-        t, s1, s2, out = measure(int(vv[1]), int(vv[2]))
+        t, s1, s2, out = measure(int(vv[1]), int(vv[2]), extra=vv[3])
         vr1 = vllm_running()
         if vv[1] == "1" or (vv[1] == "2" and vv[2] == "1"): pass
-        if ref is None and vv[2] == "1": ref = out
+        if ref is None: ref = out   # first variant must be the baseline
         dmax = float((out - ref).abs().max()) if ref is not None else None
-        r = {"round": rnd, "name": vv[0], "impl": int(vv[1]), "vpp": int(vv[2]), "ctx": a.ctx, "q_len": 7, "batch": 1,
+        r = {"round": rnd, "name": vv[0], "impl": int(vv[1]), "vpp": int(vv[2]), "extra": vv[3], "ctx": a.ctx, "q_len": 7, "batch": 1,
              "p50_us": round(t, 1), "s1_us": round(s1, 1), "s2_us": round(s2, 1), "draft_sentinel_us": round(d, 1),
              "idle_gate": idle, "vllm_running_before": vr0, "vllm_running_after": vr1, "maxabs_vs_P1": dmax,
              "finite": bool(torch.isfinite(out).all())}

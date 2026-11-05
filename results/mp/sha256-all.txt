@@ -13,3 +13,7 @@ e97a4d697c18e04696c2d07377a640ff22056985086b28cbd5f1eb32ea84ffb8  /mnt/hdd-500gb
 f2411faf8e8582b08ef5c4e075e554db04845fa2913467155d52759ba5afd18f  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-20261104/mp-libs/libxe2_kv_mp_jit.so
 7ac7851885b972dbea6d1866d0ffb15935be2ab535e3ede4d00982530c089c43  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-20261104/mp-libs/libxe2_kv_team_jit.so
 f1565f8415f4b09834ac514460881bb9bb70f2bd98a00af4e222e453013b3b95  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-cascade-deploy-20261015/libxe2_kv_cascade.so
+e8fb8d89f48985c6c2a348b69fa33045a159e7d820a226bfba850fac6e649e37  kstudy/src/xe2_kv_ops_r2.cpp
+5d4a2eafdab6d6e9b05080458a3088d3d289cbc2357648cf606a1f9d032faa02  kstudy/src/xe2_kv_ops_r3.cpp
+ebfc7264fae86c0fe23a04ff124f7ccc2f6a67231c13bf25edacf85ce255621a  tools/k8v4_fastloop.py
+b46f0bd9eba729e8fb8f125dfbd40f60e4b1cecca6eefff857aa628b10eca5ac  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-20261104/mp-libs/libxe2_kv_r2_jit.so
