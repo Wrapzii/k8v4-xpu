@@ -1,0 +1,33 @@
+22:27:59 rep1 prod:1 load=13.34 root=88% vllm_running=0.0
+  rc=0
+22:28:37 rep1 mp:1 load=8.81 root=88% vllm_running=1.0
+  rc=0
+22:28:54 rep1 mp:2 load=7.32 root=88% vllm_running=0.0
+  rc=0
+22:29:12 rep1 mp:4 load=6.22 root=88% vllm_running=0.0
+  rc=0
+22:29:32 rep1 mp2:2 load=5.32 root=88% vllm_running=1.0
+  rc=0
+22:29:47 rep1 mp2:4 load=5.21 root=88% vllm_running=0.0
+  rc=0
+22:30:02 rep1 mp:8 load=4.64 root=88% vllm_running=0.0
+  rc=0
+22:30:27 rep1 mp2:8 load=4.29 root=88% vllm_running=1.0
+  rc=0
+22:30:43 rep2 prod:1 load=4.85 root=88% vllm_running=1.0
+  rc=0
+22:31:18 rep2 mp:1 load=3.53 root=88% vllm_running=0.0
+  rc=0
+22:31:35 rep2 mp:2 load=3.60 root=88% vllm_running=0.0
+  rc=0
+22:31:54 rep2 mp:4 load=3.49 root=88% vllm_running=0.0
+  rc=0
+22:32:12 rep2 mp2:2 load=3.15 root=88% vllm_running=0.0
+  rc=0
+22:32:29 rep2 mp2:4 load=3.86 root=88% vllm_running=1.0
+  rc=0
+22:32:45 rep2 mp:8 load=4.26 root=88% vllm_running=1.0
+  rc=0
+22:33:03 rep2 mp2:8 load=4.72 root=88% vllm_running=1.0
+  rc=0
+STEP1_DONE

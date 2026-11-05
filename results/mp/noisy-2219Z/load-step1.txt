@@ -1,0 +1,21 @@
+22:19:47 rep1 prod:1 load=23.42 root=87%
+  rc=0
+22:20:40 rep1 mp:1 load=12.50 root=87%
+  rc=125
+22:20:40 rep1 mp:2 load=12.50 root=87%
+  rc=125
+22:20:40 rep1 mp:4 load=12.50 root=87%
+  rc=125
+22:20:40 rep1 mp:8 load=12.50 root=87%
+  rc=125
+22:20:41 rep2 prod:1 load=12.50 root=87%
+  rc=0
+22:21:19 rep2 mp:1 load=9.32 root=87%
+  rc=125
+22:21:19 rep2 mp:2 load=9.32 root=87%
+  rc=125
+22:21:19 rep2 mp:4 load=9.32 root=87%
+  rc=125
+22:21:19 rep2 mp:8 load=9.32 root=87%
+  rc=125
+STEP1_DONE

@@ -1,0 +1,175 @@
+ai01 crash excerpt 2026-11-04
+guest timezone: Etc/UTC
+host window requested: 16:00-16:15 America/New_York = 21:00-21:15 UTC
+boot -1 id bfacb358424f474cb71104ab418324a7 first Tue 2026-11-03 11:51:52 UTC last Wed 2026-11-04 21:07:04 UTC
+boot 0 starts Wed 2026-11-04 21:33:00 UTC (VM was down between 21:07 and 21:33 UTC)
+
+=== journalctl --list-boots ===
+IDX BOOT ID                          FIRST ENTRY                 LAST ENTRY
+ -2 374e193894624c92b0fe9f2685a6cec9 Mon 2026-11-02 11:24:01 UTC Tue 2026-11-03 11:45:03 UTC
+ -1 bfacb358424f474cb71104ab418324a7 Tue 2026-11-03 11:51:52 UTC Wed 2026-11-04 21:07:04 UTC
+  0 7d6232d8e0374fd29c213fdfabba339b Wed 2026-11-04 21:33:00 UTC Wed 2026-11-04 22:05:35 UTC
+
+=== journalctl -b -1 --since 21:00:00 --until 21:15:00 UTC (filtered) ===
+Nov 04 21:00:38 ai01 dockerd[2338]: 2026/11/04 21:00:38 http2: server: error reading preface from client @: read unix /run/docker.sock->@: read: connection reset by peer
+Nov 04 21:04:09 ai01 dockerd[2338]: 2026/11/04 21:04:09 http2: server: error reading preface from client @: read unix /run/docker.sock->@: read: connection reset by peer
+
+=== journalctl -b -1 -p err same window ===
+Nov 04 21:00:22 ai01 xpumcli_audit[2232083]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:00:24 ai01 xpumcli_audit[2232196]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:00:53 ai01 xpumcli_audit[2237257]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:00:54 ai01 xpumcli_audit[2237380]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:01:23 ai01 xpumcli_audit[2238053]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:01:25 ai01 xpumcli_audit[2238186]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:01:54 ai01 xpumcli_audit[2238868]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:01:57 ai01 xpumcli_audit[2240295]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:02:25 ai01 xpumcli_audit[2241183]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:02:28 ai01 xpumcli_audit[2241433]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:02:55 ai01 xpumcli_audit[2242024]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:03:01 ai01 xpumcli_audit[2242208]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:03:22 ai01 xpumcli_audit[2242691]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:03:25 ai01 xpumcli_audit[2242833]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:03:57 ai01 xpumcli_audit[2244617]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:04:05 ai01 xpumcli_audit[2246320]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:04:25 ai01 xpumcli_audit[2247187]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:04:29 ai01 xpumcli_audit[2247387]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:04:58 ai01 xpumcli_audit[2253102]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:05:03 ai01 xpumcli_audit[2257413]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+Nov 04 21:05:41 ai01 xpumcli_audit[2264367]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei0 [-13]:Permission denied
+Nov 04 21:06:12 ai01 xpumcli_audit[2271520]: me: error: Cannot establish a handle to the Intel MEI driver /dev/mei1 [-13]:Permission denied
+
+=== journalctl -b -1 -k same window (kernel, first 250) ===
+Nov 04 21:00:11 ai01 kernel: docker0: port 2(veth91b328e) entered blocking state
+Nov 04 21:00:11 ai01 kernel: docker0: port 2(veth91b328e) entered disabled state
+Nov 04 21:00:11 ai01 kernel: veth91b328e: entered allmulticast mode
+Nov 04 21:00:11 ai01 kernel: veth91b328e: entered promiscuous mode
+Nov 04 21:00:11 ai01 kernel: eth0: renamed from veth2121d8b
+Nov 04 21:00:11 ai01 kernel: docker0: port 2(veth91b328e) entered blocking state
+Nov 04 21:00:11 ai01 kernel: docker0: port 2(veth91b328e) entered forwarding state
+Nov 04 21:00:43 ai01 kernel: docker0: port 2(veth91b328e) entered disabled state
+Nov 04 21:00:43 ai01 kernel: veth2121d8b: renamed from eth0
+Nov 04 21:00:43 ai01 kernel: docker0: port 2(veth91b328e) entered disabled state
+Nov 04 21:00:43 ai01 kernel: veth91b328e (unregistering): left allmulticast mode
+Nov 04 21:00:43 ai01 kernel: veth91b328e (unregistering): left promiscuous mode
+Nov 04 21:00:43 ai01 kernel: docker0: port 2(veth91b328e) entered disabled state
+Nov 04 21:00:44 ai01 kernel: docker0: port 2(veth24fc61d) entered blocking state
+Nov 04 21:00:44 ai01 kernel: docker0: port 2(veth24fc61d) entered disabled state
+Nov 04 21:00:44 ai01 kernel: veth24fc61d: entered allmulticast mode
+Nov 04 21:00:44 ai01 kernel: veth24fc61d: entered promiscuous mode
+Nov 04 21:00:44 ai01 kernel: eth0: renamed from vethc91402b
+Nov 04 21:00:44 ai01 kernel: docker0: port 2(veth24fc61d) entered blocking state
+Nov 04 21:00:44 ai01 kernel: docker0: port 2(veth24fc61d) entered forwarding state
+Nov 04 21:00:55 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered blocking state
+Nov 04 21:00:55 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered disabled state
+Nov 04 21:00:55 ai01 kernel: vetha7feea1: entered allmulticast mode
+Nov 04 21:00:55 ai01 kernel: vetha7feea1: entered promiscuous mode
+Nov 04 21:00:55 ai01 kernel: eth0: renamed from vetha688254
+Nov 04 21:00:55 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered blocking state
+Nov 04 21:00:55 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered forwarding state
+Nov 04 21:01:33 ai01 kernel: docker0: port 2(veth24fc61d) entered disabled state
+Nov 04 21:01:33 ai01 kernel: vethc91402b: renamed from eth0
+Nov 04 21:01:33 ai01 kernel: docker0: port 2(veth24fc61d) entered disabled state
+Nov 04 21:01:33 ai01 kernel: veth24fc61d (unregistering): left allmulticast mode
+Nov 04 21:01:33 ai01 kernel: veth24fc61d (unregistering): left promiscuous mode
+Nov 04 21:01:33 ai01 kernel: docker0: port 2(veth24fc61d) entered disabled state
+Nov 04 21:01:34 ai01 kernel: docker0: port 2(veth48fba61) entered blocking state
+Nov 04 21:01:34 ai01 kernel: docker0: port 2(veth48fba61) entered disabled state
+Nov 04 21:01:34 ai01 kernel: veth48fba61: entered allmulticast mode
+Nov 04 21:01:34 ai01 kernel: veth48fba61: entered promiscuous mode
+Nov 04 21:01:34 ai01 kernel: eth0: renamed from veth8c0ef24
+Nov 04 21:01:34 ai01 kernel: docker0: port 2(veth48fba61) entered blocking state
+Nov 04 21:01:34 ai01 kernel: docker0: port 2(veth48fba61) entered forwarding state
+Nov 04 21:01:39 ai01 kernel: vetha688254: renamed from eth0
+Nov 04 21:01:39 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered disabled state
+Nov 04 21:01:39 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered disabled state
+Nov 04 21:01:39 ai01 kernel: vetha7feea1 (unregistering): left allmulticast mode
+Nov 04 21:01:39 ai01 kernel: vetha7feea1 (unregistering): left promiscuous mode
+Nov 04 21:01:39 ai01 kernel: br-0bae90c30029: port 2(vetha7feea1) entered disabled state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered disabled state
+Nov 04 21:01:54 ai01 kernel: veth4e45e96: entered allmulticast mode
+Nov 04 21:01:54 ai01 kernel: veth4e45e96: entered promiscuous mode
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered disabled state
+Nov 04 21:01:54 ai01 kernel: vethd4408ad: entered allmulticast mode
+Nov 04 21:01:54 ai01 kernel: vethd4408ad: entered promiscuous mode
+Nov 04 21:01:54 ai01 kernel: eth0: renamed from veth4714a73
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered forwarding state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered disabled state
+Nov 04 21:01:54 ai01 kernel: veth40baaea: entered allmulticast mode
+Nov 04 21:01:54 ai01 kernel: veth40baaea: entered promiscuous mode
+Nov 04 21:01:54 ai01 kernel: eth0: renamed from vethe5e3dbc
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered forwarding state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered disabled state
+Nov 04 21:01:54 ai01 kernel: vethdf3d5a8: entered allmulticast mode
+Nov 04 21:01:54 ai01 kernel: vethdf3d5a8: entered promiscuous mode
+Nov 04 21:01:54 ai01 kernel: eth0: renamed from veth9f8127c
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered forwarding state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered disabled state
+Nov 04 21:01:54 ai01 kernel: veth7c7876a: entered allmulticast mode
+Nov 04 21:01:54 ai01 kernel: veth7c7876a: entered promiscuous mode
+Nov 04 21:01:54 ai01 kernel: eth0: renamed from veth8afde20
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered forwarding state
+Nov 04 21:01:54 ai01 kernel: eth0: renamed from veth38aab69
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered blocking state
+Nov 04 21:01:54 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered forwarding state
+Nov 04 21:02:12 ai01 kernel: docker0: port 2(veth48fba61) entered disabled state
+Nov 04 21:02:12 ai01 kernel: veth8c0ef24: renamed from eth0
+Nov 04 21:02:12 ai01 kernel: docker0: port 2(veth48fba61) entered disabled state
+Nov 04 21:02:12 ai01 kernel: veth48fba61 (unregistering): left allmulticast mode
+Nov 04 21:02:12 ai01 kernel: veth48fba61 (unregistering): left promiscuous mode
+Nov 04 21:02:12 ai01 kernel: docker0: port 2(veth48fba61) entered disabled state
+Nov 04 21:03:51 ai01 kernel: docker0: port 2(veth232e588) entered blocking state
+Nov 04 21:03:51 ai01 kernel: docker0: port 2(veth232e588) entered disabled state
+Nov 04 21:03:51 ai01 kernel: veth232e588: entered allmulticast mode
+Nov 04 21:03:51 ai01 kernel: veth232e588: entered promiscuous mode
+Nov 04 21:03:53 ai01 kernel: eth0: renamed from vethd9cb84e
+Nov 04 21:03:53 ai01 kernel: docker0: port 2(veth232e588) entered blocking state
+Nov 04 21:03:53 ai01 kernel: docker0: port 2(veth232e588) entered forwarding state
+Nov 04 21:04:49 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered disabled state
+Nov 04 21:04:49 ai01 kernel: veth4714a73: renamed from eth0
+Nov 04 21:04:52 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered disabled state
+Nov 04 21:04:52 ai01 kernel: veth4e45e96 (unregistering): left allmulticast mode
+Nov 04 21:04:52 ai01 kernel: veth4e45e96 (unregistering): left promiscuous mode
+Nov 04 21:04:52 ai01 kernel: br-0bae90c30029: port 2(veth4e45e96) entered disabled state
+Nov 04 21:05:00 ai01 kernel: docker0: port 2(veth232e588) entered disabled state
+Nov 04 21:05:00 ai01 kernel: vethd9cb84e: renamed from eth0
+Nov 04 21:05:02 ai01 kernel: docker0: port 2(veth232e588) entered disabled state
+Nov 04 21:05:02 ai01 kernel: veth232e588 (unregistering): left allmulticast mode
+Nov 04 21:05:02 ai01 kernel: veth232e588 (unregistering): left promiscuous mode
+Nov 04 21:05:02 ai01 kernel: docker0: port 2(veth232e588) entered disabled state
+Nov 04 21:05:28 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered disabled state
+Nov 04 21:05:28 ai01 kernel: veth8afde20: renamed from eth0
+Nov 04 21:05:30 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered disabled state
+Nov 04 21:05:30 ai01 kernel: vethdf3d5a8 (unregistering): left allmulticast mode
+Nov 04 21:05:30 ai01 kernel: vethdf3d5a8 (unregistering): left promiscuous mode
+Nov 04 21:05:30 ai01 kernel: br-0bae90c30029: port 5(vethdf3d5a8) entered disabled state
+Nov 04 21:06:08 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered disabled state
+Nov 04 21:06:08 ai01 kernel: vethe5e3dbc: renamed from eth0
+Nov 04 21:06:09 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered disabled state
+Nov 04 21:06:09 ai01 kernel: vethd4408ad (unregistering): left allmulticast mode
+Nov 04 21:06:09 ai01 kernel: vethd4408ad (unregistering): left promiscuous mode
+Nov 04 21:06:09 ai01 kernel: br-0bae90c30029: port 3(vethd4408ad) entered disabled state
+Nov 04 21:06:18 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered disabled state
+Nov 04 21:06:18 ai01 kernel: veth9f8127c: renamed from eth0
+Nov 04 21:06:19 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered disabled state
+Nov 04 21:06:19 ai01 kernel: veth40baaea (unregistering): left allmulticast mode
+Nov 04 21:06:19 ai01 kernel: veth40baaea (unregistering): left promiscuous mode
+Nov 04 21:06:19 ai01 kernel: br-0bae90c30029: port 4(veth40baaea) entered disabled state
+Nov 04 21:06:26 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered disabled state
+Nov 04 21:06:26 ai01 kernel: veth38aab69: renamed from eth0
+Nov 04 21:06:26 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered disabled state
+Nov 04 21:06:26 ai01 kernel: veth7c7876a (unregistering): left allmulticast mode
+Nov 04 21:06:26 ai01 kernel: veth7c7876a (unregistering): left promiscuous mode
+Nov 04 21:06:26 ai01 kernel: br-0bae90c30029: port 6(veth7c7876a) entered disabled state
+
+=== wider -b -1 search 20:40-21:07 UTC for xe/i915/hang/OOM/IO/hung ===
+-- No entries --
+=== end wider search ===

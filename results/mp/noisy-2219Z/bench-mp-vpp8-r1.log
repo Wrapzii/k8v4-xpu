@@ -1,0 +1,3 @@
+docker: Error response from daemon: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error mounting "/home/dan/agent-work/k8v4-attnprof-20261104/kstudy/out-mp/libxe2_kv_mp_jit.so" to rootfs at "/opt/k8v4/libxe2_kv.so": mount src=/home/dan/agent-work/k8v4-attnprof-20261104/kstudy/out-mp/libxe2_kv_mp_jit.so, dst=/opt/k8v4/libxe2_kv.so, dstFd=/proc/thread-self/fd/14, flags=MS_BIND|MS_REC: not a directory: Are you trying to mount a directory onto a file (or vice-versa)? Check if the specified host path exists and is the expected type
+
+Run 'docker run --help' for more information

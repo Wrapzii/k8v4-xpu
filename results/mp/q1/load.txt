@@ -1,0 +1,50 @@
+23:00:22 rep1 prod:prod:2:1 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=79506.0
+23:01:21 rep1 c4p1:libxe2_kv_mp4_jit.so:4:1 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=82102.0
+23:02:48 rep1 mp3p2:libxe2_kv_mp3_jit.so:3:2 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=84383.0
+23:03:11 rep1 mp4p2:libxe2_kv_mp4_jit.so:4:2 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=85652.0
+23:04:03 rep1 mp4p4:libxe2_kv_mp4_jit.so:4:4 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=88520.0
+23:04:57 rep1 mp4p8:libxe2_kv_mp4_jit.so:4:8 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=90134.0
+23:05:25 rep1 mp3p4:libxe2_kv_mp3_jit.so:3:4 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=90134.0
+23:05:47 rep2 prod:prod:2:1 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=90281.0
+23:06:23 rep2 c4p1:libxe2_kv_mp4_jit.so:4:1 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=2.0 gen_tokens=91041.0
+23:08:07 rep2 mp3p2:libxe2_kv_mp3_jit.so:3:2 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=96701.0
+23:08:44 rep2 mp4p2:libxe2_kv_mp4_jit.so:4:2 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=97644.0
+23:09:13 rep2 mp4p4:libxe2_kv_mp4_jit.so:4:4 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=97644.0
+23:09:41 rep2 mp4p8:libxe2_kv_mp4_jit.so:4:8 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=97644.0
+23:10:10 rep2 mp3p4:libxe2_kv_mp3_jit.so:3:4 root=93% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=97693.0
+23:10:32 rep3 prod:prod:2:1 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=97693.0
+23:11:08 rep3 c4p1:libxe2_kv_mp4_jit.so:4:1 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=98179.0
+23:11:47 rep3 mp3p2:libxe2_kv_mp3_jit.so:3:2 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=99310.0
+23:12:08 rep3 mp4p2:libxe2_kv_mp4_jit.so:4:2 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=99743.0
+23:12:41 rep3 mp4p4:libxe2_kv_mp4_jit.so:4:4 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=99768.0
+23:13:09 rep3 mp4p8:libxe2_kv_mp4_jit.so:4:8 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=99768.0
+23:13:38 rep3 mp3p4:libxe2_kv_mp3_jit.so:3:4 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=99768.0
+23:13:59 rep4 prod:prod:2:1 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=2.0 gen_tokens=100235.0
+23:14:57 rep4 c4p1:libxe2_kv_mp4_jit.so:4:1 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=0.0 gen_tokens=101793.0
+23:15:27 rep4 mp3p2:libxe2_kv_mp3_jit.so:3:2 root=94% vllm_running=0.0
+  rc=0 vllm_running_after=1.0 gen_tokens=102484.0
+23:16:28 rep4 mp4p2:libxe2_kv_mp4_jit.so:4:2 root=94% vllm_running=0.0
+stopped early after 24 runs (n>=3 per cfg) Wed Nov  4 23:20:33 UTC 2026

@@ -1,0 +1,18 @@
+paused at Wed Nov  4 22:19:28 UTC 2026 by step1 bench (Daniel permission 2:57 PM ET)
+docker-paused FORGEJO-ACTIONS-TASK-29041_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+docker-paused FORGEJO-ACTIONS-TASK-29040_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker-paused FORGEJO-ACTIONS-TASK-29039_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+docker-paused FORGEJO-ACTIONS-TASK-29038_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker-paused FORGEJO-ACTIONS-TASK-29033_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker-paused FORGEJO-ACTIONS-TASK-29035_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker-paused wrapzii-server-runner
+docker-paused forgejo-runner
+timer-stopped fstrim.timer
+timer-stopped ai01-cargo-cache.timer
+--- Wed Nov  4 22:59:31 UTC 2026 second pass: new jobs appeared; root was 92%
+docker-paused FORGEJO-ACTIONS-TASK-29065_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker-paused FORGEJO-ACTIONS-TASK-29063_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+systemd-frozen forge-runner-hdd.service
+--- Wed Nov  4 22:59:51 UTC 2026 runners found unpaused by something else; re-pausing
+docker-paused forgejo-runner
+docker-paused wrapzii-server-runner
