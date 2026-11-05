@@ -120,6 +120,30 @@ def apply_q_rope(
     return rotated.reshape(int(tokens), int(heads), int(dim))
 
 
+def pool_blocks(
+    raw_keys: torch.Tensor,
+    block_norm: torch.Tensor,
+    first_pos: torch.Tensor,
+    hyper: QsaHyper | None = None,
+) -> torch.Tensor:
+    """Mean-pool ``[blocks, ratio, dim]`` raw keys, then block-norm and MRoPE.
+
+    ``first_pos`` is ``[blocks, 4]``, the position of each block's first token.
+    One block is the same math as ``pool_block``.
+    """
+    hyper = hyper or QsaHyper()
+    if raw_keys.ndim != 3 or int(raw_keys.shape[1]) != hyper.ratio:
+        raise ValueError("blocks are [n, %d, dim]" % hyper.ratio)
+    if int(raw_keys.shape[2]) != hyper.dim:
+        raise ValueError("indexer dim")
+    pos4 = first_pos.to(torch.int64).reshape(-1, 4)
+    if int(pos4.shape[0]) != int(raw_keys.shape[0]):
+        raise ValueError("one MRoPE position per block")
+    mean = raw_keys.to(_compute_dtype(raw_keys)).mean(dim=1)
+    normed = rmsnorm(mean, block_norm, hyper.eps)
+    return mrope(normed, pos4, hyper.n_rot, hyper.sections, hyper.theta)
+
+
 def pool_block(
     raw_keys: torch.Tensor,
     block_norm: torch.Tensor,
@@ -132,10 +156,7 @@ def pool_block(
         raise ValueError("a block is %d raw keys" % hyper.ratio)
     if int(raw_keys.shape[1]) != hyper.dim:
         raise ValueError("indexer dim")
-    mean = raw_keys.to(_compute_dtype(raw_keys)).mean(dim=0)
-    normed = rmsnorm(mean, block_norm, hyper.eps)
-    pos4 = first_pos.to(torch.int64).reshape(1, 4)
-    return mrope(normed.unsqueeze(0), pos4, hyper.n_rot, hyper.sections, hyper.theta).squeeze(0)
+    return pool_blocks(raw_keys.unsqueeze(0), block_norm, first_pos, hyper).squeeze(0)
 
 
 def finish_selection(
