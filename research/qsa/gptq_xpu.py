@@ -19,6 +19,23 @@ def int4_gemm_available() -> bool:
     except Exception:
         return False
 
+def ensure_int4_op() -> bool:
+    """Best-effort load of ``_xpu_C.int4_gemm_w4a16`` (vLLM XPU ops)."""
+    if int4_gemm_available():
+        return True
+    try:
+        import vllm._xpu_ops  # noqa: F401 — registers fakes if C op present
+    except Exception:
+        pass
+    try:
+        # Importing the kernel module can pull in the native extension.
+        import vllm.model_executor.kernels.linear.mixed_precision.xpu  # noqa: F401
+    except Exception:
+        pass
+    return int4_gemm_available()
+
+
+
 
 def prepare_gptq_nt(
     qweight: torch.Tensor,
@@ -115,7 +132,7 @@ class GPTQLinearXPU(nn.Module):
         self.group_size = int(group_size)
         self.in_features = int(qweight.shape[0] * 8)
         self.out_features = int(qweight.shape[1])
-        self._use_int4 = bool(prefer_int4 and int4_gemm_available())
+        self._use_int4 = bool(prefer_int4 and ensure_int4_op())
         if bias is not None:
             self.register_buffer(
                 "bias", bias.to(device=device, dtype=torch.float16), persistent=False
