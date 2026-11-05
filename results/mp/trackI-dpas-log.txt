@@ -1,0 +1,35 @@
+trackI dpas log
+================
+Goal: ESIMD stage-1 (XF&256) QK and PV on xmx::dpas. Baseline scalar ESIMD
+786 ms at 200K (s1). lo (XF=40) ~1464 us total, s1 ~1024 us. Prod ~1578 us.
+
+Hardware from committed IGC asm (this B60): dpas.8x8 (16|M0) for both
+int8 (:b -> :d) and fp16 (:hf -> :f). Tile is M=8, N=16, K=32 (int8) / K=16 (fp16).
+GRF row is 64 bytes (16 dwords).
+
+VNNI hypothesis (ISA DPAS.md + SPIR-V 2d-block transform):
+  int8 B byte[(k/4)*64 + n*4 + (k%4)] = B[k][n]
+  fp16 B half[(k/2)*32 + n*2 + (k%2)] = B[k][n]
+K cache is token-major with dim contiguous, so the pack is a dword transpose
+(strided simd select), not a transformed load_2d (that packs along rows).
+
+Step 0: dpas_probe (kstudy/src/dpas_probe.cpp) before touching the 5k-line kernel.
+GPU (Arc Pro B60), FAILS 0, three runs. gpubench wrapper exited 4 only because
+CI containers were visible; the math passed each time:
+  i8-prepack-L0, i8-select-transpose, i8-strided-load, i8-load2d-w32,
+  i8-load2d-w64, f16-prepack-L0, f16-select-transpose all PASS maxabs 0.
+VNNI confirmed:
+  int8 byte[(k/4)*64 + n*4 + (k%4)] = B[k][n]
+  fp16 half[(k/2)*32 + n*2 + (k%2)] = B[k][n]
+A is row-major [M][K]. C is row-major [M][N]. load_2d non-transformed returns
+token-major [height][width]; the same strided dword select packs VNNI.
+Transformed load_2d is the wrong axis for this K layout. Pitch>width and X!=0
+were not in the probe (MODE 1 in the kernel uses them).
+
+Step 1: xe2_kv_ops_tI1.cpp ESIMD body replaced. Same grid (nprog*6 threads,
+8 query rows each). QK is xmx::dpas<8,8,int32> over K=32, four N=16 token
+tiles. Softmax is esimd::exp on 16-wide chunks; P stored as fp16(exp/L).
+PV is xmx::dpas<8,8,float> on nibbles unpacked in registers (low nibble = even
+col) into two N=16 panels per 32 columns. Invalid V tokens stay zero.
+XF=296 MODE 0 block_load; XF=808 (296|512) MODE 1 load_2d.
+Lib target: mp-libs/libxe2_kv_tI1d_jit.so (does not replace libxe2_kv_tI1_jit.so).
