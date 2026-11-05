@@ -49,7 +49,7 @@ errf = tempfile.TemporaryFile(mode="w+"); saved = os.dup(2); os.dup2(errf.fileno
 def log(x): os.write(saved, (x + "\n").encode())
 BASE_ENV = {k: os.environ.get(k) for k in ("XE2_KV_COMPACT_SLM", "XE2_KV_S2_NSG_VERIFY")}
 def set_extra(extra):
-    for k in ("XE2_KV_TEAM_MODE", "XE2_KV_REUSE_VAR"): os.environ.pop(k, None)
+    for k in ("XE2_KV_TEAM_MODE", "XE2_KV_REUSE_VAR", "XE2_KV_PARTIAL_I8", "XE2_KV_S2_FUSE", "XE2_KV_FUSE_STUB"): os.environ.pop(k, None)
     for k, val in BASE_ENV.items():
         if val is None: os.environ.pop(k, None)
         else: os.environ[k] = val

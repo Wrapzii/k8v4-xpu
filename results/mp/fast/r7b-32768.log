@@ -1,0 +1,26 @@
+{"round": 0, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 329.9, "s1_us": 201.2, "s2_us": 84.9, "draft_sentinel_us": 663.5, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 0, "name": "cols32", "impl": 2, "vpp": 1, "extra": "XE2_KV_REUSE_VAR=2", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 640.0, "s1_us": 472.0, "s2_us": 118.7, "draft_sentinel_us": 398.0, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 0, "name": "f8c32", "impl": 2, "vpp": 1, "extra": "XE2_KV_S2_FUSE=8+XE2_KV_REUSE_VAR=2", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 440.7, "s1_us": 366.0, "s2_us": 23.9, "draft_sentinel_us": 196.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 7.62939453125e-06, "finite": true}
+{"round": 0, "name": "f16c32", "impl": 2, "vpp": 1, "extra": "XE2_KV_S2_FUSE=16+XE2_KV_REUSE_VAR=2", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 447.2, "s1_us": 387.4, "s2_us": 19.6, "draft_sentinel_us": 191.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 7.62939453125e-06, "finite": true}
+{"round": 0, "name": "f16c32z1", "impl": 2, "vpp": 1, "extra": "XE2_KV_S2_FUSE=16+XE2_KV_REUSE_VAR=2+XE2_KV_FUSE_ZERO_ONCE=1", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 470.2, "s1_us": 384.3, "s2_us": 19.7, "draft_sentinel_us": 192.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 7.62939453125e-06, "finite": true}
+{"round": 0, "name": "f16c32n16", "impl": 2, "vpp": 1, "extra": "XE2_KV_S2_FUSE=16+XE2_KV_REUSE_VAR=2+XE2_KV_S2_NSG_VERIFY=16", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 470.5, "s1_us": 385.4, "s2_us": 26.2, "draft_sentinel_us": 193.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 7.62939453125e-06, "finite": true}
+{"round": 0, "name": "f16c32n32", "impl": 2, "vpp": 1, "extra": "XE2_KV_S2_FUSE=16+XE2_KV_REUSE_VAR=2+XE2_KV_S2_NSG_VERIFY=32", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 466.9, "s1_us": 384.0, "s2_us": 42.4, "draft_sentinel_us": 191.9, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 7.62939453125e-06, "finite": true}
+DROP cols32 best=640.0 base=329.9
+DROP f8c32 best=440.7 base=329.9
+DROP f16c32 best=447.2 base=329.9
+DROP f16c32z1 best=470.2 base=329.9
+DROP f16c32n16 best=470.5 base=329.9
+DROP f16c32n32 best=466.9 base=329.9
+{"round": 1, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 384.3, "s1_us": 246.2, "s2_us": 86.2, "draft_sentinel_us": 194.1, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 2, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 369.9, "s1_us": 231.3, "s2_us": 85.5, "draft_sentinel_us": 186.4, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 3, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 380.3, "s1_us": 243.6, "s2_us": 86.0, "draft_sentinel_us": 192.9, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 4, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 384.3, "s1_us": 243.4, "s2_us": 86.2, "draft_sentinel_us": 194.0, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+{"round": 5, "name": "p1", "impl": 2, "vpp": 1, "extra": "", "ctx": 32768, "q_len": 7, "batch": 1, "p50_us": 498.9, "s1_us": 317.0, "s2_us": 91.8, "draft_sentinel_us": 253.8, "idle_gate": true, "vllm_running_before": 0.0, "vllm_running_after": 0.0, "maxabs_vs_P1": 0.0, "finite": true}
+SUMMARY
+p1       n=6 best=329.9 (s1 201.2 / s2 84.9) median=382.3 x1.000 vs p1 draft_at_best=663.5
+cols32   n=1 best=640.0 (s1 472.0 / s2 118.7) median=640.0 x0.515 vs p1 draft_at_best=398.0
+f8c32    n=1 best=440.7 (s1 366.0 / s2 23.9) median=440.7 x0.749 vs p1 draft_at_best=196.8
+f16c32   n=1 best=447.2 (s1 387.4 / s2 19.6) median=447.2 x0.738 vs p1 draft_at_best=191.8
+f16c32z1 n=1 best=470.2 (s1 384.3 / s2 19.7) median=470.2 x0.702 vs p1 draft_at_best=192.8
+f16c32n16 n=1 best=470.5 (s1 385.4 / s2 26.2) median=470.5 x0.701 vs p1 draft_at_best=193.8
+f16c32n32 n=1 best=466.9 (s1 384.0 / s2 42.4) median=466.9 x0.707 vs p1 draft_at_best=191.9
