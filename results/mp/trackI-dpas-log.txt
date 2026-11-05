@@ -81,5 +81,14 @@ sentinel of ~3 ms and is discarded. Attempt 3 was fully dirty (sentinels
 
 tI1g: MODE 3 QK now load_2d's the 8x32 Q tile and issues the next Q and K
 tile before dpas (16-token steps). Compiled libxe2_kv_tI1g_jit.so
-COMPILE_RC 0. 2048 bench (lo, MODE 2, MODE 3) started after tI1f. Not
-measured yet.
+COMPILE_RC 0. 2048 bench (lo, MODE 2, MODE 3) is in flight. Not measured yet.
+
+tI1h compiled COMPILE_RC 0 to libxe2_kv_tI1h_jit.so. Unmeasured, queued
+behind tI1g.
+MODE 4 (XF=2344 = 296|2048): SLM scores. Q stays 8 block_loads. K is one
+transposed uint32 load_2d of 16 tokens x 8 dwords, which is the int8 VNNI
+tile with no software shuffle. Two N=16 tiles share that Q. V is the MODE 2
+per-token block_load dequant.
+MODE 5 (XF=6440 = 2344|4096): same QK. V is one load_2d of the packed bytes
+plus a gather of the per-token scale and zero, then branchless dequant.
+Invalid tokens force scale=zero=0 so a NaN scale cannot poison PV.
