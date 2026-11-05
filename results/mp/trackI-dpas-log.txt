@@ -64,4 +64,22 @@ Step 3: MODE 2/3 (XF&1024) keep the 64-wide scores and P in per-thread SLM
 dpas. Masked lanes use a simd compare. GRF-256 property is still on.
 XF=1320 is MODE 2 (block_load), XF=1832 is MODE 3 (load_2d K and V).
 Compiled to libxe2_kv_tI1f_jit.so (COMPILE_RC 0). 2048 bench is in flight
-(lo, s0, s2). A load_2d of the 8x32 Q tile is in the source and not called.
+(lo, s0, s2).
+
+tI1f finished (gpubench exit 4, CI containers visible; math kept).
+Attempt 1 s0 (MODE 2, harness accepted the retry; before-sentinel 128):
+  p50 263.1  s1 174.0  s2 25.5  maxabs 7.63e-6  finite
+s2 of that row is above the clean lo s2 of ~17, and lo in the same attempt
+was dirty (sentinel 360, s2 75, vllm_running_after 1). s1 174 is below
+tI1d's clean 263. Best MODE 2 sample so far. Not a paired win.
+Attempt 2 had a clean lo (p50 120.3, s1 41.5, s2 16.9, sentinel 129.4).
+Its s0 row is slower (p50 429.6, s1 328.8, s2 38.2, sentinel 117.5) and is
+not used in place of the 174 us sample. MODE 3 (non-pipelined load_2d K+V)
+matched maxabs 7.63e-6 on every attempt; every timing row had s2 ~1100 or a
+sentinel of ~3 ms and is discarded. Attempt 3 was fully dirty (sentinels
+~3 ms, s2 ~1100) including lo.
+
+tI1g: MODE 3 QK now load_2d's the 8x32 Q tile and issues the next Q and K
+tile before dpas (16-token steps). Compiled libxe2_kv_tI1g_jit.so
+COMPILE_RC 0. 2048 bench (lo, MODE 2, MODE 3) started after tI1f. Not
+measured yet.
