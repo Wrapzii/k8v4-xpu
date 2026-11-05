@@ -683,6 +683,185 @@ class FrozenGPTQSwift:
         self.captures = captures
         return captures
 
+
+    def _replace_linears_with_gptq_xpu(self, layer, layer_idx: int, device: str) -> None:
+        """Swap GPTQ ``nn.Linear`` modules for ``GPTQLinearXPU`` on ``device``."""
+        from qsa.gptq_xpu import GPTQLinearXPU
+
+        prefix = self._prefix(layer_idx)
+        for qualname, module in list(layer.named_modules()):
+            if not isinstance(module, torch.nn.Linear):
+                continue
+            key = f"{prefix}.{qualname}"
+            qw_key = key + ".qweight" if not key.endswith(".weight") else key.removesuffix(".weight") + ".qweight"
+            # named_modules path for Linear is like "self_attn.q_proj"; param is ".weight"
+            base = f"{prefix}.{qualname}"
+            if not self.index.has(base + ".qweight"):
+                # Dense (unquantized) linear: move existing weight to device.
+                module.weight = torch.nn.Parameter(
+                    module.weight.detach().to(device=device, dtype=torch.float16),
+                    requires_grad=False,
+                )
+                if module.bias is not None:
+                    module.bias = torch.nn.Parameter(
+                        module.bias.detach().to(device=device, dtype=torch.float16),
+                        requires_grad=False,
+                    )
+                continue
+            qweight = self.index.get(base + ".qweight")
+            scales = self.index.get(base + ".scales")
+            qzeros = self.index.get(base + ".qzeros")
+            bias = None
+            if self.index.has(base + ".bias"):
+                bias = self.index.get(base + ".bias")
+            # prefer_int4=True when the native op is registered; else GPU dequant.
+            replacement = GPTQLinearXPU(
+                qweight, scales, qzeros,
+                group_size=self.group_size, bias=bias, device=device, prefer_int4=True,
+            )
+            owner = layer
+            parts = qualname.split(".")
+            for part in parts[:-1]:
+                owner = getattr(owner, part)
+            setattr(owner, parts[-1], replacement)
+
+    def _load_decoder_layer_xpu(self, layer, layer_idx: int, device: str) -> None:
+        """Load norms / dense tensors onto ``device``, then swap GPTQ linears."""
+        prefix = self._prefix(layer_idx)
+        # First assign non-linear parameters (norms, biases, conv, A_log, ...)
+        for qualname, param in list(layer.named_parameters()):
+            key = f"{prefix}.{qualname}"
+            if self.index.has(key):
+                tensor = self.index.get(key).to(device=device)
+                self._assign(layer, qualname, tensor)
+                del tensor
+            elif qualname.endswith(".weight") and self.index.has(key.removesuffix(".weight") + ".qweight"):
+                # Leave placeholder; replaced below.
+                continue
+            else:
+                # Module may create empty weights; try moving existing.
+                try:
+                    self._assign(layer, qualname, param.detach().to(device=device))
+                except Exception:
+                    pass
+        self._replace_linears_with_gptq_xpu(layer, layer_idx, device)
+        layer.to(device)
+
+    def forward_layerwise_xpu(
+        self,
+        input_ids: torch.Tensor,
+        layers: list[int] | None = None,
+        *,
+        block_size: int = 4,
+        end_layer: int | None = None,
+        device: str | None = None,
+    ) -> dict[int, dict]:
+        """Replay decoder layers on XPU with packed int4 GEMM (or GPU dequant fallback)."""
+        from qsa.gptq_xpu import GPTQLinearXPU, dequantize_gptq_linear_device, int4_gemm_available
+
+        device = device or resolve_device()
+        if device != "xpu":
+            raise RuntimeError(f"forward_layerwise_xpu requires xpu, got {device}")
+        wanted = set(self.full_layers if layers is None else layers)
+        if input_ids.ndim == 1:
+            input_ids = input_ids.unsqueeze(0)
+        text = self._load_text_config()
+        text._attn_implementation = "sdpa"
+        use_int4 = True
+        try:
+            # Probe op once
+            _ = torch.ops._xpu_C.int4_gemm_w4a16
+        except Exception as exc:
+            use_int4 = False
+            print(f"[gptq] int4_gemm_w4a16 unavailable ({exc}); GPU dequant fallback", flush=True)
+
+        hidden = self.embed(input_ids).to(device)
+        cos, sin = self.rope(hidden.shape[0], hidden.shape[1], dtype=hidden.dtype)
+        cos = cos.to(device)
+        sin = sin.to(device)
+        seq = hidden.shape[1]
+        # SDPA uses is_causal; pass None mask for full-attn when possible.
+        last = max(wanted) if end_layer is None else end_layer
+        captures: dict[int, dict] = {}
+        for layer_idx in range(last + 1):
+            layer = self._new_decoder_layer(text, layer_idx)
+            if use_int4:
+                self._load_decoder_layer_xpu(layer, layer_idx, device)
+            else:
+                self._load_decoder_layer(layer, layer_idx)
+                layer.to(device)
+                # Re-dequant on device for each GPTQ linear already assigned from CPU path
+                # (_load_decoder_layer dequants on CPU). Move is enough for fallback.
+            if layer_idx in wanted and layer.block_type == "full_attention":
+                attn = layer.self_attn
+
+                def _pre(mod, args, kwargs, layer_idx=layer_idx):
+                    h = kwargs.get("hidden_states", args[0] if args else None)
+                    c, s = kwargs["position_embeddings"]
+                    # Weights may be GPTQLinearXPU (no .weight) — project via forward.
+                    if hasattr(mod.q_proj, "weight"):
+                        q_w, k_w = mod.q_proj.weight, mod.k_proj.weight
+                        packed = project_qk_teacher(
+                            h, q_w, k_w, mod.q_norm.weight, mod.k_norm.weight, c, s,
+                            num_heads=self.num_heads, num_kv_heads=self.num_kv_heads,
+                            head_dim=mod.head_dim, block_size=block_size,
+                            eps=self.rms_eps, scale=mod.scaling,
+                        )
+                    else:
+                        packed = self._project_qk_teacher_module(
+                            h, mod, c, s, block_size=block_size,
+                        )
+                    captures[layer_idx] = self._finalize_capture(packed, layer_idx, "layer-replay-xpu")
+
+                handle = attn.register_forward_pre_hook(_pre, with_kwargs=True)
+            else:
+                handle = None
+            with torch.inference_mode():
+                hidden = layer(
+                    hidden,
+                    position_embeddings=(cos, sin),
+                    attention_mask=None,
+                    position_ids=None,
+                    past_key_values=None,
+                )
+            if handle is not None:
+                handle.remove()
+            finite = bool(torch.isfinite(hidden).all())
+            print(
+                f"[gptq] xpu replay layer {layer_idx} {layer.block_type} "
+                f"finite={finite} mem0={torch.xpu.memory_allocated(0)/2**20:.0f}MiB",
+                flush=True,
+            )
+            if not finite:
+                raise RuntimeError(f"non-finite hidden after xpu layer {layer_idx}")
+            # Free layer weights before next
+            del layer
+            gc.collect()
+            torch.xpu.empty_cache()
+        self.captures = captures
+        return captures
+
+    def _project_qk_teacher_module(self, hidden, attn_mod, cos, sin, *, block_size: int) -> dict:
+        """Q/K teacher when ``q_proj``/``k_proj`` are ``GPTQLinearXPU`` (no ``.weight``)."""
+        b, t, _ = hidden.shape
+        q_lin = attn_mod.q_proj(hidden)
+        q, _gate = q_lin.view(b, t, self.num_heads, self.head_dim * 2).chunk(2, dim=-1)
+        q = _zero_centered_rms(q, attn_mod.q_norm.weight, self.rms_eps).transpose(1, 2)
+        k = attn_mod.k_proj(hidden).view(b, t, self.num_kv_heads, self.head_dim)
+        k = _zero_centered_rms(k, attn_mod.k_norm.weight, self.rms_eps).transpose(1, 2)
+        q, k = apply_partial_rope(q, k, cos, sin)
+        groups = self.num_heads // self.num_kv_heads
+        if groups > 1:
+            k = k.repeat_interleave(groups, dim=1)
+        target, valid = block_teacher_from_qk(q, k, block_size, scale=self.head_dim ** -0.5)
+        return {
+            "hidden_pre_attn": hidden.detach(),
+            "cos": cos.detach(),
+            "sin": sin.detach(),
+            "block_teacher": target.detach(),
+            "valid": valid.detach(),
+        }
+
     def capture(
         self,
         input_ids: torch.Tensor,
@@ -699,6 +878,18 @@ class FrozenGPTQSwift:
             return self.forward_hooks(input_ids, layers, block_size=block_size)
         if mode == "minimal":
             return self.forward_minimal(input_ids, layers, block_size=block_size)
+        # Prefer XPU int4 GEMM replay when the accelerator is free.
+        if mode in {"auto", "layer"} and resolve_device() == "xpu":
+            try:
+                return self.forward_layerwise_xpu(
+                    input_ids, layers, block_size=block_size, end_layer=end_layer,
+                )
+            except Exception as exc:
+                self.replay_error = f"xpu:{type(exc).__name__}: {exc}"
+                print(f"[gptq] xpu layer replay failed ({self.replay_error}); CPU fallback", flush=True)
+                if mode == "layer":
+                    # Still try CPU layer path before giving up when mode=layer was forced
+                    pass
         try:
             return self.forward_layerwise(
                 input_ids, layers, block_size=block_size, end_layer=end_layer,
