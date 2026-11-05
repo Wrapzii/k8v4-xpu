@@ -31,3 +31,7 @@
 - A query still inside the block budget does not score and stays on dense K8/V4. One block past the budget is scored, because forcing the own block back in can restore a full causal set.
 - Projection, norms, pooling, and RoPE stay fp64 on CPU. Off CPU they run in fp32.
 - CPU tests in an ephemeral container, no GPU, image unchanged: 26 tests OK, 2 device tests skipped. No production kernel, container, or image changes.
+
+2026-11-05T20:16Z qsa: load indexer tensors from an HF directory
+- K8V4_QSA_WEIGHTS may be a directory. model.safetensors.index.json selects the shards that name an indexer tensor. Each shard is opened with safe_open and only _qsa_indexer keys are read, so a full dense checkpoint is not materialized.
+- A folder with no indexer tensors is "no bank" and the layer stays on dense K8/V4. A layer split across two shards still loads. CPU test, no GPU. No production kernel, container, or image changes.

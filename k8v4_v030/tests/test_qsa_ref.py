@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
+import tempfile
 import unittest
 
 import torch
@@ -31,7 +33,7 @@ from k8v4_v030.qsa_ref import (
     visible_tokens,
 )
 from k8v4_v030.qsa_rope import mrope, mrope_row, pair_axis
-from k8v4_v030.qsa_weights import IndexerBank, expected_full_numel, make_random_bank
+from k8v4_v030.qsa_weights import IndexerBank, expected_full_numel, load_bank_file, make_random_bank
 
 
 class FlagTest(unittest.TestCase):
@@ -236,6 +238,54 @@ class StateDictTest(unittest.TestCase):
         del state["layers.7._qsa_indexer.k_block_norm"]
         with self.assertRaisesRegex(ValueError, "missing"):
             IndexerBank.from_state_dict(state, hyper)
+
+    def test_directory_reads_indexer_shards_and_skips_dense_weights(self):
+        from safetensors.torch import save_file
+
+        hyper = QsaHyper()
+        weights = make_random_bank(5, layers=(3,), hyper=hyper).get(3)
+        assert weights is not None
+        with tempfile.TemporaryDirectory() as folder:
+            save_file(
+                {
+                    "model.layers.3._qsa_indexer.q_proj.weight": weights.q_proj,
+                    "model.layers.0.mlp.up_proj.weight": torch.zeros(8, 8),
+                },
+                os.path.join(folder, "model-00001-of-00002.safetensors"),
+            )
+            save_file(
+                {
+                    "model.layers.3._qsa_indexer.k_proj.weight": weights.k_proj,
+                    "model.layers.3._qsa_indexer.q_norm": weights.q_norm,
+                    "model.layers.3._qsa_indexer.k_norm": weights.k_norm,
+                    "model.layers.3._qsa_indexer.k_block_norm": weights.k_block_norm,
+                },
+                os.path.join(folder, "model-00002-of-00002.safetensors"),
+            )
+            index = {
+                "weight_map": {
+                    "model.layers.3._qsa_indexer.q_proj.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.0.mlp.up_proj.weight": "model-00001-of-00002.safetensors",
+                    "model.layers.3._qsa_indexer.k_proj.weight": "model-00002-of-00002.safetensors",
+                    "model.layers.3._qsa_indexer.q_norm": "model-00002-of-00002.safetensors",
+                    "model.layers.3._qsa_indexer.k_norm": "model-00002-of-00002.safetensors",
+                    "model.layers.3._qsa_indexer.k_block_norm": "model-00002-of-00002.safetensors",
+                }
+            }
+            with open(os.path.join(folder, "model.safetensors.index.json"), "w", encoding="utf-8") as handle:
+                json.dump(index, handle)
+            loaded = load_bank_file(folder, hyper)
+            assert loaded is not None
+            got = loaded.get(3)
+            assert got is not None
+            self.assertTrue(torch.equal(got.q_proj, weights.q_proj))
+            self.assertTrue(torch.equal(got.k_block_norm, weights.k_block_norm))
+            self.assertEqual(got.numel(), weights.numel())
+            empty = tempfile.mkdtemp()
+            try:
+                self.assertIsNone(load_bank_file(empty, hyper))
+            finally:
+                os.rmdir(empty)
 
 
 if __name__ == "__main__":

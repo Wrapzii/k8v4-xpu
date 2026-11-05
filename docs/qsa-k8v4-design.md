@@ -79,7 +79,7 @@ The bank is sized from the live K8V4 cache tensor on first use (`num_blocks` and
 
 `Xe2K8V4Impl.forward` receives Q, K, V after projection. The indexer needs the pre-projection hidden state. With `K8V4_QSA=1`, the backend wraps the loaded Qwen full-attention module (`forward` that takes `hidden_states`) and stashes `(layer_idx, hidden, positions)` for the matching backend call. Layer index is parsed from `layers.{i}.` on the module prefix. Gated DeltaNet modules are not wrapped. If the stash is empty or the layer has no weights, forward falls through to dense K8V4.
 
-Weights load from `K8V4_QSA_WEIGHTS` (a torch state dict or a safetensors file). Zero indexer tensors means "no bank": dense. A partial layer (some of the five tensors missing) is an error. Tests build a bank in memory with `set_bank`.
+Weights load from `K8V4_QSA_WEIGHTS`: a torch state dict, one safetensors file, or an HF directory. A directory reads only `_qsa_indexer` tensors, using `model.safetensors.index.json` when it is present, so the dense checkpoint is not pulled into memory. Zero indexer tensors means "no bank": dense. A partial layer (some of the five tensors missing) is an error. Tests build a bank in memory with `set_bank`.
 
 ## Kernels
 

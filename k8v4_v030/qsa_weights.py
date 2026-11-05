@@ -19,6 +19,8 @@ RMSNorm multipliers. Do not add the ggml ``+ 1``.
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from dataclasses import dataclass
 
@@ -169,12 +171,64 @@ def reset_bank() -> None:
     set_bank(None)
 
 
-def load_state_dict_file(path: str) -> dict[str, torch.Tensor]:
-    """Load a torch save or a safetensors file. The caller owns the path."""
-    if path.endswith(".safetensors"):
-        from safetensors.torch import load_file
+def _is_indexer_name(name: str) -> bool:
+    return _LAYER.search(str(name)) is not None
 
-        return dict(load_file(path))
+
+def _read_indexer_safetensors(path: str) -> dict[str, torch.Tensor]:
+    """Read only indexer tensors. Other keys in the shard stay on disk."""
+    from safetensors import safe_open
+
+    found: dict[str, torch.Tensor] = {}
+    with safe_open(path, framework="pt", device="cpu") as handle:
+        for name in handle.keys():
+            if _is_indexer_name(name):
+                found[str(name)] = handle.get_tensor(name)
+    return found
+
+
+def _indexer_shards(directory: str) -> list[str]:
+    """Safetensors files that can hold indexer weights.
+
+    An HF ``model.safetensors.index.json`` limits the read to shards named
+    by an indexer key. Without an index, every ``*.safetensors`` file in the
+    directory is opened and filtered by tensor name.
+    """
+    index_path = os.path.join(directory, "model.safetensors.index.json")
+    if os.path.isfile(index_path):
+        with open(index_path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        weight_map = payload.get("weight_map")
+        if not isinstance(weight_map, dict):
+            raise ValueError("indexer index %s has no weight_map" % index_path)
+        names = sorted({str(shard) for name, shard in weight_map.items() if _is_indexer_name(str(name))})
+        return [os.path.join(directory, name) for name in names]
+    names = sorted(
+        entry for entry in os.listdir(directory) if entry.endswith(".safetensors")
+    )
+    return [os.path.join(directory, name) for name in names]
+
+
+def load_state_dict_file(path: str) -> dict[str, torch.Tensor]:
+    """Load indexer tensors from a torch save, a safetensors file, or a directory.
+
+    A directory is an HF checkpoint folder. Only ``_qsa_indexer`` tensors are
+    read, so pointing this at a full model does not pull the dense weights
+    into memory. A folder with none of those tensors yields an empty dict,
+    which the bank treats as "no indexer".
+    """
+    if os.path.isdir(path):
+        found: dict[str, torch.Tensor] = {}
+        for shard in _indexer_shards(path):
+            if not os.path.isfile(shard):
+                raise FileNotFoundError(shard)
+            for name, tensor in _read_indexer_safetensors(shard).items():
+                if name in found:
+                    raise ValueError("duplicate indexer tensor %s" % name)
+                found[name] = tensor
+        return found
+    if path.endswith(".safetensors"):
+        return _read_indexer_safetensors(path)
     loaded = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(loaded, dict):
         raise ValueError("indexer checkpoint is not a state dict")
