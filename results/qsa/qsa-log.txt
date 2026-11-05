@@ -1,0 +1,6 @@
+2026-11-05T18:10Z qsa: design
+- Reference clone is a shallow read-only checkout of kuraneko1/Qwen3.8-27B-QSA-llama.cpp (commit 864934c).
+- K8V4 lives in k8v4_v030/. Dense page layout stays 396 bytes/head. QSA cache is a sibling of the block table, not a wider cell, so the production kernel stride stays valid.
+- Algorithm taken from qwen35.cpp build_qsa_mask and qwen4exp.cpp build_qsa_blk_select / build_attn_qsa_blk. Fast path: mean-pool 4 raw keys, block RMSNorm, MRoPE at the first token, sum of ReLU dots over 4 heads, top 512 blocks plus the own block. No 1/sqrt(128) on that path.
+- HF tensor names: layers.{i}._qsa_indexer.{q_proj.weight,k_proj.weight,q_norm,k_norm,k_block_norm}. 16 layers * 3,277,184 params = 52,434,944.
+- Wrote docs/qsa-k8v4-design.md. Flag K8V4_QSA defaults off. No production kernel, container, or image changes.
