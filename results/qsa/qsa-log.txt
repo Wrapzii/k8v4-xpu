@@ -24,3 +24,10 @@
 - CPU, same ephemeral container, no GPU: 23 tests OK, 2 device tests skipped. A CPU attend does not open a missing library. customize_spec stays 396 bytes per head.
 - GPU through bench-hold, no model loaded, serving container stayed up. Score and top-k match the reference, and ties keep the lower block id. Sparse attention on packed pages matches the Python page reader. Largest absolute gap was 1.2e-7 for fp32 and 2.5e-4 for fp16, across decode, a q_len 7 verifier tile, a 4-query subset, 2 and 4 KV heads, and a 2-page block table. ESIMD scores match the same reference within 1e-4. No speedup was measured.
 - No production kernel, container, or image changes.
+
+2026-11-05T20:13Z qsa: gather pooled blocks and call the XPU score and top-k
+- The forward gathers one pooled row per logical block through the block table, including a swapped table and a block table whose entry covers two kernel pages.
+- On XPU that matrix is scored with qsa_score and ranked with qsa_topk. CPU scoring stays on the fp64 reference, one query at a time, so the existing dense-match tests stay bit-exact.
+- A query still inside the block budget does not score and stays on dense K8/V4. One block past the budget is scored, because forcing the own block back in can restore a full causal set.
+- Projection, norms, pooling, and RoPE stay fp64 on CPU. Off CPU they run in fp32.
+- CPU tests in an ephemeral container, no GPU, image unchanged: 26 tests OK, 2 device tests skipped. No production kernel, container, or image changes.

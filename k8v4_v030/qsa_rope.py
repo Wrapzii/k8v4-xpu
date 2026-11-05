@@ -104,13 +104,15 @@ def mrope(
         dtype=torch.int64,
         device=values.device,
     )
+    # CPU stays on fp64 so the reference tests are exact. Device RoPE is fp32.
+    work = torch.float64 if values.device.type == "cpu" else torch.float32
     scale = theta_scale(n_rot, theta)
-    freq_scale = torch.tensor([scale ** p for p in range(half)], dtype=torch.float64)
-    chosen = pos4.to(torch.float64)[..., axes]
+    freq_scale = torch.tensor([scale ** p for p in range(half)], dtype=work)
+    chosen = pos4.to(work)[..., axes]
     freq = chosen * freq_scale.to(chosen.device)
     cos_t = torch.cos(freq)
     sin_t = torch.sin(freq)
-    x = values.to(torch.float64)
+    x = values.to(work)
     x0 = x[..., :half]
     x1 = x[..., half:n_rot]
     out = x.clone()

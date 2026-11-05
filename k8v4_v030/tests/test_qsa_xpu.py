@@ -19,11 +19,13 @@ from k8v4_v030.paged import write_token
 from k8v4_v030.qsa_ops import (
     attend_selected,
     causal_visible_rows,
+    choose_blocks,
     library_path,
+    mask_query_scores,
     score_pooled,
     topk_ids,
 )
-from k8v4_v030.qsa_ref import score_blocks
+from k8v4_v030.qsa_ref import QsaHyper, score_blocks, select_blocks
 
 
 def _cache(hkv: int, key, value):
@@ -75,6 +77,32 @@ class CpuContractTest(unittest.TestCase):
         self.assertEqual(got.tolist(), [[2, 0], [0, 1]])
         full = topk_ids(scores[:1, :3], 3)
         self.assertEqual(full.tolist(), [[2, 0, 1]])
+
+    def test_masked_scores_rank_like_select_blocks(self):
+        hyper = QsaHyper(top_tokens=8)  # two blocks
+        raw = torch.tensor(
+            [
+                [0.2, 0.2, 5.0, 0.0],
+                [1.0, 4.0, 4.0, 0.5],
+            ],
+            dtype=torch.float64,
+        )
+        valid = torch.tensor([True, False, True, True])
+        # Query 0 sees one complete block. Query 1 sees three, past the budget.
+        masked = mask_query_scores(raw, [1, 3], valid)
+        self.assertTrue(torch.isneginf(masked[0, 1:]).all())
+        self.assertTrue(torch.isneginf(masked[1, 1]))
+        self.assertTrue(torch.isneginf(masked[1, 3]))
+        chosen, width = choose_blocks(masked[1], 3, cell=11, hyper=hyper, force_all=False)
+        expect, expect_width = select_blocks(masked[1], 11, hyper, force_all=False)
+        self.assertEqual((chosen, width), (expect, expect_width))
+        # Block 1 is invalid, so the two finite blocks in range are 0 and 2.
+        # The budget keeps both. The own block is 2. Width is 11 % 4 + 1.
+        self.assertEqual(chosen, [0, 2])
+        self.assertEqual(width, 4)
+        short, short_width = choose_blocks(None, 1, cell=3, hyper=hyper, force_all=False)
+        self.assertEqual(short, [0])
+        self.assertEqual(short_width, 4)
 
 
 def _xpu_available() -> bool:

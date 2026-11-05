@@ -55,6 +55,8 @@ Selection:
 
 `K8V4_QSA_FORCE_ALL=1` skips the top-k and keeps every causal block. That mode is the dense-match test of the sparse kernel.
 
+A query whose complete-block count is at most the budget is already dense, so the forward does not score it. One step past the budget can still come back to a full causal set: top-k drops one block and the own-block rule puts that block back when it was the one dropped. The forward scores that case and, if every query's token list is the full causal range, returns to the dense kernel.
+
 Short contexts and missing weights do not call the sparse kernel. They call the existing dense op, including the packed MTP verifier (`q_len <= 10`, MTP6 uses 7) and the eager / oneDNN chunked prefill.
 
 ## Indexer cache and prefix blocks
@@ -82,6 +84,8 @@ Weights load from `K8V4_QSA_WEIGHTS` (a torch state dict or a safetensors file).
 ## Kernels
 
 New library `libxe2_qsa.so`, built by `k8v4_v030/compile_qsa.sh` into `/mnt/hdd-500gb/model-validation/qsa-k8v4/`. It does not replace `libxe2_kv.so`. `XE2_QSA_LIB` overrides the path. If the library is absent, or the tensors are on CPU, the same op contract runs in Python. A CPU call does not load the library.
+
+The eager XPU forward gathers one pooled row per logical block through the block table, then calls `qsa_score` and `qsa_topk`. CPU scoring stays on the fp64 reference, one query at a time, so a full allow-set still matches the quantized oracle bit for bit. Projection, RMSNorm, pooling, and RoPE use that same fp64 reference on CPU. On XPU they run in fp32, because the Arc has no fast fp64. An XPU graph capture still takes the dense kernel: the plan reads sequence lengths on the host, and the indexer write is a Python loop.
 
 Three device ops, registered on `torch.ops.xe2_qsa`:
 

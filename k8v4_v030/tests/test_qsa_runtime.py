@@ -228,6 +228,9 @@ class RuntimeTest(unittest.TestCase):
         self._continuation(q_len=1, hist=16, hkv=2, seed=8)
         reset_caches()
         reset_bank()
+        self._crossing_prefill()
+        reset_caches()
+        reset_bank()
         self._continuation(q_len=7, hist=13, hkv=2, seed=9)
         reset_caches()
         reset_bank()
@@ -300,6 +303,44 @@ class RuntimeTest(unittest.TestCase):
         note_hidden(3, hidden_all[hist:], positions)
         self.assertTrue(try_sparse_forward(impl, layer, query, cache, meta, again))
         self.assertTrue(torch.equal(again, output))
+
+    def _crossing_prefill(self):
+        """One chunk where early queries are inside the budget and the last is not.
+
+        The last query has four complete blocks and a budget of two, so forcing
+        its own block back in still leaves a block out. Early queries stay dense.
+        """
+        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
+
+        hkv = 2
+        impl = _Impl(hkv)
+        layer = _Layer("model.layers.3.self_attn.attn")
+        weights = make_random_bank(11, layers=(3,)).get(3)
+        assert weights is not None
+        set_bank(make_random_bank(11, layers=(3,)))
+        seq_len = 16
+        os.environ["K8V4_QSA"] = "1"
+        os.environ["K8V4_QSA_TOP_TOKENS"] = "8"
+        key = deterministic_rows(seq_len, hkv, 60)
+        value = deterministic_rows(seq_len, hkv, 61)
+        cache = _page(hkv, key, value)
+        query = _rows(seq_len, impl.layout.hq, 62)
+        hidden = torch.randn(seq_len, HIDDEN)
+        positions = torch.arange(seq_len)
+        meta = _Meta(seq_len, seq_len, hkv, torch.arange(seq_len))
+        output = torch.zeros_like(query)
+        note_hidden(3, hidden, positions)
+        self.assertTrue(try_sparse_forward(impl, layer, query, cache, meta, output))
+        stored = all_banks()[0].layers[3]
+        visible = _expected(
+            stored, weights, hidden, positions, seq_len, seq_len, meta.block_table[0], 1
+        )
+        self.assertEqual(visible[0], [0])
+        self.assertEqual(visible[7], list(range(8)))
+        self.assertNotEqual(visible[-1], list(range(seq_len)))
+        views = bind_regions(cache, impl.layout)
+        expect = attend_selected(query, views, meta.block_table[0], seq_len, visible, 1)
+        self.assertTrue(torch.equal(output, expect))
 
     def _force_all(self, hkv: int):
         from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward

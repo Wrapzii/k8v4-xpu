@@ -14,7 +14,7 @@ import torch
 
 from k8v4_v030.layout import builtin_q_end
 from k8v4_v030.qsa_quant_attn import allow_tokens, sparse_from_views
-from k8v4_v030.qsa_ref import score_blocks, topk_block_ids
+from k8v4_v030.qsa_ref import QsaHyper, finish_selection, score_blocks, topk_block_ids
 
 _LOADED: str | None = None
 _DEFAULT_LIB = "/mnt/hdd-500gb/model-validation/qsa-k8v4/libxe2_qsa.so"
@@ -94,6 +94,61 @@ def score_pooled(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor:
         ops().qsa_score(q, k, scores)
         return scores
     return score_blocks(query, pooled)
+
+
+def mask_query_scores(
+    scores: torch.Tensor,
+    counts: list[int],
+    valid: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """``-inf`` past each query's complete-block count, and on invalid blocks.
+
+    ``scores`` is ``[queries, blocks]``. ``valid`` is ``[blocks]`` when a
+    pooled row exists. A query with ``count`` complete blocks must not rank
+    a later column, including one that belongs to a longer query in the batch.
+    """
+    if scores.ndim != 2:
+        raise ValueError("scores are [queries, blocks]")
+    if len(counts) != int(scores.shape[0]):
+        raise ValueError("one complete-block count per query")
+    out = scores
+    if valid is not None:
+        if int(valid.shape[0]) != int(scores.shape[1]):
+            raise ValueError("validity width")
+        mask = valid.to(device=out.device, dtype=torch.bool)
+        out = out.masked_fill(~mask.unsqueeze(0), float("-inf"))
+    if int(scores.shape[1]) == 0 or not counts:
+        return out
+    columns = torch.arange(int(scores.shape[1]), device=out.device)
+    limit = torch.tensor(list(counts), dtype=torch.int64, device=out.device).unsqueeze(1)
+    return out.masked_fill(columns.unsqueeze(0) >= limit, float("-inf"))
+
+
+def choose_blocks(
+    row: torch.Tensor | None,
+    count: int,
+    cell: int,
+    hyper: QsaHyper,
+    force_all: bool,
+    device_ids: list[int] | None = None,
+) -> tuple[list[int], int]:
+    """Block ids for one query.
+
+    Inside the budget, and under ``force_all``, every complete block is kept.
+    Past the budget, ``device_ids`` is the top-k kernel's row (best first).
+    Otherwise the fp64 reference ranks ``row``. The own block is added either way.
+    """
+    count = int(count)
+    if force_all or count <= hyper.n_sel:
+        return finish_selection(list(range(count)), cell, hyper)
+    if device_ids is not None:
+        chosen = [int(block) for block in device_ids if 0 <= int(block) < count]
+        return finish_selection(chosen, cell, hyper)
+    if row is None:
+        raise RuntimeError("QSA has no scores for a query past the block budget")
+    if int(row.shape[0]) < count:
+        raise RuntimeError("scores cover %d blocks, query needs %d" % (int(row.shape[0]), count))
+    return finish_selection(topk_block_ids(row[:count], hyper.n_sel), cell, hyper)
 
 
 def topk_ids(scores: torch.Tensor, k: int) -> torch.Tensor:

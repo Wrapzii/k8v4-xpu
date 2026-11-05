@@ -111,22 +111,68 @@ class QsaBlockCache:
             self.pooled[dm] = self.pooled[sm]
             self.pool_valid[dm] = self.pool_valid[sm]
 
-    def logical_slot(self, block_row: torch.Tensor, token: int, pages_per_block: int) -> int:
-        """Physical slot of one logical token. Same map as the K8/V4 page table."""
-        token = int(token)
-        logical_page = token // PAGE
-        offset = token % PAGE
+    def logical_slots(
+        self,
+        block_row: torch.Tensor,
+        tokens: torch.Tensor,
+        pages_per_block: int,
+    ) -> torch.Tensor:
+        """Physical slots of logical tokens. Same map as the K8/V4 page table.
+
+        ``block_row`` is one request's block table. A manager entry covers
+        ``pages_per_block`` kernel pages. The indexer cache is addressed in
+        tokens, with ``block_size`` tokens per physical block.
+        """
+        tokens = tokens.to(dtype=torch.int64, device=self.raw.device)
+        row = block_row.to(dtype=torch.int64, device=self.raw.device).reshape(-1)
+        if tokens.ndim != 1:
+            raise ValueError("tokens must be a 1-D list of logical cells")
         ratio = int(pages_per_block)
         if ratio < 1:
             raise ValueError("pages_per_block")
+        logical_page = torch.div(tokens, PAGE, rounding_mode="floor")
+        offset = tokens.remainder(PAGE)
         if ratio == 1:
-            page = int(block_row[logical_page])
+            page = row[logical_page]
         else:
-            page = int(block_row[logical_page // ratio]) * ratio + (logical_page % ratio)
+            entry = torch.div(logical_page, ratio, rounding_mode="floor")
+            sub = logical_page.remainder(ratio)
+            page = row[entry] * ratio + sub
         pages_in_block = self.block_size // PAGE
-        block_id = page // pages_in_block
-        page_in_block = page % pages_in_block
+        block_id = torch.div(page, pages_in_block, rounding_mode="floor")
+        page_in_block = page.remainder(pages_in_block)
         return block_id * self.block_size + page_in_block * PAGE + offset
+
+    def logical_slot(self, block_row: torch.Tensor, token: int, pages_per_block: int) -> int:
+        """Physical slot of one logical token."""
+        slots = self.logical_slots(
+            block_row,
+            torch.tensor([int(token)], dtype=torch.int64),
+            pages_per_block,
+        )
+        return int(slots[0])
+
+    def gather_blocks(
+        self,
+        block_row: torch.Tensor,
+        count: int,
+        pages_per_block: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Pooled keys for logical blocks ``[0, count)`` and a validity mask.
+
+        Row ``b`` is the micro-block that starts at logical token ``b * ratio``.
+        A micro-block that is not complete is invalid. Callers must not treat
+        an invalid row as a score of zero: the stored vector is uninitialized
+        from the indexer's point of view.
+        """
+        count = int(count)
+        if count < 1:
+            empty = self.pooled[:0]
+            return empty, self.pool_valid[:0]
+        tokens = torch.arange(count, dtype=torch.int64) * self.hyper.ratio
+        slots = self.logical_slots(block_row, tokens, pages_per_block)
+        micros = torch.div(slots, self.hyper.ratio, rounding_mode="floor")
+        return self.pooled.index_select(0, micros), self.pool_valid.index_select(0, micros)
 
     def pooled_row(self, block_row: torch.Tensor, cell: int, pages_per_block: int) -> torch.Tensor | None:
         """Pooled key of the micro-block that contains ``cell``, or None if it is open."""

@@ -53,6 +53,45 @@ class CacheTest(unittest.TestCase):
         self.assertTrue(torch.allclose(copied, expect))
         self.assertIsNone(cache.pooled_row(row, 4, pages_per_block=1))
 
+    def test_gather_follows_a_swapped_block_table(self):
+        cache = QsaBlockCache(num_blocks=4, block_size=64)
+        norm = torch.ones(cache.hyper.dim)
+        # Physical block 2 holds a distinctive pooled micro-block.
+        for slot in range(128, 132):
+            key = torch.full((cache.hyper.dim,), float(slot - 127))
+            cache.write_token(slot, key, torch.tensor([slot, slot, 0, 0]), norm)
+        self.assertTrue(bool(cache.pool_valid[128 // cache.hyper.ratio]))
+        swapped = torch.tensor([2, 0, 1, 3], dtype=torch.int32)
+        gathered, valid = cache.gather_blocks(swapped, count=1, pages_per_block=1)
+        direct = cache.pooled_row(swapped, 0, pages_per_block=1)
+        self.assertIsNotNone(direct)
+        self.assertTrue(bool(valid[0]))
+        self.assertTrue(torch.equal(gathered[0], direct))
+        # Identity would read physical slot 0, which was never written.
+        identity = torch.arange(4, dtype=torch.int32)
+        self.assertIsNone(cache.pooled_row(identity, 0, pages_per_block=1))
+        for token in (0, 64, 128):
+            vector = cache.logical_slots(swapped, torch.tensor([token]), 1)
+            self.assertEqual(int(vector[0]), cache.logical_slot(swapped, token, 1))
+
+    def test_pages_per_block_addresses_the_second_kernel_page(self):
+        cache = QsaBlockCache(num_blocks=4, block_size=128)
+        norm = torch.ones(cache.hyper.dim)
+        # Manager entry 3 covers kernel pages 6 and 7. Token 64 of that entry
+        # is the second page: physical slot 3 * 128 + 64.
+        row = torch.tensor([3, 0, 1, 2], dtype=torch.int32)
+        slot = cache.logical_slot(row, 64, pages_per_block=2)
+        self.assertEqual(slot, 3 * 128 + 64)
+        for offset in range(4):
+            key = torch.full((cache.hyper.dim,), float(offset + 1))
+            cache.write_token(slot + offset, key, torch.zeros(4, dtype=torch.int64), norm)
+        # Logical block 16 starts at token 64.
+        gathered, valid = cache.gather_blocks(row, count=17, pages_per_block=2)
+        self.assertTrue(bool(valid[16]))
+        self.assertFalse(bool(valid[0]))
+        direct = cache.pooled_row(row, 64, pages_per_block=2)
+        self.assertTrue(torch.equal(gathered[16], direct))
+
 
 if __name__ == "__main__":
     unittest.main()
