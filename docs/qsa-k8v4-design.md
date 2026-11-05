@@ -57,7 +57,7 @@ Selection:
 
 `K8V4_QSA_FORCE_ALL=1` skips the top-k and keeps every causal block. That mode is the dense-match test of the sparse kernel.
 
-A query whose complete-block count is at most the budget is already dense, so the forward does not score it. One step past the budget can still come back to a full causal set: top-k drops one block and the own-block rule puts that block back when it was the one dropped. The forward scores that case and, if every query's token list is the full causal range, returns to the dense kernel.
+A query whose complete-block count is at most the budget is already dense, so the forward does not score it. One step past the budget can still come back to a full causal set: top-k drops one block and the own-block rule puts that block back when it was the one dropped. The forward scores that case and, if every query's token list is the full causal range, returns to the dense kernel. A batch may mix the two. Each request uses its own block-table row for the pooled gather and for the sparse read. A request still inside the budget contributes a full causal token list and does not change the other request's selection.
 
 Short contexts and missing weights do not call the sparse kernel. They call the existing dense op, including the packed MTP verifier (`q_len <= 10`, MTP6 uses 7) and the eager / oneDNN chunked prefill.
 
