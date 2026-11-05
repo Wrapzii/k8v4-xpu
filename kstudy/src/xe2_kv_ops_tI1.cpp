@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #include <stdexcept>
 #include <type_traits>
 
@@ -2722,7 +2723,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                 for (int d = 0; d < BK; ++d) acc += static_cast<int32_t>(qrow[d]) * static_cast<int32_t>(krow[d]);
                 const float s = static_cast<float>(acc) * qsc[r] * ksc * INV_SQRT_D;
                 scores[r][t] = s;
-                row_max[r] = std::fmax(row_max[r], s);
+                row_max[r] = ::fmaxf(row_max[r], s);
               }
             }
 #pragma unroll
@@ -2730,7 +2731,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
               if (row0 + r >= q_len * GQA) continue;
               float sm = 0.f;
               for (int t = 0; t < n_valid; ++t) {
-                const float e = expf(scores[r][t] - row_max[r]);
+                const float e = ::expf(scores[r][t] - row_max[r]);
                 scores[r][t] = e;
                 sm += e;
               }
@@ -2761,8 +2762,8 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
 #pragma unroll
                 for (int j = 0; j < 16; ++j) {
                   const std::uint8_t b = raw[j];
-                  vdec[2 * j] = sycl::half((static_cast<float>(b & 0xfu) - v_zero) * v_scale);
-                  vdec[2 * j + 1] = sycl::half((static_cast<float>(b >> 4) - v_zero) * v_scale);
+                  vdec[2 * j] = static_cast<sycl::half>((static_cast<float>(b & 0xfu) - v_zero) * v_scale);
+                  vdec[2 * j + 1] = static_cast<sycl::half>((static_cast<float>(b >> 4) - v_zero) * v_scale);
                 }
 #pragma unroll
                 for (int r = 0; r < TM; ++r) {
@@ -2779,7 +2780,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                 const float inv = row_sum[r] > 0.f ? (1.f / row_sum[r]) : 0.f;
 #pragma unroll
                 for (int c = 0; c < COLS; ++c)
-                  pOh[r * BV + nbase + c] = sycl::half(acc[r][c] * inv);
+                  pOh[r * BV + nbase + c] = static_cast<sycl::half>(acc[r][c] * inv);
               }
             }
           }
@@ -2796,7 +2797,7 @@ static inline void q8_tile_store(sycl::sub_group sg, JM &c, const float (&inv)[T
 #if defined(__SYCL_DEVICE_ONLY__)
   auto w = sycl::ext::oneapi::detail::get_wi_data(sg, c);
 #pragma unroll
-  for (int i = 0; i < TM; ++i) { float e = w[i]; float qv = sycl::rint(e * inv[i]); qv = sycl::fmin(127.f, std::fmax(-127.f, qv));
+  for (int i = 0; i < TM; ++i) { float e = w[i]; float qv = sycl::rint(e * inv[i]); qv = sycl::fmin(127.f, ::fmaxf(-127.f, qv));
     if constexpr (BLK) sg.store(sycl::address_space_cast<sycl::access::address_space::global_space, sycl::access::decorated::yes>(dst + i * BV), static_cast<std::int8_t>(qv));
     else dst[i * BV + lane] = static_cast<std::int8_t>(qv); }
 #else
@@ -2810,7 +2811,7 @@ static inline void q8_tile_store_c8(sycl::sub_group sg, JM &c, const float (&inv
   auto w = sycl::ext::oneapi::detail::get_wi_data(sg, c);
   std::uint64_t pk = 0;
 #pragma unroll
-  for (int i = 0; i < TM; ++i) { float e = w[i]; float qv = sycl::rint(e * inv[i]); qv = sycl::fmin(127.f, std::fmax(-127.f, qv));
+  for (int i = 0; i < TM; ++i) { float e = w[i]; float qv = sycl::rint(e * inv[i]); qv = sycl::fmin(127.f, ::fmaxf(-127.f, qv));
     pk |= static_cast<std::uint64_t>(static_cast<std::uint8_t>(static_cast<std::int8_t>(qv))) << (8 * i); }
   auto *d = reinterpret_cast<std::uint64_t *>(tile_base + static_cast<size_t>(col0) * 8);
   sg.store(sycl::address_space_cast<sycl::access::address_space::global_space, sycl::access::decorated::yes>(d), pk);
@@ -2823,7 +2824,7 @@ static inline void q8_tile_absmax(sycl::sub_group sg, JM &c, float (&am)[TM]) {
 #if defined(__SYCL_DEVICE_ONLY__)
   auto w = sycl::ext::oneapi::detail::get_wi_data(sg, c);
 #pragma unroll
-  for (int i = 0; i < TM; ++i) { float e = w[i]; am[i] = std::fmax(am[i], sycl::fabs(e)); }
+  for (int i = 0; i < TM; ++i) { float e = w[i]; am[i] = ::fmaxf(am[i], sycl::fabs(e)); }
 #else
   std::ignore = sg; std::ignore = c; std::ignore = am;
 #endif
