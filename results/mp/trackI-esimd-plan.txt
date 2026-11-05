@@ -1,0 +1,4 @@
+Phase 2: ESIMD stage-1 rewrite on lo baseline (XF=40).
+Branch k8v4-trackI-esimd off d0b8c37. Kernel kstudy/src/xe2_kv_ops_tI1.cpp
+Correct-first, then optimize. Occupancy: WG=96, 8KB SLM, 128 GRF.
+XF&256 selects ESIMD path; default remains SYCL lo.

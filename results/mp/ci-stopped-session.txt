@@ -74,3 +74,198 @@ docker stop FORGEJO-ACTIONS-TASK-29117_WORKFLOW-69ebc4e5426388e1a730128233af57e8
 2026-11-05T03:00:18Z gpubench: CI containers (2) appeared during run attempt 1 -> contaminated, rerun
 2026-11-05T03:00:39Z gpubench: docker stop FORGEJO-ACTIONS-TASK-29134_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
 2026-11-05T03:00:42Z gpubench: docker stop wrapzii-server-runner
+2026-11-05T12:26:34Z gpubench: CI_HOLD until=1793888794 by=gpubench (2 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T12:39:17Z manual: docker stop bold_herschel (CI/cargo build during trackH; ET=2026-11-05 07:39:17 EST)
+
+## 2026-11-05T12:39:18Z trackH: vLLM busy (2 running) contaminated tH1 b1; killed harness. Also stopped dan-owned ai01-ci-rust docker builds + bold_herschel-like build containers. ET=2026-11-05 07:39:18 EST
+2026-11-05T12:40:20Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29417_WORKFLOW-2b3a8bafc9b5fd7ce8d86612f259cbcd86a1539cc9b15278605631b03f2bef0e_JOB-Sync-PR-prefix-and-labels
+2026-11-05T12:40:31Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29420_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T12:40:42Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29419_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T12:40:52Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29421_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T12:41:03Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29418_WORKFLOW-2b3a8bafc9b5fd7ce8d86612f259cbcd86a1539cc9b15278605631b03f2bef0e_JOB-Sync-PR-prefix-and-labels
+2026-11-05T12:41:14Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29422_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T12:41:25Z wait-idle: docker stop wrapzii-server-runner
+2026-11-05T12:41:35Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29427_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T12:41:45Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29426_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T12:43:31Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29425_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T12:45:01Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29424_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T12:46:19Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29423_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T12:46:58Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29434_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T12:48:06Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29433_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T12:50:15Z wait-idle: docker stop wrapzii-server-runner
+2026-11-05T12:50:26Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29438_WORKFLOW-2b3a8bafc9b5fd7ce8d86612f259cbcd86a1539cc9b15278605631b03f2bef0e_JOB-Sync-PR-prefix-and-labels
+2026-11-05T12:50:40Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29437_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+2026-11-05T12:51:01Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29436_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+2026-11-05T12:52:02Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29435_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T12:52:40Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29441_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+2026-11-05T12:52:47Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29440_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+2026-11-05T12:52:47Z wait-idle: docker stop FORGEJO-ACTIONS-TASK-29439_WORKFLOW-fd35e946b2e9da066c64ad78a06dd9495fec850aaf8a0d7fa4d4eafd40bc1dd9_JOB-Mark-reviewed-from-Cursor-verdict
+2026-11-05T12:52:52Z wait-idle: docker stop wrapzii-server-runner
+
+## 2026-11-05T12:53:29Z trackH: removed mistaken /run/ci-root-guard-paused (would auto-start wrapzii). Pruned exited CI containers/builder. ET=2026-11-05 07:53:29 EST
+2026-11-05T12:58:40Z ci_hold: acquire until=1793897920 by=trackH-vshuffle
+2026-11-05T12:58:40Z ci_hold: systemctl stop forge-runner-hdd.service
+
+## 2026-11-05T12:58:40Z trackH: switched from systemctl mask to Face CI_HOLD (mask was causing watchdog restarts). acquire 4h. ET=2026-11-05 07:58:40 EST
+2026-11-05T12:58:40Z ci_hold: acquire until=1793897920 by=trackH-vshuffle
+2026-11-05T12:58:40Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:58:45Z ci_hold: acquire until=1793897925 by=trackH-vshuffle
+2026-11-05T12:58:45Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:58:50Z ci_hold: acquire until=1793897930 by=trackH-vshuffle
+2026-11-05T12:58:50Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:58:56Z ci_hold: acquire until=1793897935 by=trackH-vshuffle
+2026-11-05T12:58:56Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:01Z ci_hold: acquire until=1793897941 by=trackH-vshuffle
+2026-11-05T12:59:01Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:06Z ci_hold: acquire until=1793897946 by=trackH-vshuffle
+2026-11-05T12:59:06Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:11Z ci_hold: acquire until=1793897951 by=trackH-vshuffle
+2026-11-05T12:59:11Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:16Z ci_hold: acquire until=1793897956 by=trackH-vshuffle
+2026-11-05T12:59:16Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:21Z ci_hold: acquire until=1793897961 by=trackH-vshuffle
+2026-11-05T12:59:21Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:26Z ci_hold: acquire until=1793897966 by=trackH-vshuffle
+2026-11-05T12:59:26Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:31Z ci_hold: acquire until=1793897971 by=trackH-vshuffle
+2026-11-05T12:59:31Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:36Z ci_hold: acquire until=1793897976 by=trackH-vshuffle
+2026-11-05T12:59:36Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:41Z ci_hold: acquire until=1793897981 by=trackH-vshuffle
+2026-11-05T12:59:42Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:47Z ci_hold: acquire until=1793897987 by=trackH-vshuffle
+2026-11-05T12:59:47Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:52Z ci_hold: acquire until=1793897992 by=trackH-vshuffle
+2026-11-05T12:59:52Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T12:59:57Z ci_hold: acquire until=1793897997 by=trackH-vshuffle
+2026-11-05T12:59:57Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:02Z ci_hold: acquire until=1793898002 by=trackH-vshuffle
+2026-11-05T13:00:02Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:07Z ci_hold: acquire until=1793898007 by=trackH-vshuffle
+2026-11-05T13:00:07Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:12Z ci_hold: acquire until=1793898012 by=trackH-vshuffle
+2026-11-05T13:00:12Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:17Z ci_hold: acquire until=1793898017 by=trackH-vshuffle
+2026-11-05T13:00:17Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:22Z ci_hold: acquire until=1793898022 by=trackH-vshuffle
+2026-11-05T13:00:22Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:27Z ci_hold: acquire until=1793898027 by=trackH-vshuffle
+2026-11-05T13:00:28Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:33Z ci_hold: acquire until=1793898033 by=trackH-vshuffle
+2026-11-05T13:00:33Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:38Z ci_hold: acquire until=1793898038 by=trackH-vshuffle
+2026-11-05T13:00:38Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:43Z ci_hold: acquire until=1793898043 by=trackH-vshuffle
+2026-11-05T13:00:43Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:48Z ci_hold: acquire until=1793898048 by=trackH-vshuffle
+2026-11-05T13:00:48Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:53Z ci_hold: acquire until=1793898053 by=trackH-vshuffle
+2026-11-05T13:00:53Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:00:58Z ci_hold: acquire until=1793898058 by=trackH-vshuffle
+2026-11-05T13:00:58Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:03Z ci_hold: acquire until=1793898063 by=trackH-vshuffle
+2026-11-05T13:01:03Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:08Z ci_hold: acquire until=1793898068 by=trackH-vshuffle
+2026-11-05T13:01:08Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:13Z ci_hold: acquire until=1793898073 by=trackH-vshuffle
+2026-11-05T13:01:14Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:19Z ci_hold: acquire until=1793898079 by=trackH-vshuffle
+2026-11-05T13:01:19Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:24Z ci_hold: acquire until=1793898084 by=trackH-vshuffle
+2026-11-05T13:01:24Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:29Z ci_hold: acquire until=1793898089 by=trackH-vshuffle
+2026-11-05T13:01:29Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:36Z ci_hold: acquire until=1793898096 by=trackH-vshuffle
+2026-11-05T13:01:36Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:41Z ci_hold: acquire until=1793898101 by=trackH-vshuffle
+2026-11-05T13:01:41Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:46Z ci_hold: acquire until=1793898106 by=trackH-vshuffle
+2026-11-05T13:01:46Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:51Z ci_hold: acquire until=1793898111 by=trackH-vshuffle
+2026-11-05T13:01:51Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:01:56Z ci_hold: acquire until=1793898116 by=trackH-vshuffle
+2026-11-05T13:01:56Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:02:09Z ci_hold: acquire until=1793898129 by=trackH-vshuffle
+2026-11-05T13:02:09Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:02:09Z gpubench: CI_HOLD until=1793890929 by=gpubench (2 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:06:41Z gpubench: systemctl start forge-runner-hdd.service (hold released)
+2026-11-05T13:07:05Z ci_hold: acquire until=1793898425 by=trackH-vshuffle
+2026-11-05T13:07:05Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:07:59Z ci_hold: acquire until=1793898479 by=trackH-vshuffle
+2026-11-05T13:07:59Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:08:50Z ci_hold: acquire until=1793898530 by=trackH-vshuffle
+2026-11-05T13:08:50Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:09:43Z ci_hold: acquire until=1793898583 by=trackH-vshuffle
+2026-11-05T13:09:43Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:10:34Z ci_hold: acquire until=1793898633 by=trackH-vshuffle
+2026-11-05T13:10:34Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:11:24Z ci_hold: acquire until=1793898684 by=trackH-vshuffle
+2026-11-05T13:11:24Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:11:55Z ci_hold: acquire until=1793898715 by=trackH-vshuffle
+2026-11-05T13:11:55Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:12:05Z ci_hold: acquire until=1793898725 by=trackH-vshuffle
+2026-11-05T13:12:05Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:12:06Z gpubench: CI_HOLD until=1793898726 by=trackH-vshuffle (4 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:15:34Z ci_hold: acquire until=1793898934 by=trackH-vshuffle
+2026-11-05T13:15:34Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:17:34Z ci_hold: acquire until=1793899054 by=trackH-vshuffle
+2026-11-05T13:17:34Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:18:23Z gpubench: KEEP_CI_HOLD=1 -> skip clear/restart
+2026-11-05T13:18:23Z gpubench: CI_HOLD until=1793899103 by=trackH-vshuffle (4 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:19:35Z ci_hold: acquire until=1793899175 by=trackH-vshuffle
+2026-11-05T13:19:35Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:21:35Z ci_hold: acquire until=1793899295 by=trackH-vshuffle
+2026-11-05T13:21:35Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:23:36Z ci_hold: acquire until=1793899416 by=trackH-vshuffle
+2026-11-05T13:23:36Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:25:36Z ci_hold: acquire until=1793899536 by=trackH-vshuffle
+2026-11-05T13:25:36Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:27:06Z ci_hold: acquire until=1793899626 by=trackH-vshuffle
+2026-11-05T13:27:06Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:27:37Z ci_hold: acquire until=1793899657 by=trackH-vshuffle
+2026-11-05T13:27:37Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:28:47Z ci_hold: acquire until=1793899727 by=trackH-vshuffle
+2026-11-05T13:28:47Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:29:37Z ci_hold: acquire until=1793899777 by=trackH-vshuffle
+2026-11-05T13:29:37Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:30:23Z gpubench: KEEP_CI_HOLD=1 -> skip clear/restart
+2026-11-05T13:30:51Z ci_hold: acquire until=1793899851 by=trackH-vshuffle
+2026-11-05T13:30:51Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:30:53Z gpubench: CI_HOLD until=1793899853 by=trackH-vshuffle (4 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:34:39Z gpubench: KEEP_CI_HOLD=1 -> skip clear/restart
+2026-11-05T13:34:39Z gpubench: CI_HOLD until=1793900079 by=trackH-vshuffle (4 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:43:50Z gpubench: KEEP_CI_HOLD=1 -> skip clear/restart
+2026-11-05T13:43:50Z gpubench: CI_HOLD until=1793900630 by=trackH-vshuffle (4 h) file=/home/dan/hermes-face/data/CI_HOLD
+2026-11-05T13:45:03Z ci_hold: acquire until=1793900703 by=trackH-vshuffle
+2026-11-05T13:45:03Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:45:18Z ci_hold: acquire until=1793900718 by=trackH-vshuffle
+2026-11-05T13:45:18Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:45:33Z ci_hold: acquire until=1793900733 by=trackH-vshuffle
+2026-11-05T13:45:33Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:45:48Z ci_hold: acquire until=1793900748 by=trackH-vshuffle
+2026-11-05T13:45:48Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:46:06Z ci_hold: acquire until=1793900766 by=trackH-vshuffle
+2026-11-05T13:46:08Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:46:23Z ci_hold: acquire until=1793900783 by=trackH-vshuffle
+2026-11-05T13:46:25Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:46:42Z ci_hold: acquire until=1793900801 by=trackH-vshuffle
+2026-11-05T13:46:42Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:46:57Z ci_hold: acquire until=1793900817 by=trackH-vshuffle
+2026-11-05T13:46:57Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:47:12Z ci_hold: acquire until=1793900832 by=trackH-vshuffle
+2026-11-05T13:47:13Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:47:28Z ci_hold: acquire until=1793900848 by=trackH-vshuffle
+2026-11-05T13:47:28Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:47:43Z ci_hold: acquire until=1793900863 by=trackH-vshuffle
+2026-11-05T13:47:44Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:47:59Z ci_hold: acquire until=1793900879 by=trackH-vshuffle
+2026-11-05T13:47:59Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:48:14Z ci_hold: acquire until=1793900894 by=trackH-vshuffle
+2026-11-05T13:48:14Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:48:21Z gpubench: KEEP_CI_HOLD=1 -> skip clear/restart
+2026-11-05T13:48:46Z ci_hold: acquire until=1793900926 by=trackI-esimd
+2026-11-05T13:48:46Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:51:19Z ci_hold: acquire until=1793901079 by=trackI-esimd
+2026-11-05T13:51:19Z ci_hold: systemctl stop forge-runner-hdd.service
+2026-11-05T13:53:24Z ci_hold: acquire until=1793901204 by=trackI-esimd
+2026-11-05T13:53:24Z ci_hold: systemctl stop forge-runner-hdd.service

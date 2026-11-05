@@ -42,44 +42,71 @@ def mk(ql):
     q.copy_(torch.randn(q.shape, generator=g, device=dev, dtype=torch.float32).half())
     return q, o
 QV = mk(7)
-def call(q, o, ql):
-    ops().int8k_int4v_attn_batch(q, s.q8, s.q_scale, v["k"], v["k_scale"], v["v"], v["v_scale"], v["v_zero"],
+# Track H: reshape each page of packed V from [tok][head][128] to [chunk][tok][head][16]
+# (COLS=32 consume order). Same bytes / same scales; stage-1 XF&128 reads this layout.
+def reshuffle_v_cols32(v_u8):
+    # v_u8: [pages, PAGE, HKV, 128] uint8
+    pages, page, hkv, cols = v_u8.shape
+    assert page == 64 and cols == 128
+    nchunks = 8  # 256 dims / 32
+    src = v_u8.reshape(pages, page, hkv, nchunks, 16)
+    # -> [pages, nchunks, page, hkv, 16]
+    dst = src.permute(0, 3, 1, 2, 4).contiguous()
+    return dst.reshape(pages, page, hkv, cols)
+
+V_SHUF = None  # lazy
+def call(q, o, ql, use_vshuf=False):
+    vv = v["v"]
+    if use_vshuf:
+        global V_SHUF
+        if V_SHUF is None:
+            V_SHUF = reshuffle_v_cols32(v["v"])
+        vv = V_SHUF
+    ops().int8k_int4v_attn_batch(q, s.q8, s.q_scale, v["k"], v["k_scale"], vv, v["v_scale"], v["v_zero"],
                                  bt, sl, s.visible, part, m, l, merged, o, ql, 1)
 errf = tempfile.TemporaryFile(mode="w+"); saved = os.dup(2); os.dup2(errf.fileno(), 2)
 def log(x): os.write(saved, (x + "\n").encode())
 BASE_ENV = {k: os.environ.get(k) for k in ("XE2_KV_COMPACT_SLM", "XE2_KV_S2_NSG_VERIFY")}
 def set_extra(extra):
-    for k in ("XE2_KV_TEAM_MODE", "XE2_KV_REUSE_VAR", "XE2_KV_PARTIAL_I8", "XE2_KV_S2_FUSE", "XE2_KV_FUSE_STUB"): os.environ.pop(k, None)
+    for k in ("XE2_KV_TEAM_MODE", "XE2_KV_REUSE_VAR", "XE2_KV_PARTIAL_I8", "XE2_KV_S2_FUSE", "XE2_KV_FUSE_STUB", "XE2_KV_XF", "XE2_KV_PP2", "XE2_KV_PERSIST_WG"): os.environ.pop(k, None)
     for k, val in BASE_ENV.items():
         if val is None: os.environ.pop(k, None)
         else: os.environ[k] = val
     for kv in filter(None, extra.split("+")):
-        k, val = kv.split("="); os.environ[k] = val
+        k, val = kv.split("=")
+        if k == "XE2_KV_VSHUF":
+            continue  # harness-only; kernel selected via XF&128
+        os.environ[k] = val
 def measure(impl, vpp, ql=7, extra=""):
     set_extra(extra if ql == 7 else "")
     os.environ["XE2_KV_VERIFY_MP_IMPL"] = str(impl); os.environ["XE2_KV_VERIFY_PAGES"] = str(vpp)
+    use_vshuf = ("XE2_KV_VSHUF=1" in extra) if ql == 7 else False
     q, o = QV if ql == 7 else QD
-    for _ in range(3): call(q, o, ql)
+    for _ in range(3): call(q, o, ql, use_vshuf=use_vshuf)
     torch.xpu.synchronize(); ts = []
     for _ in range(a.iters):
         e0 = torch.xpu.Event(enable_timing=True); e1 = torch.xpu.Event(enable_timing=True)
-        e0.record(); call(q, o, ql); e1.record(); e1.synchronize(); ts.append(e0.elapsed_time(e1) * 1e3)
+        e0.record(); call(q, o, ql, use_vshuf=use_vshuf); e1.record(); e1.synchronize(); ts.append(e0.elapsed_time(e1) * 1e3)
     out = o.float().clone()
     os.environ["XE2_KV_TIME_SPLITS"] = "1"; errf.seek(0); errf.truncate()
-    for _ in range(6): call(q, o, ql)
+    for _ in range(6): call(q, o, ql, use_vshuf=use_vshuf)
     torch.xpu.synchronize(); os.environ.pop("XE2_KV_TIME_SPLITS"); os.fsync(2); errf.seek(0)
     sp = RE.findall(errf.read())
     return st.median(ts), st.median(float(x[0]) for x in sp), st.median(float(x[1]) for x in sp), out
 QD = mk(1)
 variants = [tuple((x.split(":") + [""])[:4]) for x in a.variants.split(",")]  # name:impl:vpp[:K=V+K=V]
 alive = [vv for vv in variants]; res = {vv[0]: [] for vv in variants}
-outf = open(a.out, "a"); ref = None
+outf = open(a.out, "a"); ref = None; SENT = []
 for rnd in range(a.rounds):
     for vv in list(alive):
-        idle = wait_idle(); vr0 = vllm_running()
-        d = measure(1, 1, ql=1)[0]                      # draft sentinel
-        t, s1, s2, out = measure(int(vv[1]), int(vv[2]), extra=vv[3])
-        vr1 = vllm_running()
+        for tries in range(4):  # contamination retry: draft sentinel before/after must stay near its floor
+            idle = wait_idle(); vr0 = vllm_running()
+            d = measure(1, 1, ql=1)[0]                      # draft sentinel
+            t, s1, s2, out = measure(int(vv[1]), int(vv[2]), extra=vv[3])
+            d2 = measure(1, 1, ql=1)[0]; vr1 = vllm_running()
+            SENT.append(min(d, d2)); floor = min(SENT)
+            if max(d, d2) <= floor * 1.12: break
+            log("CONTAMINATED %s try=%d sentinel %.1f/%.1f floor %.1f -> retry" % (vv[0], tries, d, d2, floor))
         if vv[1] == "1" or (vv[1] == "2" and vv[2] == "1"): pass
         if ref is None: ref = out   # first variant must be the baseline
         dmax = float((out - ref).abs().max()) if ref is not None else None
