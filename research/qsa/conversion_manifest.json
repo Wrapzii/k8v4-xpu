@@ -1,0 +1,85 @@
+{
+  "format_version": 1,
+  "base": {
+    "indexer_repo": "higa2515/qwen38-27b-qsa-indexers",
+    "indexer_revision": "b51b8d15e4342f2bc11ad8419abc18e3be6a8c8a",
+    "indexer_file": "mm2_16k/qsa_indexers.pt",
+    "indexer_sha256": "e44193e5ef832b6220c8355fff92ac8f07d8c13538f584d2b6231b5dd2f4bc51",
+    "base_model": "Qwen/Qwen3.8-27B",
+    "base_revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+    "note": "MM2 16k K=2048 continuation, 300 steps, lr 3e-4, from mm1_lr3e-4. Re-export for Q8_0 rebuild."
+  },
+  "indexer_checkpoint_sha256": "e44193e5ef832b6220c8355fff92ac8f07d8c13538f584d2b6231b5dd2f4bc51",
+  "qsa": {
+    "format_version": 1,
+    "budget": 2048,
+    "block_size": 4,
+    "indexer_heads": 4,
+    "indexer_head_dim": 128,
+    "rope_dim": 64,
+    "multimodal_policy": "dense",
+    "runtime": "reference_sdpa"
+  },
+  "full_attention_layers": [
+    3,
+    7,
+    11,
+    15,
+    19,
+    23,
+    27,
+    31,
+    35,
+    39,
+    43,
+    47,
+    51,
+    55,
+    59,
+    63
+  ],
+  "backbone_shards_unchanged": [
+    "model-00001-of-00018.safetensors",
+    "model-00002-of-00018.safetensors",
+    "model-00003-of-00018.safetensors",
+    "model-00004-of-00018.safetensors",
+    "model-00005-of-00018.safetensors",
+    "model-00006-of-00018.safetensors",
+    "model-00007-of-00018.safetensors",
+    "model-00008-of-00018.safetensors",
+    "model-00009-of-00018.safetensors",
+    "model-00010-of-00018.safetensors",
+    "model-00011-of-00018.safetensors",
+    "model-00012-of-00018.safetensors",
+    "model-00013-of-00018.safetensors",
+    "model-00014-of-00018.safetensors",
+    "model-00015-of-00018.safetensors",
+    "model-00016-of-00018.safetensors",
+    "model-00017-of-00018.safetensors",
+    "model-00018-of-00018.safetensors"
+  ],
+  "vision_tensor_count": 333,
+  "mtp_tensor_count": 15,
+  "indexer_parameters": 52434944,
+  "validation": {
+    "full_27b_forward": false,
+    "multimodal_quality_benchmark": false,
+    "note": "MM2 16k K=2048 indexers; backbone shards unchanged from the Qwen3.8-27B snapshot; image/video route remains dense.",
+    "tensor_layout_validated": true,
+    "processor_image_and_video": true,
+    "indexer_tensors_exactly_equal": 80,
+    "unit_tests_passed": 17,
+    "backbone_shards_sha256_verified": 18
+  },
+  "runtime_sha256": {
+    "modeling_qsa.py": "d864951eeeffd7a507159dab1fec639f7a1e29520ff0f9148fb0637ef224ab5a",
+    "indexer.py": "7a51ab9e88191e5161208347882d0363de8c9f96a332f64e12b51ee1c472b632",
+    "requirements.txt": "80f3e67dc5897f3813fd4a671b82eee4aeab7525fb9e66aed62424f0a510d4b4"
+  },
+  "release": "mm2-20261104",
+  "reference_runtime": {
+    "text": "masked_sdpa_qsa",
+    "image_video": "dense",
+    "mtp_execution": false
+  }
+}

@@ -1,0 +1,131 @@
+{
+  "model": {
+    "repo": "Qwen/Qwen3.8-27B",
+    "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
+  },
+  "indexer": {
+    "repo": "higa2515/qwen38-27b-qsa-indexers",
+    "revision": "b51b8d15e4342f2bc11ad8419abc18e3be6a8c8a",
+    "file": "mm2_16k/qsa_indexers.pt",
+    "sha256": "e44193e5ef832b6220c8355fff92ac8f07d8c13538f584d2b6231b5dd2f4bc51",
+    "heads": 4,
+    "head_dim": 128,
+    "rope_dim": 64,
+    "layers": [
+      3,
+      7,
+      11,
+      15,
+      19,
+      23,
+      27,
+      31,
+      35,
+      39,
+      43,
+      47,
+      51,
+      55,
+      59,
+      63
+    ],
+    "dtype": "float32",
+    "block_size": 4,
+    "budget_tokens": 2048
+  },
+  "training": {
+    "run_id": "9dd0ce84-f7f2-46a6-92bb-33a915fc7ae8",
+    "commit": "d75da83",
+    "sequence_length": 16384,
+    "steps": 300,
+    "learning_rate": 0.0003,
+    "image_text_batch_ratio": 0.5,
+    "backbone_vision_projector_mtp_frozen": true
+  },
+  "verified_results": {
+    "text_ppl": {
+      "dense": 7.072960359927699,
+      "sparse": 7.071383728706213,
+      "delta_pct": -0.022290966458959893,
+      "tokens": 32766
+    },
+    "question_region_capture": [
+      {
+        "text->text": {
+          "queries": 1536,
+          "mass": 1359.508773803711,
+          "learned": 0.8957786650103702,
+          "oracle": 0.9178684339915499
+        },
+        "text->image": {
+          "queries": 1536,
+          "mass": 176.491219997406,
+          "learned": 0.991226414991112,
+          "oracle": 0.9922631953112877
+        }
+      },
+      {
+        "text->text": {
+          "queries": 1536,
+          "mass": 1391.3975143432617,
+          "learned": 0.899040086771495,
+          "oracle": 0.9195940106459141
+        },
+        "text->image": {
+          "queries": 1536,
+          "mass": 144.6024827361107,
+          "learned": 0.9904835248445023,
+          "oracle": 0.992262523324415
+        }
+      }
+    ],
+    "docvqa_four_choice": {
+      "dataset": "nielsr/docvqa_1200_examples",
+      "revision": "dc77ab0c3d98855d0f3cb3a00832f2423fbe7528",
+      "license": "DocVQA (CC BY-NC-SA 4.0); nielsr conversion",
+      "indexer": {
+        "file": "mm2_16k/qsa_indexers.pt",
+        "sha256": "e44193e5ef832b6220c8355fff92ac8f07d8c13538f584d2b6231b5dd2f4bc51"
+      },
+      "n": 50,
+      "dense_acc": 1.0,
+      "sparse_acc": 1.0,
+      "top1_agreement": 1.0,
+      "mean_nll_dense": 0.7562380851331472,
+      "mean_nll_sparse": 0.7639391550517791,
+      "mean_abs_delta": 0.019878462880191655,
+      "competent": true
+    },
+    "docvqa_input_lengths": {
+      "min": 1456,
+      "median": 3987.0,
+      "max": 6878,
+      "above_budget": 49,
+      "n": 50
+    },
+    "synthetic_answer_nll": {
+      "8192": {
+        "n": 12,
+        "mean_abs_delta_per_token": 0.12256185213724773,
+        "max_abs_delta_per_token": 0.29227542877197266,
+        "mean_nll_dense": 13.458460489908854,
+        "mean_nll_sparse": 13.434103218714396,
+        "top1_agreement": 1.0
+      },
+      "16384": {
+        "n": 12,
+        "mean_abs_delta_per_token": 0.47008832295735675,
+        "max_abs_delta_per_token": 1.875,
+        "mean_nll_dense": 15.185094992319742,
+        "mean_nll_sparse": 15.030308659871418,
+        "top1_agreement": 1.0
+      }
+    }
+  },
+  "limits": [
+    "DocVQA result is a constructed four-choice probe and teacher-forced answer NLL, not standard open-ended DocVQA scoring.",
+    "49 of 50 DocVQA inputs exceed K; input lengths range from 1456 to 6878, so this is not a fixed 12.5-percent budget comparison.",
+    "Synthetic long QA does not establish preserved accuracy when the dense model cannot answer the questions.",
+    "Native 8k/16k image/video probes and a simple 64k image followup passed. Broad video quality, long document QA, 128k/262k multimodal quality and repeated throughput measurements remain unverified."
+  ]
+}
