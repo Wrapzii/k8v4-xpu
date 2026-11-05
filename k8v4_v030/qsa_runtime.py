@@ -30,7 +30,7 @@ from k8v4_v030.qsa_config import (
     qsa_force_all,
     weights_path,
 )
-from k8v4_v030.qsa_ops import attend_selected
+from k8v4_v030.qsa_ops import attend_selected, choose_blocks, library_path, mask_query_scores, score_pooled, topk_ids
 from k8v4_v030.qsa_ref import (
     QsaHyper,
     apply_q_rope,
@@ -38,7 +38,6 @@ from k8v4_v030.qsa_ref import (
     complete_blocks,
     project_indexer,
     score_blocks,
-    select_blocks,
     visible_tokens,
 )
 from k8v4_v030.qsa_rope import normalize_positions
@@ -216,6 +215,12 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
         if slot < 0:
             continue
         cache.write_token(slot, k_raw[token], pos4[token], weights.k_block_norm)
+    # Every query with count <= n_sel keeps every causal block. Scoring cannot
+    # change that, so the packed dense kernel still produces the output.
+    # count == n_sel + 1 can collapse back to a full set once the own block is
+    # forced in, so that case is scored and checked below.
+    if not qsa_force_all() and not _over_budget(requests, hyper):
+        return False
     plans = _plans(cache, q_idx, requests, meta, hyper)
     if not qsa_force_all() and all(item[5] for item in plans):
         return False
@@ -234,6 +239,15 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     return True
 
 
+def _over_budget(requests, hyper: QsaHyper) -> bool:
+    """True when any query has more complete blocks than the selection budget."""
+    for _req, _q0, q_len, seq_len in requests:
+        for cell in cells_for_queries(seq_len, q_len):
+            if complete_blocks(cell, hyper.ratio) > hyper.n_sel:
+                return True
+    return False
+
+
 def _plans(cache, q_idx, requests, meta, hyper: QsaHyper):
     """``(req, q0, q_len, seq_len, visible, fully_causal)`` per request."""
     ratio = int(meta.pages_per_block)
@@ -244,12 +258,15 @@ def _plans(cache, q_idx, requests, meta, hyper: QsaHyper):
         block_row = meta.block_table[req]
         q_req = q_idx[cursor : cursor + q_len]
         cursor += q_len
+        cells = cells_for_queries(seq_len, q_len)
+        counts = [complete_blocks(cell, hyper.ratio) for cell in cells]
+        scores, device_ids = _request_scores(cache, q_req, block_row, counts, ratio, hyper, force)
         visible_rows: list[list[int]] = []
         fully = True
-        for local, cell in enumerate(cells_for_queries(seq_len, q_len)):
-            count = complete_blocks(cell, hyper.ratio)
-            scores = _block_scores(cache, q_req[local], block_row, count, ratio, hyper)
-            chosen, width = select_blocks(scores, cell, hyper, force_all=force)
+        for local, cell in enumerate(cells):
+            row = None if scores is None else scores[local]
+            picked = None if device_ids is None else device_ids[local]
+            chosen, width = choose_blocks(row, counts[local], cell, hyper, force, picked)
             tokens = visible_tokens(cell, chosen, width, hyper.ratio)
             if tokens != list(range(cell + 1)):
                 fully = False
@@ -258,24 +275,35 @@ def _plans(cache, q_idx, requests, meta, hyper: QsaHyper):
     return planned
 
 
-def _block_scores(cache, query, block_row, count: int, pages_per_block: int, hyper: QsaHyper):
-    """Scores for complete blocks ``[0, count)``. A missing pool is ``-inf``."""
-    if count < 1:
-        return torch.zeros(0, dtype=torch.float64)
-    matrix = torch.zeros(count, hyper.dim, dtype=torch.float64)
-    missing = []
-    for block in range(count):
-        row = cache.pooled_row(block_row, block * hyper.ratio, pages_per_block)
-        if row is None:
-            missing.append(block)
-            continue
-        matrix[block] = row.to(dtype=torch.float64, device="cpu")
-    scores = score_blocks(query.detach().to(dtype=torch.float64, device="cpu"), matrix)
-    if missing:
-        scores = scores.clone()
-        for block in missing:
-            scores[block] = float("-inf")
-    return scores
+def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper: QsaHyper, force: bool):
+    """``(scores, device_ids)`` for one request.
+
+    ``device_ids`` is set when the XPU top-k kernel ranked the rows. CPU
+    scores stay fp64 and are ranked by ``choose_blocks``. No scores are built
+    when every query in the request is inside the budget.
+    """
+    if force or not counts or max(counts) <= hyper.n_sel:
+        return None, None
+    max_count = max(counts)
+    matrix, valid = cache.gather_blocks(block_row, max_count, pages_per_block)
+    use_kernel = (
+        query.device.type == "xpu"
+        and matrix.device.type == "xpu"
+        and library_path() is not None
+        and int(query.shape[1]) == 4
+        and int(query.shape[2]) == 128
+    )
+    if use_kernel:
+        raw = score_pooled(query, matrix)
+        scores = mask_query_scores(raw, counts, valid)
+        ids = topk_ids(scores, hyper.n_sel).detach().to(device="cpu").tolist()
+        return scores, ids
+    q_cpu = query.detach().to(dtype=torch.float64, device="cpu")
+    matrix_cpu = matrix.detach().to(dtype=torch.float64, device="cpu")
+    rows = [score_blocks(q_cpu[local], matrix_cpu) for local in range(int(q_cpu.shape[0]))]
+    stacked = torch.stack(rows, dim=0) if rows else torch.zeros(0, max_count, dtype=torch.float64)
+    scores = mask_query_scores(stacked, counts, valid.detach().to(device="cpu"))
+    return scores, None
 
 
 def _requests(meta, n_tokens: int) -> list[tuple[int, int, int, int]]:

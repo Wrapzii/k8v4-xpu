@@ -61,10 +61,18 @@ class QsaHyper:
         return budget // self.ratio
 
 
+def _compute_dtype(values: torch.Tensor) -> torch.dtype:
+    """CPU reference math is fp64. XPU has no fast fp64, so the device path is fp32."""
+    if values.device.type == "cpu":
+        return torch.float64
+    return torch.float32
+
+
 def rmsnorm(values: torch.Tensor, weight: torch.Tensor, eps: float = RMS_EPS) -> torch.Tensor:
     """``x * rsqrt(mean(x^2) + eps) * weight`` over the last dimension."""
-    x = values.to(torch.float64)
-    w = weight.to(dtype=torch.float64, device=x.device)
+    work = _compute_dtype(values)
+    x = values.to(work)
+    w = weight.to(dtype=work, device=x.device)
     var = x.pow(2).mean(dim=-1, keepdim=True)
     return x * torch.rsqrt(var + float(eps)) * w
 
@@ -85,11 +93,12 @@ def project_indexer(
     hyper = hyper or QsaHyper()
     if hidden.ndim != 2 or int(hidden.shape[1]) != hyper.hidden:
         raise ValueError("hidden must be [tokens, %d]" % hyper.hidden)
-    h = hidden.to(torch.float64)
-    q = h @ q_proj.to(dtype=torch.float64, device=h.device).transpose(0, 1)
+    work = _compute_dtype(hidden)
+    h = hidden.to(work)
+    q = h @ q_proj.to(dtype=work, device=h.device).transpose(0, 1)
     q = q.reshape(h.shape[0], hyper.heads, hyper.dim)
     q = rmsnorm(q, q_norm, hyper.eps)
-    k = h @ k_proj.to(dtype=torch.float64, device=h.device).transpose(0, 1)
+    k = h @ k_proj.to(dtype=work, device=h.device).transpose(0, 1)
     k = rmsnorm(k, k_norm, hyper.eps)
     return q, k
 
@@ -123,10 +132,27 @@ def pool_block(
         raise ValueError("a block is %d raw keys" % hyper.ratio)
     if int(raw_keys.shape[1]) != hyper.dim:
         raise ValueError("indexer dim")
-    mean = raw_keys.to(torch.float64).mean(dim=0)
+    mean = raw_keys.to(_compute_dtype(raw_keys)).mean(dim=0)
     normed = rmsnorm(mean, block_norm, hyper.eps)
     pos4 = first_pos.to(torch.int64).reshape(1, 4)
     return mrope(normed.unsqueeze(0), pos4, hyper.n_rot, hyper.sections, hyper.theta).squeeze(0)
+
+
+def finish_selection(
+    chosen: list[int],
+    cell: int,
+    hyper: QsaHyper | None = None,
+) -> tuple[list[int], int]:
+    """Sort ``chosen``, add the query's own block once, and report its visible width."""
+    hyper = hyper or QsaHyper()
+    ratio = hyper.ratio
+    cell = int(cell)
+    own = cell // ratio
+    width = cell % ratio + 1
+    blocks = [int(block) for block in chosen]
+    if own not in blocks:
+        blocks.append(own)
+    return sorted(set(blocks)), width
 
 
 def score_blocks(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor:
@@ -182,17 +208,13 @@ def select_blocks(
     ratio = hyper.ratio
     cell = int(cell)
     count = complete_blocks(cell, ratio)
-    own = cell // ratio
-    width = cell % ratio + 1
     if int(scores.shape[0]) < count:
         raise ValueError("scores cover %d blocks, cell needs %d" % (int(scores.shape[0]), count))
     if force_all or count <= hyper.n_sel:
         chosen = list(range(count))
     else:
         chosen = topk_block_ids(scores[:count], hyper.n_sel)
-    if own not in chosen:
-        chosen.append(own)
-    return sorted(set(chosen)), width
+    return finish_selection(chosen, cell, hyper)
 
 
 def visible_tokens(cell: int, block_ids: list[int], width: int, ratio: int = RATIO) -> list[int]:
