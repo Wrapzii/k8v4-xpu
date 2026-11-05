@@ -29,10 +29,12 @@ class QsaBlockCache:
         block_size: int,
         hyper: QsaHyper | None = None,
         dtype: torch.dtype = torch.float32,
+        device: torch.device | str | None = None,
     ) -> None:
         self.hyper = hyper or QsaHyper()
         self.block_size = int(block_size)
         self.num_blocks = int(num_blocks)
+        self.device = torch.device("cpu" if device is None else device)
         if self.num_blocks < 1 or self.block_size < self.hyper.ratio:
             raise ValueError("indexer cache size")
         if self.block_size % self.hyper.ratio != 0:
@@ -41,11 +43,12 @@ class QsaBlockCache:
             raise ValueError("block_size must be a multiple of the K8/V4 page")
         slots = self.num_blocks * self.block_size
         dim = self.hyper.dim
-        self.raw = torch.zeros(slots, dim, dtype=dtype)
-        self.pos = torch.zeros(slots, 4, dtype=torch.int32)
-        self.filled = torch.zeros(slots, dtype=torch.bool)
-        self.pooled = torch.zeros(slots // self.hyper.ratio, dim, dtype=dtype)
-        self.pool_valid = torch.zeros(slots // self.hyper.ratio, dtype=torch.bool)
+        dev = self.device
+        self.raw = torch.zeros(slots, dim, dtype=dtype, device=dev)
+        self.pos = torch.zeros(slots, 4, dtype=torch.int32, device=dev)
+        self.filled = torch.zeros(slots, dtype=torch.bool, device=dev)
+        self.pooled = torch.zeros(slots // self.hyper.ratio, dim, dtype=dtype, device=dev)
+        self.pool_valid = torch.zeros(slots // self.hyper.ratio, dtype=torch.bool, device=dev)
 
     @property
     def num_slots(self) -> int:
@@ -71,8 +74,8 @@ class QsaBlockCache:
             raise IndexError(slot)
         if tuple(key.shape) != (self.hyper.dim,):
             raise ValueError("indexer key shape %s" % (tuple(key.shape),))
-        self.raw[slot] = key.to(dtype=self.raw.dtype)
-        self.pos[slot] = position.to(torch.int32).reshape(4)
+        self.raw[slot] = key.to(dtype=self.raw.dtype, device=self.raw.device)
+        self.pos[slot] = position.to(dtype=torch.int32, device=self.pos.device).reshape(4)
         self.filled[slot] = True
         self._maybe_pool(slot // self.hyper.ratio, block_norm)
 
@@ -141,17 +144,28 @@ class QsaCacheBank:
         self.hyper = hyper or QsaHyper()
         self.layers: dict[int, QsaBlockCache] = {}
 
-    def layer(self, layer_idx: int, num_blocks: int, block_size: int) -> QsaBlockCache:
+    def layer(
+        self,
+        layer_idx: int,
+        num_blocks: int,
+        block_size: int,
+        device: torch.device | str | None = None,
+    ) -> QsaBlockCache:
         layer_idx = int(layer_idx)
         current = self.layers.get(layer_idx)
         if current is None:
-            current = QsaBlockCache(num_blocks, block_size, self.hyper)
+            current = QsaBlockCache(num_blocks, block_size, self.hyper, device=device)
             self.layers[layer_idx] = current
             return current
         if current.num_blocks != int(num_blocks) or current.block_size != int(block_size):
             raise RuntimeError(
                 "QSA cache for layer %d was allocated %d x %d and is now %d x %d"
                 % (layer_idx, current.num_blocks, current.block_size, num_blocks, block_size)
+            )
+        if device is not None and current.device != torch.device(device):
+            raise RuntimeError(
+                "QSA cache for layer %d is on %s and the forward is on %s"
+                % (layer_idx, current.device, device)
             )
         return current
 
@@ -173,6 +187,10 @@ def bank_for(num_kv_heads: int, hyper: QsaHyper | None = None) -> QsaCacheBank:
         found = QsaCacheBank(hyper)
         _BANKS[bank_key] = found
     return found
+
+
+def all_banks() -> list[QsaCacheBank]:
+    return list(_BANKS.values())
 
 
 def reset_caches() -> None:

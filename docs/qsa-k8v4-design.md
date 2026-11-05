@@ -106,6 +106,7 @@ On:
 - Backend install wraps Qwen attention modules and the block-copy helper if those symbols exist.
 - `forward` asks `try_sparse_forward`. That updates the indexer cache from the stashed hidden state, pools completed micro-blocks, and either runs sparse attention into `output` and returns, or returns false. False means the existing packed decode, cascade, or eager prefill runs, unchanged.
 - Dense is taken when there is no bank, the layer is not a full-attention layer, the stash is missing, or every query still sees at most 512 complete blocks (unless `K8V4_QSA_FORCE_ALL=1`).
+- An XPU graph capture does not run the Python sparse loop. Until `libxe2_qsa.so` supplies the captured op, capture stays on dense K8/V4 and does not write the indexer cache. Eager forwards use the Python path, which is the numeric contract.
 
 ## Tests
 
