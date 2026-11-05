@@ -2723,7 +2723,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
                 for (int d = 0; d < BK; ++d) acc += static_cast<int32_t>(qrow[d]) * static_cast<int32_t>(krow[d]);
                 const float s = static_cast<float>(acc) * qsc[r] * ksc * INV_SQRT_D;
                 scores[r][t] = s;
-                row_max[r] = ::fmaxf(row_max[r], s);
+                row_max[r] = (s > row_max[r]) ? s : row_max[r];
               }
             }
 #pragma unroll
@@ -2731,7 +2731,7 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
               if (row0 + r >= q_len * GQA) continue;
               float sm = 0.f;
               for (int t = 0; t < n_valid; ++t) {
-                const float e = ::expf(scores[r][t] - row_max[r]);
+                const float e = esimd::exp(esimd::simd<float, 1>(scores[r][t] - row_max[r]))[0];
                 scores[r][t] = e;
                 sm += e;
               }
