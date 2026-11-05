@@ -1,6 +1,7 @@
 """Capture full-attention teacher activations from the Swift GPTQ checkpoint.
 
-CPU-only. Do not pass ``/dev/dri`` or ``--gpus`` while ``vllm-k8v4-tp2`` is up.
+Layer replay stays on CPU. When ``QSA_DEVICE=xpu``, the Q/K block teacher
+runs on that device. Do not pass ``/dev/dri`` while ``vllm-k8v4-tp2`` is up.
 
 Example::
 
@@ -26,6 +27,7 @@ if str(_RESEARCH) not in sys.path:
 
 import torch
 
+from qsa.device import resolve_device
 from qsa.gptq_backbone import FrozenGPTQSwift, _unpack_qzeros, gptq_self_test
 
 
@@ -97,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.seq % args.block_size != 0:
         raise SystemExit(f"--seq must be a multiple of --block-size ({args.block_size})")
+    torch.manual_seed(args.seed)
     torch.set_num_threads(args.threads)
     out = Path(args.out)
     log_path = Path(args.log)
@@ -135,7 +138,10 @@ def main(argv: list[str] | None = None) -> int:
         del sample, zeros, g_idx
         layers = _parse_layers(args.layers, backbone.full_layers, args.end_layer)
         ids = _prompt_ids(Path(args.model), args.prompt_tokens, args.seq, args.seed, backbone.vocab_size)
-        log(f"prompt-tokens: {args.prompt_tokens} seq={args.seq} ids={tuple(ids.shape)} mode={args.mode}")
+        log(
+            f"prompt-tokens: {args.prompt_tokens} seed={args.seed} seq={args.seq} "
+            f"ids={tuple(ids.shape)} mode={args.mode} teacher_device={resolve_device()}"
+        )
         captures = backbone.capture(
             ids,
             mode=args.mode,

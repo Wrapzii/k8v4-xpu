@@ -29,6 +29,7 @@ os.environ["USE_HUB_KERNELS"] = "0"
 import torch
 import torch.nn.functional as F
 
+from qsa.device import resolve_device
 from qsa.teacher import block_teacher_from_qk
 
 
@@ -235,6 +236,10 @@ def project_qk_teacher(
     groups = num_heads // num_kv_heads
     if groups > 1:
         k = k.repeat_interleave(groups, dim=1)
+    teacher_device = resolve_device()
+    if teacher_device != "cpu":
+        q = q.to(teacher_device)
+        k = k.to(teacher_device)
     target, valid = block_teacher_from_qk(q, k, block_size, scale=scale)
     return {
         "hidden_pre_attn": hidden.detach(),
