@@ -17,7 +17,7 @@ from __future__ import annotations
 import torch
 
 from k8v4_v030.layout import PAGE
-from k8v4_v030.qsa_ref import QsaHyper, pool_block
+from k8v4_v030.qsa_ref import QsaHyper, pool_blocks
 
 
 class QsaBlockCache:
@@ -116,19 +116,30 @@ class QsaBlockCache:
         self.filled.index_fill_(0, idx, True)
         ratio = self.hyper.ratio
         micros = torch.unique(torch.div(idx, ratio, rounding_mode="floor"))
-        for micro in micros.tolist():
-            self._maybe_pool(int(micro), block_norm)
+        self._pool_micros(micros, block_norm)
 
     def _maybe_pool(self, micro: int, block_norm: torch.Tensor) -> None:
-        ratio = self.hyper.ratio
-        start = int(micro) * ratio
-        window = slice(start, start + ratio)
-        if not bool(self.filled[window].all()):
-            self.pool_valid[micro] = False
+        self._pool_micros(
+            torch.tensor([int(micro)], dtype=torch.int64, device=self.raw.device),
+            block_norm,
+        )
+
+    def _pool_micros(self, micros: torch.Tensor, block_norm: torch.Tensor) -> None:
+        """Re-pool these micro-blocks. An incomplete window clears ``pool_valid``."""
+        if int(micros.numel()) == 0:
             return
-        pooled = pool_block(self.raw[window], block_norm, self.pos[start], self.hyper)
-        self.pooled[micro] = pooled.to(dtype=self.pooled.dtype)
-        self.pool_valid[micro] = True
+        ratio = self.hyper.ratio
+        micros = micros.to(dtype=torch.int64, device=self.raw.device).reshape(-1)
+        offsets = torch.arange(ratio, device=self.raw.device)
+        windows = micros.unsqueeze(1) * ratio + offsets
+        complete = self.filled[windows].all(dim=1)
+        self.pool_valid[micros] = complete
+        if not bool(complete.any()):
+            return
+        raw = self.raw[windows[complete]]
+        first = self.pos[windows[complete][:, 0]]
+        pooled = pool_blocks(raw, block_norm, first, self.hyper)
+        self.pooled[micros[complete]] = pooled.to(dtype=self.pooled.dtype)
 
     def copy_blocks(self, src_ids: list[int] | torch.Tensor, dst_ids: list[int] | torch.Tensor) -> None:
         """Copy whole physical blocks, including pooled micro-blocks inside them."""

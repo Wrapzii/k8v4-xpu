@@ -53,3 +53,7 @@
 - packed_visible_rows is the token list the sparse kernel reads. Inside the budget it is the full causal range. One block past the budget, top-k can drop the query's own block and the own-block rule puts it back, so that row is causal again. A lower block that loses stays out. Ties keep the lower block id. The CPU forward builds its lists from this pack.
 - qsa_visible is the same selection in one XPU launch. libxe2_qsa.so was rebuilt with the ESIMD score path still compiled in, sha256 1fd8f0720edb7801e0a1932a994dd42c6ec20c4ceefa20366f4aa9ac7405ee0c. The compile did not use a GPU. The eager XPU forward still expands qsa_topk ids. qsa_visible has not been compared on a device.
 - CPU tests, ephemeral container, no GPU: contract, runtime, and reference 22 tests OK. No production kernel, container, or image changes. No speedup was measured.
+
+2026-11-05T20:33Z qsa: re-pool a step's micro-blocks in one call
+- write_tokens and write_token share _pool_micros. Complete windows are mean-pooled, block-normalized, and MRoPE'd together. An incomplete window clears pool_valid and leaves the old pooled row. A batch of two blocks matches two single-block pools, including a non-zero position. The scatter still matches the per-slot loop on raw keys, positions, fill flags, and pooled rows.
+- CPU tests, ephemeral container, no GPU: cache, reference, and runtime 21 tests OK. No production kernel, container, or image changes. No speedup was measured.

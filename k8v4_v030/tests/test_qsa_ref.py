@@ -25,6 +25,7 @@ from k8v4_v030.qsa_ref import (
     complete_blocks,
     fp_gqa,
     pool_block,
+    pool_blocks,
     project_indexer,
     rmsnorm,
     score_blocks,
@@ -137,6 +138,15 @@ class IndexerMathTest(unittest.TestCase):
         mean = keys.mean(dim=0)
         # Position 0 makes every frequency 0, so RoPE is identity.
         self.assertTrue(torch.allclose(pooled, rmsnorm(mean, block_norm, hyper.eps)))
+        second_pos = torch.tensor([1, 2, 3, 4], dtype=torch.int64)
+        batched = pool_blocks(
+            torch.stack([keys, keys + 1]),
+            block_norm,
+            torch.stack([first, second_pos]),
+            hyper,
+        )
+        self.assertTrue(torch.equal(batched[0], pool_block(keys, block_norm, first, hyper)))
+        self.assertTrue(torch.equal(batched[1], pool_block(keys + 1, block_norm, second_pos, hyper)))
 
         query = torch.tensor([[1.0, 0.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]], dtype=torch.float64)
         blocks = torch.stack([pooled, -pooled])
