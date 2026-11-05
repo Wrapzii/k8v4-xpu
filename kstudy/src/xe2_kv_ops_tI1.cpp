@@ -4560,6 +4560,17 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
         return;
       }
     }
+    if (tq == 7 && env_is_1("XE2_KV_COMPACT_SLM") && reuse_var != 0 && (xf & 256) != 0) {
+      // Track I ESIMD stage-1 (correct-first: ESIMD V block_load/decode; scalar QK/PV).
+      launch_int8k_int4v_s1_paged_reuse_esimd<HKV>(current_xpu_queue(), q8.data_ptr<int8_t>(),
+          q_scale.data_ptr<float>(), k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
+          v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(), v_zero.data_ptr<float>(),
+          bt.data_ptr<int32_t>(), seq_lens.data_ptr<int32_t>(), partials.data_ptr<float>(),
+          m.data_ptr<float>(), l.data_ptr<float>(), n_splits, tq,
+          static_cast<size_t>(k_cache.stride(0)), static_cast<size_t>(v_cache.stride(0)),
+          static_cast<size_t>(k_scale.stride(0)), visible_ptr, ratio);
+      return;
+    }
     if (tq == 7 && env_is_1("XE2_KV_COMPACT_SLM") && reuse_var != 0) {
       auto gov = [&](auto cols, auto vw) {
         auto gq0 = [&](auto qq, auto fz, auto xv) {
