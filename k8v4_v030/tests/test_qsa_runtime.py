@@ -228,6 +228,9 @@ class RuntimeTest(unittest.TestCase):
         self._continuation(q_len=1, hist=16, hkv=2, seed=8)
         reset_caches()
         reset_bank()
+        self._mixed_batch()
+        reset_caches()
+        reset_bank()
         self._crossing_prefill()
         reset_caches()
         reset_bank()
@@ -303,6 +306,76 @@ class RuntimeTest(unittest.TestCase):
         note_hidden(3, hidden_all[hist:], positions)
         self.assertTrue(try_sparse_forward(impl, layer, query, cache, meta, again))
         self.assertTrue(torch.equal(again, output))
+
+    def _mixed_batch(self):
+        """One request past the budget and one inside it, on different blocks.
+
+        The short request must stay a full causal set and must read its own
+        physical block. The long request is sparse and must not use that block.
+        """
+        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
+
+        hkv = 2
+        impl = _Impl(hkv)
+        layer = _Layer("model.layers.3.self_attn.attn")
+        weights = make_random_bank(12, layers=(3,)).get(3)
+        assert weights is not None
+        set_bank(make_random_bank(12, layers=(3,)))
+        long_n, short_n = 16, 4
+        os.environ["K8V4_QSA"] = "1"
+        os.environ["K8V4_QSA_TOP_TOKENS"] = "8"
+        key_long = deterministic_rows(long_n, hkv, 70)
+        value_long = deterministic_rows(long_n, hkv, 71)
+        key_short = deterministic_rows(short_n, hkv, 72)
+        value_short = deterministic_rows(short_n, hkv, 73)
+        cache = torch.cat(
+            [_page(hkv, key_long, value_long), _page(hkv, key_short, value_short)]
+        )
+        query = _rows(long_n + short_n, impl.layout.hq, 74)
+        hidden = torch.randn(long_n + short_n, HIDDEN)
+        positions = torch.cat([torch.arange(long_n), torch.arange(short_n)])
+        slots = torch.cat([torch.arange(long_n), torch.arange(64, 64 + short_n)])
+        meta = _Meta(long_n, long_n + short_n, hkv, slots)
+        meta.seq_lens = torch.tensor([long_n, short_n], dtype=torch.int32)
+        meta.seq_lens_cpu = meta.seq_lens.clone()
+        meta.query_starts = (0, long_n, long_n + short_n)
+        meta.num_actual_tokens = long_n + short_n
+        meta.block_table = torch.tensor(
+            [[0, 3, 2, 1], [1, 0, 2, 3]],
+            dtype=torch.int32,
+        )
+        output = torch.zeros_like(query)
+        note_hidden(3, hidden, positions)
+        self.assertTrue(try_sparse_forward(impl, layer, query, cache, meta, output))
+        stored = all_banks()[0].layers[3]
+        long_visible = _expected(
+            stored, weights, hidden[:long_n], positions[:long_n], long_n, long_n, meta.block_table[0], 1
+        )
+        short_visible = _expected(
+            stored,
+            weights,
+            hidden[long_n:],
+            positions[long_n:],
+            short_n,
+            short_n,
+            meta.block_table[1],
+            1,
+        )
+        self.assertEqual(short_visible[-1], list(range(short_n)))
+        self.assertNotEqual(long_visible[-1], list(range(long_n)))
+        views = bind_regions(cache, impl.layout)
+        long_expect = attend_selected(
+            query[:long_n], views, meta.block_table[0], long_n, long_visible, 1
+        )
+        short_expect = attend_selected(
+            query[long_n:], views, meta.block_table[1], short_n, short_visible, 1
+        )
+        self.assertTrue(torch.equal(output[:long_n], long_expect))
+        self.assertTrue(torch.equal(output[long_n:], short_expect))
+        swapped = attend_selected(
+            query[long_n:], views, meta.block_table[0], short_n, short_visible, 1
+        )
+        self.assertFalse(torch.equal(short_expect, swapped))
 
     def _crossing_prefill(self):
         """One chunk where early queries are inside the budget and the last is not.

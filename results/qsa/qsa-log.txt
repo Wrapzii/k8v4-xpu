@@ -44,3 +44,7 @@
 - Training stores q_norm, k_norm, and k_block_norm as 1+weight deltas (zeros at init). conversion/qwen.py adds 1 when it writes GGUF. ggml build_norm multiplies by that stored vector and does not add 1 again. The in-memory bank keeps the real multiplier, and load_bank_file adds 1 unless safetensors metadata says norm_storage=multiplier.
 - A stored zero therefore loads as ones, which is an identity RMSNorm. The training export key layers.{i}.self_attn._qsa_indexer.* is accepted. The training score scale 1/sqrt(128) is positive and shared, so it does not change top-k order. The fast path still does not apply it.
 - CPU test, ephemeral container, no GPU: test_qsa_ref 11 tests OK. No production kernel, container, or image changes.
+
+2026-11-05T20:24Z qsa: one batch can mix a sparse request with a dense one
+- Two requests share a forward. One has 16 tokens and a budget of 8, so its last query drops a block. The other has 4 tokens, stays a full causal set, and reads a different physical block. Swapping that short request onto the long request's block changes its output.
+- CPU tests, ephemeral container, no GPU: runtime, cache, and quant 12 tests OK. No production kernel, container, or image changes.
