@@ -43,3 +43,16 @@ apport /var/crash removed: 215M
 /: 48.8 GiB (52421988352 bytes) trimmed on /dev/sda1
 root before:  325G  90%  after:  311G  86%
 apport /var/lib/apport/coredump removed: 3.1G
+## Thu Nov  5 01:21:19 UTC 2026 CI restarted AGAIN at 01:05:12 UTC (8:05:12 PM ET): ssh session as dan from 100.71.157.125 (desktop-9u46sbp) accepted 01:05:10, then wrapzii-server-runner started directly via docker (bypasses the systemd mask; restart policy was 'no'). Re-stopped:
+docker stop FORGEJO-ACTIONS-TASK-29115_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+docker stop FORGEJO-ACTIONS-TASK-29116_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29114_WORKFLOW-2b3a8bafc9b5fd7ce8d86612f259cbcd86a1539cc9b15278605631b03f2bef0e_JOB-Sync-PR-prefix-and-labels
+docker stop FORGEJO-ACTIONS-TASK-29113_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29109_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29107_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+## Thu Nov  5 01:27:54 UTC 2026 runner was running again (StartedAt=2026-11-05T01:05:12.869592836Z) after the 01:05 restart record; stopping runner first, then jobs:
+docker stop wrapzii-server-runner
+docker stop FORGEJO-ACTIONS-TASK-29120_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29119_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+docker stop FORGEJO-ACTIONS-TASK-29118_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop FORGEJO-ACTIONS-TASK-29117_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts

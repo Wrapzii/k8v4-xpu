@@ -1,0 +1,7 @@
+	libsycl.so.9 => /opt/intel/oneapi/compiler/2026.0/lib/libsycl.so.9 (0x0000736699c00000)
+	libtorch-xpu-ops-sycltla.so => /opt/venv/lib/python3.12/site-packages/torch/lib/libtorch-xpu-ops-sycltla.so (0x000073668c536000)
+	libmkl_sycl_blas.so.6 => /opt/venv/lib/python3.12/site-packages/torch/lib/../../../../libmkl_sycl_blas.so.6 (0x000073668885f000)
+	libmkl_sycl_dft.so.6 => /opt/venv/lib/python3.12/site-packages/torch/lib/../../../../libmkl_sycl_dft.so.6 (0x00007366865ba000)
+	libmkl_sycl_lapack.so.6 => /opt/venv/lib/python3.12/site-packages/torch/lib/../../../../libmkl_sycl_lapack.so.6 (0x0000736684ae3000)
+c2e1bfe950e76c1aea30c77a508b876d7003a823fdefade74c13b217f7e0b963  /mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-20261104/mp-libs/libxe2_kv_r8_jit.so
+                 U sycl::_V1::exception::exception(std::error_code, std::shared_ptr<sycl::_V1::context>, char const*)
