@@ -14,7 +14,7 @@ import torch
 
 from k8v4_v030.layout import builtin_q_end
 from k8v4_v030.qsa_quant_attn import allow_tokens, sparse_from_views
-from k8v4_v030.qsa_ref import QsaHyper, finish_selection, score_blocks, topk_block_ids
+from k8v4_v030.qsa_ref import QsaHyper, finish_selection, score_blocks, topk_block_ids, visible_tokens
 
 _LOADED: str | None = None
 _DEFAULT_LIB = "/mnt/hdd-500gb/model-validation/qsa-k8v4/libxe2_qsa.so"
@@ -149,6 +149,87 @@ def choose_blocks(
     if int(row.shape[0]) < count:
         raise RuntimeError("scores cover %d blocks, query needs %d" % (int(row.shape[0]), count))
     return finish_selection(topk_block_ids(row[:count], hyper.n_sel), cell, hyper)
+
+
+def packed_visible_rows(
+    scores: torch.Tensor | None,
+    counts: list[int],
+    cells: list[int],
+    hyper: QsaHyper,
+    force_all: bool,
+) -> torch.Tensor:
+    """``[queries, width]`` int32 token cells, ascending, padded with ``-1``.
+
+    The rows are ``visible_tokens`` of ``choose_blocks``. A query inside the
+    budget, and a query whose own block is the one top-k dropped, both come
+    back as the full causal range. Width is the longest row, at least 1.
+    """
+    if len(counts) != len(cells):
+        raise ValueError("one complete-block count per query")
+    if scores is not None and int(scores.shape[0]) != len(cells):
+        raise ValueError("one score row per query")
+    if (
+        scores is not None
+        and scores.device.type == "xpu"
+        and library_path() is not None
+        and _visible_op() is not None
+    ):
+        return _visible_xpu(scores, counts, cells, hyper, force_all)
+    rows: list[list[int]] = []
+    width = 1
+    for local, cell in enumerate(cells):
+        row = None if scores is None else scores[local]
+        chosen, own_width = choose_blocks(row, counts[local], int(cell), hyper, force_all, None)
+        tokens = visible_tokens(int(cell), chosen, own_width, hyper.ratio)
+        rows.append(tokens)
+        if len(tokens) > width:
+            width = len(tokens)
+    packed = torch.full((len(cells), width), -1, dtype=torch.int32)
+    for i, tokens in enumerate(rows):
+        if tokens:
+            packed[i, : len(tokens)] = torch.tensor(tokens, dtype=torch.int32)
+    return packed
+
+
+def _visible_op():
+    table = ops()
+    if table is None or not hasattr(table, "qsa_visible"):
+        return None
+    return table
+
+
+def _visible_width(counts: list[int], cells: list[int], hyper: QsaHyper, force_all: bool) -> int:
+    """Upper bound on the token list. The kernel writes fewer and leaves ``-1``."""
+    width = 1
+    budget = hyper.n_sel
+    for count, cell in zip(counts, cells):
+        if force_all or int(count) <= budget:
+            need = int(cell) + 1
+        else:
+            need = (budget + 1) * hyper.ratio
+        if need > width:
+            width = need
+    return width
+
+
+def _visible_xpu(
+    scores: torch.Tensor,
+    counts: list[int],
+    cells: list[int],
+    hyper: QsaHyper,
+    force_all: bool,
+) -> torch.Tensor:
+    row = scores if scores.dtype == torch.float32 and scores.is_contiguous() else scores.contiguous().float()
+    if row.ndim != 2:
+        raise ValueError("scores are [queries, blocks]")
+    counts_t = torch.tensor(list(counts), dtype=torch.int32, device=row.device)
+    cells_t = torch.tensor(list(cells), dtype=torch.int32, device=row.device)
+    width = _visible_width(counts, cells, hyper, force_all)
+    out = torch.full((int(row.shape[0]), width), -1, dtype=torch.int32, device=row.device)
+    _visible_op().qsa_visible(
+        row, counts_t, cells_t, out, int(hyper.n_sel), int(hyper.ratio), 1 if force_all else 0
+    )
+    return out
 
 
 def topk_ids(scores: torch.Tensor, k: int) -> torch.Tensor:

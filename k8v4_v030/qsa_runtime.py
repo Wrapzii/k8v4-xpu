@@ -30,7 +30,15 @@ from k8v4_v030.qsa_config import (
     qsa_force_all,
     weights_path,
 )
-from k8v4_v030.qsa_ops import attend_selected, choose_blocks, library_path, mask_query_scores, score_pooled, topk_ids
+from k8v4_v030.qsa_ops import (
+    attend_selected,
+    choose_blocks,
+    library_path,
+    mask_query_scores,
+    packed_visible_rows,
+    score_pooled,
+    topk_ids,
+)
 from k8v4_v030.qsa_ref import (
     QsaHyper,
     apply_q_rope,
@@ -259,14 +267,23 @@ def _plans(cache, q_idx, requests, meta, hyper: QsaHyper):
         scores, device_ids = _request_scores(cache, q_req, block_row, counts, ratio, hyper, force)
         visible_rows: list[list[int]] = []
         fully = True
-        for local, cell in enumerate(cells):
-            row = None if scores is None else scores[local]
-            picked = None if device_ids is None else device_ids[local]
-            chosen, width = choose_blocks(row, counts[local], cell, hyper, force, picked)
-            tokens = visible_tokens(cell, chosen, width, hyper.ratio)
-            if tokens != list(range(cell + 1)):
-                fully = False
-            visible_rows.append(tokens)
+        if device_ids is None:
+            packed = packed_visible_rows(scores, counts, cells, hyper, force)
+            for local, cell in enumerate(cells):
+                tokens = [int(token) for token in packed[local].tolist() if int(token) >= 0]
+                if tokens != list(range(cell + 1)):
+                    fully = False
+                visible_rows.append(tokens)
+        else:
+            # XPU top-k already ranked this request. Expand those ids here
+            # until qsa_visible has been compared on a device.
+            for local, cell in enumerate(cells):
+                row = None if scores is None else scores[local]
+                chosen, width = choose_blocks(row, counts[local], cell, hyper, force, device_ids[local])
+                tokens = visible_tokens(cell, chosen, width, hyper.ratio)
+                if tokens != list(range(cell + 1)):
+                    fully = False
+                visible_rows.append(tokens)
         planned.append((req, q0, q_len, seq_len, visible_rows, fully))
     return planned
 

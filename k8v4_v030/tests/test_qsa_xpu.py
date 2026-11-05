@@ -22,10 +22,11 @@ from k8v4_v030.qsa_ops import (
     choose_blocks,
     library_path,
     mask_query_scores,
+    packed_visible_rows,
     score_pooled,
     topk_ids,
 )
-from k8v4_v030.qsa_ref import QsaHyper, score_blocks, select_blocks
+from k8v4_v030.qsa_ref import QsaHyper, score_blocks, select_blocks, visible_tokens
 
 
 def _cache(hkv: int, key, value):
@@ -103,6 +104,36 @@ class CpuContractTest(unittest.TestCase):
         short, short_width = choose_blocks(None, 1, cell=3, hyper=hyper, force_all=False)
         self.assertEqual(short, [0])
         self.assertEqual(short_width, 4)
+
+    def test_packed_visible_matches_the_token_lists(self):
+        hyper = QsaHyper(top_tokens=8)
+        scores = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [5.0, 4.0, 0.1],
+                [0.1, 5.0, 4.0],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=torch.float64,
+        )
+        counts = [1, 3, 3, 3]
+        cells = [3, 11, 11, 11]
+        packed = packed_visible_rows(scores, counts, cells, hyper, False)
+        expect = []
+        for local, cell in enumerate(cells):
+            chosen, width = select_blocks(scores[local], cell, hyper, force_all=False)
+            expect.append(visible_tokens(cell, chosen, width, hyper.ratio))
+        self.assertEqual(expect[0], [0, 1, 2, 3])
+        self.assertEqual(expect[1], list(range(12)))
+        self.assertEqual(expect[2], [4, 5, 6, 7, 8, 9, 10, 11])
+        self.assertEqual(expect[3], list(range(12)))
+        for local, tokens in enumerate(expect):
+            row = [int(token) for token in packed[local].tolist() if int(token) >= 0]
+            self.assertEqual(row, tokens)
+        forced = packed_visible_rows(scores, counts, cells, hyper, True)
+        for local, cell in enumerate(cells):
+            row = [int(token) for token in forced[local].tolist() if int(token) >= 0]
+            self.assertEqual(row, list(range(cell + 1)))
 
 
 def _xpu_available() -> bool:
