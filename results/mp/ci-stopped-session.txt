@@ -1,83 +1,45 @@
-CI stopped for the kernel-work session
-Host: ai01
-Recorded: 2026-11-04T23:55Z (after guest boot 2026-11-04 23:37 UTC)
-Nothing was deleted for this stop.
-
-Prior state is the state observed after the guest rebooted and before these stop commands.
-The pre-crash pause list is still in paused-step1-20261104T221928Z.txt. Those paused names were not present after the reboot.
-
-1. forge-runner-hdd.service
-   prior: active, running, FreezerState=running, ActiveEnterTimestamp=Wed 2026-11-04 23:38:05 UTC
-   command: sudo systemctl stop forge-runner-hdd.service
-   after: ActiveState=failed, SubState=failed, Result=exit-code, NRestarts=0 (not running)
-   restore: sudo systemctl start forge-runner-hdd.service
-
-2. forgejo-runner
-   image: data.forgejo.org/forgejo/runner:13.2.0
-   prior: Up (running), restart policy unless-stopped
-   how it stopped: compose stop from the unit stop above; confirmed Exited (0)
-   also issued: docker stop -t 30 forgejo-runner
-   restore: docker start forgejo-runner
-
-3. wrapzii-server-runner
-   image: data.forgejo.org/forgejo/runner:13.1.0
-   prior: Up (running), restart policy unless-stopped
-   how it stopped: exited with the unit stop, Exited (137). Not deleted.
-   restore: docker start wrapzii-server-runner
-
-4. FORGEJO-ACTIONS-TASK-29083_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-   prior: Up 10 seconds (spawned after boot)
-   command: docker stop -t 30 <that name>
-   after: Exited (137). SIGTERM did not exit within 30s, so docker sent SIGKILL.
-   restore: docker start FORGEJO-ACTIONS-TASK-29083_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-
-5. ai01-cargo-cache.timer
-   prior: active (waiting)
-   command: sudo systemctl stop ai01-cargo-cache.timer
-   after: inactive (dead)
-   restore: sudo systemctl start ai01-cargo-cache.timer
-
-fstrim.timer
-   prior: active (waiting)
-   command: sudo systemctl start fstrim.timer
-   after: active (waiting)
-   leave this started
-
-Hollow Engine cargo / rustc
-   prior: no host cargo or rustc processes
-   command: none (nothing to SIGTERM)
-   after: none
-
-No containers were docker-paused at stop time, so no unpause was required.
-
-Left running on purpose:
-- forgejo (codeberg.org/forgejo/forgejo:16.0.5) Up
-- vllm-k8v4-tp2 Up
-- vllm-k8v4-tp2-before-gmu090-20261104T195848 already Exited (137), not started
-- vllm-k8v4-tp2-before-attnprof-20261104T180008 already Exited (137), not started
-
-Created job containers left as they were (not started, not deleted):
-- FORGEJO-ACTIONS-TASK-28881_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-- FORGEJO-ACTIONS-TASK-28868_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-- FORGEJO-ACTIONS-TASK-28373_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-- FORGEJO-ACTIONS-TASK-28308_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
-- FORGEJO-ACTIONS-TASK-28305_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
-- FORGEJO-ACTIONS-TASK-28304_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
-- FORGEJO-ACTIONS-TASK-27577_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
-- FORGEJO-ACTIONS-TASK-27576_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
-- FORGEJO-ACTIONS-TASK-27575_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-- FORGEJO-ACTIONS-TASK-27567_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
-- FORGEJO-ACTIONS-TASK-27458_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
-
-Right after boot these job containers were Up, and they were already gone before the stop (this session did not docker rm them):
-- FORGEJO-ACTIONS-TASK-29080 Rust-fmt-test-clippy
-- FORGEJO-ACTIONS-TASK-29079 Repository-hygiene
-- FORGEJO-ACTIONS-TASK-29077 Forge-ops-scripts
-- FORGEJO-ACTIONS-TASK-29081 merge-gate-evaluator
-- FORGEJO-ACTIONS-TASK-29078 merge-gate-evaluator
-These were Exited (255) then also gone before the stop:
-- FORGEJO-ACTIONS-TASK-29075 Rust-fmt-test-clippy
-- FORGEJO-ACTIONS-TASK-29073 Rust-fmt-test-clippy
-- FORGEJO-ACTIONS-TASK-29074 Repository-hygiene
-- FORGEJO-ACTIONS-TASK-29072 Repository-hygiene
-- FORGEJO-ACTIONS-TASK-29071 Rust-fmt-test-clippy
+# CI stopped for the session (Daniel). Written Thu Nov  5 00:26:26 UTC 2026 by kernel-bench agent.
+## Who restarted CI: ssh session as dan from 100.71.157.125 (desktop-9u46sbp) ran 'sudo systemctl start forge-runner-hdd.service' at 2026-11-05 00:10:28 UTC (7:10:28 PM ET); forgejo-runner + wrapzii-server-runner started the same second. Not issued by this agent's logged commands.
+## Old restart policies
+forgejo-runner unless-stopped
+wrapzii-server-runner unless-stopped
+## Actions
+docker update --restart=no forgejo-runner
+docker update --restart=no wrapzii-server-runner
+systemctl stop forge-runner-hdd.service
+Created symlink /run/systemd/system/forge-runner-hdd.service → /dev/null.
+systemctl mask --runtime forge-runner-hdd.service
+docker stop FORGEJO-ACTIONS-TASK-29098_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+docker stop FORGEJO-ACTIONS-TASK-29090_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29087_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-29085_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-28881_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop FORGEJO-ACTIONS-TASK-28868_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop FORGEJO-ACTIONS-TASK-28373_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop FORGEJO-ACTIONS-TASK-28308_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+docker stop FORGEJO-ACTIONS-TASK-28305_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-28304_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+docker stop FORGEJO-ACTIONS-TASK-27577_WORKFLOW-d9c8eaad9e67344d0d358601f12c66bedec668e62c8ea8a08a66fe6ae033c68e_JOB-Rust-fmt-test-clippy
+docker stop FORGEJO-ACTIONS-TASK-27576_WORKFLOW-3bb28f1ce84f437943a2c9016cd4011475987e7ffd74761c42952d217778756d_JOB-Repository-hygiene
+docker stop FORGEJO-ACTIONS-TASK-27575_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop FORGEJO-ACTIONS-TASK-27567_WORKFLOW-69ebc4e5426388e1a730128233af57e87b2c46f26f14833fa74a3ce7e95a0d72_JOB-Forge-ops-scripts
+docker stop FORGEJO-ACTIONS-TASK-27458_WORKFLOW-e6202a9bd04587a89df164c8a3d1d381a2b0e850fc74b1b99c8170dc241081df_JOB-merge-gate-evaluator
+docker stop forgejo-runner
+docker stop wrapzii-server-runner
+root-guard: /run/ci-root-guard-paused present? no (root_guard.sh only restarts wrapzii-server-runner via compose if that mark exists; left enabled for its cleanup role)
+fstrim.timer: active  ai01-cargo-cache.timer: active
+## Restore (only when Daniel asks)
+sudo systemctl unmask --runtime forge-runner-hdd.service && sudo systemctl start forge-runner-hdd.service
+docker update --restart=unless-stopped forgejo-runner wrapzii-server-runner && docker start forgejo-runner
+Created symlink /run/systemd/system/ai01-cargo-cache.timer → /dev/null.
+stopped+mask --runtime ai01-cargo-cache.timer (restore: sudo systemctl unmask --runtime ai01-cargo-cache.timer && sudo systemctl start ai01-cargo-cache.timer)
+## Disk cleanup
+exited CI job containers: 4
+Total:	973.2MB
+apport /var/crash removed: 215M
+/mnt/hdd-500gb: 132.6 MiB (139063296 bytes) trimmed on /dev/sdb1
+/mnt/extra: 631 MiB (661680128 bytes) trimmed on /dev/sdc1
+/boot/efi: 98.2 MiB (102995968 bytes) trimmed on /dev/sda15
+/: 48.8 GiB (52421988352 bytes) trimmed on /dev/sda1
+root before:  325G  90%  after:  311G  86%
+apport /var/lib/apport/coredump removed: 3.1G
