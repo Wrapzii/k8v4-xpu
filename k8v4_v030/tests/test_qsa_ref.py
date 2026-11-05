@@ -232,12 +232,37 @@ class StateDictTest(unittest.TestCase):
             "layers.7._qsa_indexer.k_norm.weight": weights.k_norm,
             "layers.7._qsa_indexer.k_block_norm": weights.k_block_norm,
         }
-        loaded = IndexerBank.from_state_dict(state, hyper)
+        loaded = IndexerBank.from_state_dict(state, hyper, norm_storage="multiplier")
         assert loaded is not None
-        self.assertEqual(loaded.get(7).numel(), weights.numel())
+        got = loaded.get(7)
+        assert got is not None
+        self.assertEqual(got.numel(), weights.numel())
+        self.assertTrue(torch.equal(got.k_norm, weights.k_norm))
         del state["layers.7._qsa_indexer.k_block_norm"]
         with self.assertRaisesRegex(ValueError, "missing"):
-            IndexerBank.from_state_dict(state, hyper)
+            IndexerBank.from_state_dict(state, hyper, norm_storage="multiplier")
+
+    def test_hf_delta_and_self_attn_key_become_the_multiplier(self):
+        hyper = QsaHyper()
+        dim = hyper.dim
+        q_out = hyper.heads * dim
+        q_proj = torch.randn(q_out, hyper.hidden)
+        k_proj = torch.randn(dim, hyper.hidden)
+        state = {
+            "model.language_model.layers.3.self_attn._qsa_indexer.q_proj.weight": q_proj,
+            "model.language_model.layers.3.self_attn._qsa_indexer.k_proj.weight": k_proj,
+            "model.language_model.layers.3.self_attn._qsa_indexer.q_norm": torch.zeros(dim),
+            "model.language_model.layers.3.self_attn._qsa_indexer.k_norm": torch.full((dim,), 0.25),
+            "model.language_model.layers.3.self_attn._qsa_indexer.k_block_norm": torch.full((dim,), -0.5),
+        }
+        loaded = IndexerBank.from_state_dict(state, hyper)
+        assert loaded is not None
+        got = loaded.get(3)
+        assert got is not None
+        self.assertTrue(torch.equal(got.q_proj, q_proj))
+        self.assertTrue(torch.equal(got.q_norm, torch.ones(dim)))
+        self.assertTrue(torch.equal(got.k_norm, torch.full((dim,), 1.25)))
+        self.assertTrue(torch.equal(got.k_block_norm, torch.full((dim,), 0.5)))
 
     def test_directory_reads_indexer_shards_and_skips_dense_weights(self):
         from safetensors.torch import save_file
@@ -256,11 +281,12 @@ class StateDictTest(unittest.TestCase):
             save_file(
                 {
                     "model.layers.3._qsa_indexer.k_proj.weight": weights.k_proj,
-                    "model.layers.3._qsa_indexer.q_norm": weights.q_norm,
-                    "model.layers.3._qsa_indexer.k_norm": weights.k_norm,
-                    "model.layers.3._qsa_indexer.k_block_norm": weights.k_block_norm,
+                    "model.layers.3._qsa_indexer.q_norm": weights.q_norm - 1,
+                    "model.layers.3._qsa_indexer.k_norm": weights.k_norm - 1,
+                    "model.layers.3._qsa_indexer.k_block_norm": weights.k_block_norm - 1,
                 },
                 os.path.join(folder, "model-00002-of-00002.safetensors"),
+                metadata={"norm_storage": "zero-centered-delta"},
             )
             index = {
                 "weight_map": {
@@ -279,8 +305,27 @@ class StateDictTest(unittest.TestCase):
             got = loaded.get(3)
             assert got is not None
             self.assertTrue(torch.equal(got.q_proj, weights.q_proj))
+            self.assertTrue(torch.equal(got.q_norm, weights.q_norm))
+            self.assertTrue(torch.equal(got.k_norm, weights.k_norm))
             self.assertTrue(torch.equal(got.k_block_norm, weights.k_block_norm))
             self.assertEqual(got.numel(), weights.numel())
+            baked = os.path.join(folder, "baked.safetensors")
+            save_file(
+                {
+                    "model.layers.3._qsa_indexer.q_proj.weight": weights.q_proj,
+                    "model.layers.3._qsa_indexer.k_proj.weight": weights.k_proj,
+                    "model.layers.3._qsa_indexer.q_norm": weights.q_norm,
+                    "model.layers.3._qsa_indexer.k_norm": weights.k_norm,
+                    "model.layers.3._qsa_indexer.k_block_norm": weights.k_block_norm,
+                },
+                baked,
+                metadata={"norm_storage": "multiplier"},
+            )
+            baked_bank = load_bank_file(baked, hyper)
+            assert baked_bank is not None
+            baked_got = baked_bank.get(3)
+            assert baked_got is not None
+            self.assertTrue(torch.equal(baked_got.k_block_norm, weights.k_block_norm))
             empty = tempfile.mkdtemp()
             try:
                 self.assertIsNone(load_bank_file(empty, hyper))

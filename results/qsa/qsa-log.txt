@@ -39,3 +39,8 @@
 2026-11-05T20:16Z qsa: write a step of raw indexer keys in one scatter
 - write_tokens stores the step, skips negative padding slots, and re-pools each touched micro-block with the same pool_block as write_token. A CPU compare of the two writers matched raw keys, positions, fill flags, and pooled rows exactly.
 - The forward uses that scatter. Cache, runtime, and quant tests in an ephemeral container, no GPU: 12 tests OK. No production kernel, container, or image changes.
+
+2026-11-05T20:21Z qsa: load indexer norms as zero-centered deltas
+- Training stores q_norm, k_norm, and k_block_norm as 1+weight deltas (zeros at init). conversion/qwen.py adds 1 when it writes GGUF. ggml build_norm multiplies by that stored vector and does not add 1 again. The in-memory bank keeps the real multiplier, and load_bank_file adds 1 unless safetensors metadata says norm_storage=multiplier.
+- A stored zero therefore loads as ones, which is an identity RMSNorm. The training export key layers.{i}.self_attn._qsa_indexer.* is accepted. The training score scale 1/sqrt(128) is positive and shared, so it does not change top-k order. The fast path still does not apply it.
+- CPU test, ephemeral container, no GPU: test_qsa_ref 11 tests OK. No production kernel, container, or image changes.

@@ -35,7 +35,9 @@ Per full-attention layer, five FP32 tensors (80 tensors across 16 layers, 52,434
 | `k_norm` or `k_norm.weight` | RMSNorm on the raw key, before the cache | `[128]` |
 | `k_block_norm` or `k_block_norm.weight` | RMSNorm on the mean-pooled block key | `[128]` |
 
-GGUF stores the norm vectors as `weight + 1` because ggml RMSNorm multiplies by `(1 + w)`. HF and this backend store the real multiplier. RMSNorm is `x * rsqrt(mean(x^2) + 1e-6) * weight` with the Swift `rms_norm_eps`.
+Training checkpoints, and the HF tensors `QSAQwen35Model.modify_tensors` reads, store zero-centered deltas. That converter adds 1 before writing GGUF. ggml `build_norm` then multiplies by the stored vector (`ggml_rms_norm`, then `ggml_mul`); it does not add 1 a second time. The in-memory bank holds that real multiplier. `load_bank_file` adds 1 to `q_norm`, `k_norm`, and `k_block_norm`, so a stored zero (the training initialization) is an identity RMSNorm. Safetensors metadata `norm_storage=multiplier` skips the add. RMSNorm is `x * rsqrt(mean(x^2) + 1e-6) * weight` with the Swift `rms_norm_eps`.
+
+The training loss multiplies the ReLU sum by `1/sqrt(128)`. That factor is positive and the same for every block, so it does not change which blocks win or how ties break. The llama.cpp fast path does not apply it. This backend does not either.
 
 The indexer is MQA: 4 query heads, 1 shared key, head dim 128. It reads the same post-attention-norm hidden state that feeds the main QKV projection (`build_qsa_blk_select` / `build_qsa_mask` in the fork).
 
@@ -79,7 +81,7 @@ The bank is sized from the live K8V4 cache tensor on first use (`num_blocks` and
 
 `Xe2K8V4Impl.forward` receives Q, K, V after projection. The indexer needs the pre-projection hidden state. With `K8V4_QSA=1`, the backend wraps the loaded Qwen full-attention module (`forward` that takes `hidden_states`) and stashes `(layer_idx, hidden, positions)` for the matching backend call. Layer index is parsed from `layers.{i}.` on the module prefix. Gated DeltaNet modules are not wrapped. If the stash is empty or the layer has no weights, forward falls through to dense K8V4.
 
-Weights load from `K8V4_QSA_WEIGHTS`: a torch state dict, one safetensors file, or an HF directory. A directory reads only `_qsa_indexer` tensors, using `model.safetensors.index.json` when it is present, so the dense checkpoint is not pulled into memory. Zero indexer tensors means "no bank": dense. A partial layer (some of the five tensors missing) is an error. Tests build a bank in memory with `set_bank`.
+Weights load from `K8V4_QSA_WEIGHTS`: a torch state dict, one safetensors file, or an HF directory. A directory reads only `_qsa_indexer` tensors, using `model.safetensors.index.json` when it is present, so the dense checkpoint is not pulled into memory. The tensor may be named `layers.{i}._qsa_indexer.*` or `layers.{i}.self_attn._qsa_indexer.*`, which is the training export. Zero indexer tensors means "no bank": dense. A partial layer (some of the five tensors missing) is an error. Tests build a bank in memory with `set_bank`; those objects already hold real multipliers, and the file loader is what adds 1.
 
 ## Kernels
 
