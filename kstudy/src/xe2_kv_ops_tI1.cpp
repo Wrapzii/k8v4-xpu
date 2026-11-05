@@ -2708,20 +2708,41 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
 #pragma unroll
             for (int t = 0; t < BM; ++t) scores[r][t] = -INFINITY;
           }
-          if (sg_live) {
+          if (!sg_live) {
+            // Padding SG: publish empty softmax state (match lo).
+#pragma unroll
+            for (int r = 0; r < TM; ++r) {
+              M[static_cast<size_t>(prog_x) * BM + row0 + r] = -INFINITY;
+              L[static_cast<size_t>(prog_x) * BM + row0 + r] = 0.f;
+            }
+          } else {
             const std::int8_t *qbase = Q8 + (static_cast<size_t>(kv_head) * BM + row0) * BK;
             const float *qsc = Qsc + static_cast<size_t>(kv_head) * BM + row0;
             for (int t = 0; t < n_valid; ++t) {
               const std::int8_t *krow = K8 + k_head_off + static_cast<size_t>(t) * k_tok_stride;
               const float ksc = Ksc[sc_head_off + static_cast<size_t>(t) * sc_tok_stride];
+              const std::int64_t k_abs = static_cast<std::int64_t>(logical) * BM + t;
 #pragma unroll
               for (int r = 0; r < TM; ++r) {
-                if (row0 + r >= q_len * GQA) continue;
-                const std::int8_t *qrow = qbase + r * BK;
-                int32_t acc = 0;
+                const int row = row0 + r;
+                if (row >= q_len * GQA) continue;
+                const int q_tok = row / GQA;
+                const bool live_q = row < q_len * GQA;
+                const std::int64_t q_end = live_q
+                    ? (visible_lens
+                           ? static_cast<std::int64_t>(visible_lens[1 + q_tok])
+                           : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1)
+                    : 0;
+                float s;
+                if (k_abs >= q_end) {
+                  s = -INFINITY;
+                } else {
+                  const std::int8_t *qrow = qbase + r * BK;
+                  int32_t acc = 0;
 #pragma unroll
-                for (int d = 0; d < BK; ++d) acc += static_cast<int32_t>(qrow[d]) * static_cast<int32_t>(krow[d]);
-                const float s = static_cast<float>(acc) * qsc[r] * ksc * INV_SQRT_D;
+                  for (int d = 0; d < BK; ++d) acc += static_cast<int32_t>(qrow[d]) * static_cast<int32_t>(krow[d]);
+                  s = static_cast<float>(acc) * qsc[r] * ksc * INV_SQRT_D;
+                }
                 scores[r][t] = s;
                 row_max[r] = (s > row_max[r]) ? s : row_max[r];
               }
@@ -2730,10 +2751,15 @@ static void launch_int8k_int4v_s1_paged_reuse_esimd(sycl::queue &q, const std::i
             for (int r = 0; r < TM; ++r) {
               if (row0 + r >= q_len * GQA) continue;
               float sm = 0.f;
-              for (int t = 0; t < n_valid; ++t) {
-                const float e = esimd::exp(esimd::simd<float, 1>(scores[r][t] - row_max[r]))[0];
-                scores[r][t] = e;
-                sm += e;
+              if (row_max[r] == -INFINITY) {
+                for (int t = 0; t < n_valid; ++t) scores[r][t] = 0.f;
+                sm = 0.f;
+              } else {
+                for (int t = 0; t < n_valid; ++t) {
+                  const float e = esimd::exp(esimd::simd<float, 1>(scores[r][t] - row_max[r]))[0];
+                  scores[r][t] = e;
+                  sm += e;
+                }
               }
               row_sum[r] = sm;
               M[static_cast<size_t>(prog_x) * BM + row0 + r] = row_max[r];
