@@ -13,8 +13,13 @@ HF names, anywhere under the state dict::
     layers.{i}._qsa_indexer.k_norm             [128]   pre-pool
     layers.{i}._qsa_indexer.k_block_norm       [128]   after the mean
 
-Norm tensors may also use a ``.weight`` suffix. The values are the real
-RMSNorm multipliers. Do not add the ggml ``+ 1``.
+Norm tensors may also use a ``.weight`` suffix. On disk they are the
+zero-centered deltas the training checkpoint and ``conversion/qwen.py``
+store (zeros mean identity). ``from_state_dict`` adds 1, which is what
+that converter writes into GGUF and what ggml then multiplies by.
+Safetensors metadata ``norm_storage=multiplier`` means the file already
+holds that multiplier and the add is skipped. The key may be
+``layers.{i}._qsa_indexer.*`` or ``layers.{i}.self_attn._qsa_indexer.*``.
 """
 
 from __future__ import annotations
@@ -29,7 +34,9 @@ import torch
 from k8v4_v030.qsa_config import HIDDEN, IDX_DIM, IDX_HEADS, PARAMS_PER_LAYER, full_attention_layers
 from k8v4_v030.qsa_ref import QsaHyper
 
-_LAYER = re.compile(r"(?:^|\.)layers\.(\d+)\._qsa_indexer\.(.+)$")
+_LAYER = re.compile(
+    r"(?:^|\.)layers\.(\d+)\.(?:self_attn\.)?_qsa_indexer\.(.+)$"
+)
 _FIELDS = {
     "q_proj.weight": "q_proj",
     "k_proj.weight": "k_proj",
@@ -41,6 +48,8 @@ _FIELDS = {
     "k_block_norm.weight": "k_block_norm",
 }
 _REQUIRED = ("q_proj", "k_proj", "q_norm", "k_block_norm", "k_norm")
+_NORM_FIELDS = frozenset({"q_norm", "k_norm", "k_block_norm"})
+_MULTIPLIER_STORAGE = frozenset({"multiplier", "real", "real-multiplier"})
 
 _BANK: "IndexerBank | None" = None
 
@@ -96,9 +105,19 @@ class IndexerBank:
         cls,
         state: dict[str, torch.Tensor],
         hyper: QsaHyper | None = None,
+        norm_storage: str = "delta",
     ) -> "IndexerBank | None":
-        """Return None when ``state`` has no indexer tensors."""
+        """Return None when ``state`` has no indexer tensors.
+
+        ``norm_storage="delta"`` adds 1 to the three norm vectors. That is
+        the training and HF layout: a stored zero is an identity RMSNorm.
+        ``norm_storage="multiplier"`` keeps the stored values.
+        """
         hyper = hyper or QsaHyper()
+        storage = str(norm_storage).strip().lower().replace("_", "-")
+        if storage not in _MULTIPLIER_STORAGE and storage != "delta":
+            storage = "delta"
+        add_one = storage not in _MULTIPLIER_STORAGE
         found: dict[int, dict[str, torch.Tensor]] = {}
         for name, tensor in state.items():
             match = _LAYER.search(str(name))
@@ -111,7 +130,10 @@ class IndexerBank:
             slot = found.setdefault(layer, {})
             if field in slot:
                 raise ValueError("duplicate indexer tensor %s" % name)
-            slot[field] = tensor.detach().to(torch.float32).contiguous()
+            value = tensor.detach().to(torch.float32).contiguous()
+            if add_one and field in _NORM_FIELDS:
+                value = value + 1
+            slot[field] = value
         if not found:
             return None
         layers: dict[int, IndexerWeights] = {}
@@ -175,16 +197,27 @@ def _is_indexer_name(name: str) -> bool:
     return _LAYER.search(str(name)) is not None
 
 
-def _read_indexer_safetensors(path: str) -> dict[str, torch.Tensor]:
+def _storage_name(metadata: dict | None) -> str:
+    """``multiplier`` keeps stored norms. Anything else is a zero-centered delta."""
+    if not metadata:
+        return "delta"
+    raw = str(metadata.get("norm_storage", "")).strip().lower().replace("_", "-")
+    if raw in _MULTIPLIER_STORAGE:
+        return "multiplier"
+    return "delta"
+
+
+def _read_indexer_safetensors(path: str) -> tuple[dict[str, torch.Tensor], str]:
     """Read only indexer tensors. Other keys in the shard stay on disk."""
     from safetensors import safe_open
 
     found: dict[str, torch.Tensor] = {}
     with safe_open(path, framework="pt", device="cpu") as handle:
+        storage = _storage_name(handle.metadata())
         for name in handle.keys():
             if _is_indexer_name(name):
                 found[str(name)] = handle.get_tensor(name)
-    return found
+    return found, storage
 
 
 def _indexer_shards(directory: str) -> list[str]:
@@ -209,34 +242,46 @@ def _indexer_shards(directory: str) -> list[str]:
     return [os.path.join(directory, name) for name in names]
 
 
-def load_state_dict_file(path: str) -> dict[str, torch.Tensor]:
+def load_state_dict_file(path: str) -> tuple[dict[str, torch.Tensor], str]:
     """Load indexer tensors from a torch save, a safetensors file, or a directory.
 
     A directory is an HF checkpoint folder. Only ``_qsa_indexer`` tensors are
     read, so pointing this at a full model does not pull the dense weights
     into memory. A folder with none of those tensors yields an empty dict,
-    which the bank treats as "no indexer".
+    which the bank treats as "no indexer". The second value is ``delta`` or
+    ``multiplier``. A torch save has no metadata and is always ``delta``.
     """
     if os.path.isdir(path):
         found: dict[str, torch.Tensor] = {}
+        storage = "delta"
+        saw = False
         for shard in _indexer_shards(path):
             if not os.path.isfile(shard):
                 raise FileNotFoundError(shard)
-            for name, tensor in _read_indexer_safetensors(shard).items():
+            tensors, shard_storage = _read_indexer_safetensors(shard)
+            if not tensors:
+                continue
+            if saw and shard_storage != storage:
+                raise ValueError("indexer shards disagree on norm_storage")
+            storage = shard_storage
+            saw = True
+            for name, tensor in tensors.items():
                 if name in found:
                     raise ValueError("duplicate indexer tensor %s" % name)
                 found[name] = tensor
-        return found
+        return found, storage
     if path.endswith(".safetensors"):
         return _read_indexer_safetensors(path)
     loaded = torch.load(path, map_location="cpu", weights_only=True)
     if not isinstance(loaded, dict):
         raise ValueError("indexer checkpoint is not a state dict")
-    return {str(k): v for k, v in loaded.items() if isinstance(v, torch.Tensor)}
+    state = {str(k): v for k, v in loaded.items() if isinstance(v, torch.Tensor)}
+    return state, "delta"
 
 
 def load_bank_file(path: str, hyper: QsaHyper | None = None) -> IndexerBank | None:
-    return IndexerBank.from_state_dict(load_state_dict_file(path), hyper)
+    state, storage = load_state_dict_file(path)
+    return IndexerBank.from_state_dict(state, hyper, norm_storage=storage)
 
 
 def expected_full_numel() -> int:
