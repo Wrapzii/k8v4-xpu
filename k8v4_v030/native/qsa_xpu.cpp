@@ -6,6 +6,8 @@
 //   An ESIMD variant does the same reduction when the header is compiled in
 //   and QSA_SCORE_ESIMD=1.
 // qsa_topk: k largest scores. Ties keep the lower block id.
+// qsa_visible: those blocks expanded to ascending token cells, plus the
+//   query's own block. -1 pads the row. Same list as the Python reference.
 // qsa_sparse_attn: INT8 K / INT4 V attention over an explicit token list.
 //   Q is quantized with amax/127 and rint, matching the dense kernel.
 //   Score is int_dot * q_scale * k_scale * (1/16). Online softmax, then
@@ -269,6 +271,122 @@ static void launch_sparse(sycl::queue &q, const void *query, bool query_fp16, fl
   });
 }
 
+static int emit_block_tokens(int32_t *tokens, int written, int width, int block, int span,
+                             int ratio, int cell) {
+  if (block < 0 || span < 1) return written;
+  const int start = block * ratio;
+  for (int off = 0; off < span && written < width; ++off) {
+    const int token = start + off;
+    if (token <= cell) tokens[written++] = token;
+  }
+  return written;
+}
+
+static void launch_visible(sycl::queue &q, const float *scores, const int32_t *counts,
+                           const int32_t *cells, int32_t *chosen, int32_t *out, int n_query,
+                           int n_blocks, int k, int width, int ratio, int force) {
+  if (n_query < 1) return;
+  q.submit([&](sycl::handler &h) {
+    h.parallel_for(sycl::range<1>(static_cast<size_t>(n_query)), [=](sycl::id<1> id) {
+      const int query_i = static_cast<int>(id);
+      const int count = counts[query_i];
+      const int cell = cells[query_i];
+      const int own = cell / ratio;
+      const int own_width = cell % ratio + 1;
+      int32_t *tokens = out + static_cast<int64_t>(query_i) * width;
+      int written = 0;
+      if (force || count <= k) {
+        for (int block = 0; block < count; ++block) {
+          written = emit_block_tokens(tokens, written, width, block, block == own ? own_width : ratio,
+                                      ratio, cell);
+        }
+        if (own >= count) {
+          written = emit_block_tokens(tokens, written, width, own, own_width, ratio, cell);
+        }
+        return;
+      }
+      int32_t *picked = chosen + static_cast<int64_t>(query_i) * k;
+      const float *row = scores + static_cast<int64_t>(query_i) * n_blocks;
+      for (int slot = 0; slot < k; ++slot) {
+        int best = -1;
+        float best_s = 0.f;
+        for (int block = 0; block < count; ++block) {
+          bool used = false;
+          for (int prev = 0; prev < slot; ++prev) {
+            if (picked[prev] == block) {
+              used = true;
+              break;
+            }
+          }
+          if (used) continue;
+          const float s = row[block];
+          if (best < 0 || s > best_s) {
+            best = block;
+            best_s = s;
+          }
+        }
+        picked[slot] = best;
+      }
+      for (int i = 1; i < k; ++i) {
+        const int32_t value = picked[i];
+        int j = i;
+        while (j > 0 && picked[j - 1] > value) {
+          picked[j] = picked[j - 1];
+          --j;
+        }
+        picked[j] = value;
+      }
+      bool present = false;
+      for (int i = 0; i < k; ++i) {
+        if (picked[i] == own) present = true;
+      }
+      bool emitted_own = present;
+      for (int i = 0; i < k; ++i) {
+        if (!present && !emitted_own && own < picked[i]) {
+          written = emit_block_tokens(tokens, written, width, own, own_width, ratio, cell);
+          emitted_own = true;
+        }
+        const int block = picked[i];
+        written = emit_block_tokens(tokens, written, width, block, block == own ? own_width : ratio,
+                                    ratio, cell);
+      }
+      if (!present && !emitted_own) {
+        written = emit_block_tokens(tokens, written, width, own, own_width, ratio, cell);
+      }
+    });
+  });
+}
+
+static void qsa_visible(const at::Tensor &scores, const at::Tensor &counts, const at::Tensor &cells,
+                        at::Tensor out, int64_t k, int64_t ratio, int64_t force) {
+  check_xpu(scores, "scores");
+  check_xpu(counts, "counts");
+  check_xpu(cells, "cells");
+  check_xpu(out, "out");
+  TORCH_CHECK(scores.is_contiguous() && counts.is_contiguous() && cells.is_contiguous() &&
+                  out.is_contiguous(),
+              "qsa_visible tensors must be contiguous");
+  TORCH_CHECK(scores.scalar_type() == at::kFloat, "qsa_visible scores are fp32");
+  TORCH_CHECK(counts.scalar_type() == at::kInt && cells.scalar_type() == at::kInt &&
+                  out.scalar_type() == at::kInt,
+              "qsa_visible index dtypes");
+  TORCH_CHECK(scores.dim() == 2 && counts.dim() == 1 && cells.dim() == 1 && out.dim() == 2,
+              "qsa_visible ranks");
+  TORCH_CHECK(k >= 1 && ratio >= 1, "qsa_visible k and ratio");
+  TORCH_CHECK(counts.size(0) == scores.size(0) && cells.size(0) == scores.size(0) &&
+                  out.size(0) == scores.size(0),
+              "qsa_visible query count");
+  TORCH_CHECK(out.size(1) >= 1, "qsa_visible width");
+  const int n_query = static_cast<int>(scores.size(0));
+  const int n_blocks = static_cast<int>(scores.size(1));
+  TORCH_CHECK(n_blocks >= 1, "qsa_visible needs at least one score column");
+  auto scratch = at::empty({scores.size(0), k}, scores.options().dtype(at::kInt));
+  launch_visible(current_xpu_queue(), scores.data_ptr<float>(), counts.data_ptr<int32_t>(),
+                 cells.data_ptr<int32_t>(), scratch.data_ptr<int32_t>(), out.data_ptr<int32_t>(),
+                 n_query, n_blocks, static_cast<int>(k), static_cast<int>(out.size(1)),
+                 static_cast<int>(ratio), force != 0 ? 1 : 0);
+}
+
 static void qsa_score(const at::Tensor &query, const at::Tensor &pooled, at::Tensor scores) {
   check_xpu(query, "query");
   check_xpu(pooled, "pooled");
@@ -363,6 +481,9 @@ TORCH_LIBRARY(xe2_qsa, m) {
   m.def("qsa_score(Tensor query, Tensor pooled, Tensor(a!) scores) -> ()");
   m.def("qsa_topk(Tensor scores, Tensor(a!) ids, int k) -> ()");
   m.def(
+      "qsa_visible(Tensor scores, Tensor counts, Tensor cells, Tensor(a!) out, int k, int ratio, "
+      "int force) -> ()");
+  m.def(
       "qsa_sparse_attn(Tensor query, Tensor k, Tensor k_scale, Tensor v, Tensor v_scale, "
       "Tensor v_zero, Tensor block_row, Tensor visible, Tensor(a!) out, int pages_per_block, "
       "int seq_len) -> ()");
@@ -371,5 +492,6 @@ TORCH_LIBRARY(xe2_qsa, m) {
 TORCH_LIBRARY_IMPL(xe2_qsa, XPU, m) {
   m.impl("qsa_score", &qsa_score);
   m.impl("qsa_topk", &qsa_topk);
+  m.impl("qsa_visible", &qsa_visible);
   m.impl("qsa_sparse_attn", &qsa_sparse_attn);
 }

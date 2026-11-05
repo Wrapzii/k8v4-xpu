@@ -48,3 +48,8 @@
 2026-11-05T20:24Z qsa: one batch can mix a sparse request with a dense one
 - Two requests share a forward. One has 16 tokens and a budget of 8, so its last query drops a block. The other has 4 tokens, stays a full causal set, and reads a different physical block. Swapping that short request onto the long request's block changes its output.
 - CPU tests, ephemeral container, no GPU: runtime, cache, and quant 12 tests OK. No production kernel, container, or image changes.
+
+2026-11-05T20:30Z qsa: pack the visible token list, and compile qsa_visible
+- packed_visible_rows is the token list the sparse kernel reads. Inside the budget it is the full causal range. One block past the budget, top-k can drop the query's own block and the own-block rule puts it back, so that row is causal again. A lower block that loses stays out. Ties keep the lower block id. The CPU forward builds its lists from this pack.
+- qsa_visible is the same selection in one XPU launch. libxe2_qsa.so was rebuilt with the ESIMD score path still compiled in, sha256 1fd8f0720edb7801e0a1932a994dd42c6ec20c4ceefa20366f4aa9ac7405ee0c. The compile did not use a GPU. The eager XPU forward still expands qsa_topk ids. qsa_visible has not been compared on a device.
+- CPU tests, ephemeral container, no GPU: contract, runtime, and reference 22 tests OK. No production kernel, container, or image changes. No speedup was measured.
