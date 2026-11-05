@@ -1,4 +1,5 @@
 #!/bin/bash
+# bench-hold is acquired/released inside gpubench.sh (not duplicated here).
 # usage: twice.sh <tag> <lib1> <lib2> <variants> [ctx]  -- fast loop from two separate builds, separate processes.
 # A variant is a WIN only if it beats the first (baseline) variant by >=3% in BOTH runs.
 cd ~/agent-work/k8v4-attnprof-20261104; T=$1; L1=$2; L2=$3; V=$4; C=${5:-204800}
