@@ -121,6 +121,8 @@ class RuntimeTest(unittest.TestCase):
         os.environ.pop("K8V4_QSA_FORCE_ALL", None)
         os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
         os.environ.pop("K8V4_QSA_WEIGHTS", None)
+        os.environ.pop("K8V4_QSA_EAGER", None)
+        os.environ.pop("K8V4_QSA_STATS", None)
         reset_caches()
         reset_bank()
 
@@ -128,6 +130,8 @@ class RuntimeTest(unittest.TestCase):
         os.environ.pop("K8V4_QSA", None)
         os.environ.pop("K8V4_QSA_FORCE_ALL", None)
         os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
+        os.environ.pop("K8V4_QSA_EAGER", None)
+        os.environ.pop("K8V4_QSA_STATS", None)
         reset_caches()
         reset_bank()
 
@@ -455,6 +459,224 @@ class RuntimeTest(unittest.TestCase):
         direct.write_token(0, torch.ones(cache.hyper.dim), torch.zeros(4, dtype=torch.int64), norm)
         apply_scheduled_copies(2, [types.SimpleNamespace(src_block_id=0, dst_block_id=1)])
         self.assertTrue(torch.equal(direct.raw[64], direct.raw[0]))
+
+    def test_eager_wrapper_still_stashes_outside_compile(self):
+        from k8v4_v030.qsa_runtime import install_if_requested, take_hidden
+
+        module = types.ModuleType("vllm.qsa_eager_mod")
+
+        class Qwen3NextAttention:
+            def __init__(self):
+                self.attn = types.SimpleNamespace(layer_name="model.layers.3.self_attn.attn")
+
+            def forward(self, positions, hidden_states):
+                return hidden_states
+
+        module.Qwen3NextAttention = Qwen3NextAttention
+        sys.modules["vllm.qsa_eager_mod"] = module
+        os.environ["K8V4_QSA"] = "1"
+        os.environ["K8V4_QSA_EAGER"] = "1"
+        from k8v4_v030 import qsa_runtime
+
+        # install_if_requested stops scanning once it has wrapped a class.
+        # Put the flag back so a later test can wrap its own stand-in.
+        previous = qsa_runtime._CLASSES_WRAPPED
+        try:
+            install_if_requested()
+            self.assertTrue(getattr(Qwen3NextAttention.forward, "_qsa_wrapped", False))
+            hidden = torch.zeros(1, 4)
+            Qwen3NextAttention().forward(torch.tensor([3]), hidden)
+            stashed = take_hidden(3)
+            self.assertIsNotNone(stashed)
+            assert stashed is not None
+            self.assertTrue(torch.equal(stashed[0], hidden))
+        finally:
+            qsa_runtime._CLASSES_WRAPPED = previous
+            sys.modules.pop("vllm.qsa_eager_mod", None)
+
+
+class EagerGraphTest(unittest.TestCase):
+    def tearDown(self):
+        os.environ.pop("K8V4_QSA", None)
+        os.environ.pop("K8V4_QSA_EAGER", None)
+
+    def test_eager_flag_reports_no_cudagraph_support(self):
+        from k8v4_v030.backend import Xe2K8V4MetadataBuilder
+        from vllm.v1.attention.backend import AttentionCGSupport
+
+        self.assertEqual(
+            Xe2K8V4MetadataBuilder.get_cudagraph_support(None, None),
+            AttentionCGSupport.UNIFORM_BATCH,
+        )
+        os.environ["K8V4_QSA_EAGER"] = "1"
+        self.assertEqual(
+            Xe2K8V4MetadataBuilder.get_cudagraph_support(None, None),
+            AttentionCGSupport.UNIFORM_BATCH,
+        )
+        os.environ["K8V4_QSA"] = "1"
+        self.assertEqual(
+            Xe2K8V4MetadataBuilder.get_cudagraph_support(None, None),
+            AttentionCGSupport.NEVER,
+        )
+        os.environ.pop("K8V4_QSA_EAGER", None)
+        self.assertEqual(
+            Xe2K8V4MetadataBuilder.get_cudagraph_support(None, None),
+            AttentionCGSupport.UNIFORM_BATCH,
+        )
+
+
+class StatsTest(unittest.TestCase):
+    def setUp(self):
+        os.environ.pop("K8V4_QSA", None)
+        os.environ.pop("K8V4_QSA_FORCE_ALL", None)
+        os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
+        os.environ.pop("K8V4_QSA_WEIGHTS", None)
+        os.environ.pop("K8V4_QSA_STATS", None)
+        os.environ.pop("K8V4_QSA_STATS_FILE", None)
+        from k8v4_v030.qsa_stats import qsa_stats_reset
+
+        qsa_stats_reset()
+        reset_caches()
+        reset_bank()
+
+    def tearDown(self):
+        os.environ.pop("K8V4_QSA", None)
+        os.environ.pop("K8V4_QSA_FORCE_ALL", None)
+        os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
+        os.environ.pop("K8V4_QSA_STATS", None)
+        os.environ.pop("K8V4_QSA_STATS_FILE", None)
+        from k8v4_v030.qsa_stats import qsa_stats_reset
+
+        qsa_stats_reset()
+        reset_caches()
+        reset_bank()
+
+    def test_counters_stay_quiet_until_enabled(self):
+        import json
+        import tempfile
+
+        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
+        from k8v4_v030.qsa_stats import REASONS, qsa_stats_flush, qsa_stats_snapshot
+
+        hkv = 2
+        impl = _Impl(hkv)
+        layer = _Layer("model.layers.3.self_attn.attn")
+        query = _rows(1, impl.layout.hq, 1)
+        cache = _page(hkv, deterministic_rows(4, hkv, 2), deterministic_rows(4, hkv, 3))
+        meta = _Meta(4, 1, hkv, torch.tensor([3]))
+        output = torch.zeros_like(query)
+        with tempfile.TemporaryDirectory() as temp:
+            path = os.path.join(temp, "stats.jsonl")
+            os.environ["K8V4_QSA_STATS_FILE"] = path
+            note_hidden(3, torch.zeros(1, HIDDEN), torch.tensor([3]))
+            self.assertFalse(try_sparse_forward(impl, layer, query, cache, meta, output))
+            qsa_stats_flush()
+            self.assertFalse(os.path.exists(path))
+            quiet = qsa_stats_snapshot()
+            self.assertEqual(set(quiet), {"prefill", "decode"})
+            self.assertEqual(set(quiet["decode"]), set(REASONS))
+            self.assertEqual(sum(quiet["decode"].values()) + sum(quiet["prefill"].values()), 0)
+
+            os.environ["K8V4_QSA_STATS"] = "1"
+            note_hidden(3, torch.zeros(1, HIDDEN), torch.tensor([3]))
+            self.assertFalse(try_sparse_forward(impl, layer, query, cache, meta, output))
+            prefill_query = _rows(16, impl.layout.hq, 4)
+            prefill_meta = _Meta(16, 16, hkv, torch.arange(16))
+            self.assertFalse(
+                try_sparse_forward(impl, _Layer("not-a-layer"), prefill_query, cache, prefill_meta, torch.zeros_like(prefill_query))
+            )
+            snap = qsa_stats_snapshot()
+            self.assertEqual(snap["decode"]["disabled"], 1)
+            self.assertEqual(snap["prefill"]["disabled"], 1)
+            self.assertEqual(snap["decode"]["sparse_ok"], 0)
+            qsa_stats_flush()
+            lines = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+            # The first decision appends a line; the second is inside the
+            # one-second window, and flush forces the second line.
+            self.assertGreaterEqual(len(lines), 2)
+            self.assertEqual(lines[-1]["decode"]["disabled"], 1)
+            self.assertEqual(lines[-1]["prefill"]["disabled"], 1)
+            before = len(lines)
+            note_hidden(3, torch.zeros(1, HIDDEN), torch.tensor([3]))
+            self.assertFalse(try_sparse_forward(impl, layer, query, cache, meta, output))
+            self.assertEqual(qsa_stats_snapshot()["decode"]["disabled"], 2)
+            mid = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+            self.assertEqual(len(mid), before)
+
+    def test_fallback_reasons_follow_the_forward(self):
+        from k8v4_v030 import qsa_runtime
+        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
+        from k8v4_v030.qsa_stats import qsa_stats_snapshot
+
+        os.environ["K8V4_QSA"] = "1"
+        os.environ["K8V4_QSA_STATS"] = "1"
+        hkv = 2
+        impl = _Impl(hkv)
+        query = _rows(1, impl.layout.hq, 1)
+        cache = _page(hkv, deterministic_rows(4, hkv, 2), deterministic_rows(4, hkv, 3))
+        meta = _Meta(4, 1, hkv, torch.tensor([3]))
+        output = torch.zeros_like(query)
+        note_hidden(3, torch.zeros(1, HIDDEN), torch.tensor([3]))
+        self.assertFalse(try_sparse_forward(impl, _Layer("model.layers.3.self_attn.attn"), query, cache, meta, output))
+        self.assertEqual(qsa_stats_snapshot()["decode"]["no_weights"], 1)
+
+        set_bank(make_random_bank(1, layers=(3,)))
+        note_hidden(1, torch.zeros(1, HIDDEN), torch.tensor([3]))
+        self.assertFalse(try_sparse_forward(impl, _Layer("model.layers.1.self_attn.attn"), query, cache, meta, output))
+        self.assertEqual(qsa_stats_snapshot()["decode"]["not_full_attn"], 1)
+        self.assertFalse(try_sparse_forward(impl, _Layer("draft.mtp.layers.0"), query, cache, meta, output))
+        self.assertEqual(qsa_stats_snapshot()["decode"]["no_layer"], 1)
+        self.assertFalse(try_sparse_forward(impl, _Layer("model.layers.3.self_attn.attn"), query, cache, meta, output))
+        self.assertEqual(qsa_stats_snapshot()["decode"]["no_hidden"], 1)
+
+        note_hidden(3, torch.zeros(1, HIDDEN), torch.tensor([3]))
+        original = qsa_runtime._capturing
+        qsa_runtime._capturing = lambda: True
+        try:
+            self.assertFalse(
+                try_sparse_forward(impl, _Layer("model.layers.3.self_attn.attn"), query, cache, meta, output)
+            )
+        finally:
+            qsa_runtime._capturing = original
+        self.assertEqual(qsa_stats_snapshot()["decode"]["capturing"], 1)
+        self.assertTrue(torch.equal(output, torch.zeros_like(query)))
+
+        # Eight tokens are inside the default budget and inside the decode tile.
+        seq_len = 8
+        wide = _rows(seq_len, impl.layout.hq, 6)
+        wide_cache = _page(hkv, deterministic_rows(seq_len, hkv, 4), deterministic_rows(seq_len, hkv, 5))
+        note_hidden(3, torch.randn(seq_len, HIDDEN), torch.arange(seq_len))
+        self.assertFalse(
+            try_sparse_forward(
+                impl,
+                _Layer("model.layers.3.self_attn.attn"),
+                wide,
+                wide_cache,
+                _Meta(seq_len, seq_len, hkv, torch.arange(seq_len)),
+                torch.zeros_like(wide),
+            )
+        )
+        self.assertEqual(qsa_stats_snapshot()["decode"]["within_budget"], 1)
+
+        # Sixteen tokens is a prefill, and a budget of 8 drops a block.
+        os.environ["K8V4_QSA_TOP_TOKENS"] = "8"
+        reset_caches()
+        long_n = 16
+        long_q = _rows(long_n, impl.layout.hq, 7)
+        long_cache = _page(hkv, deterministic_rows(long_n, hkv, 8), deterministic_rows(long_n, hkv, 9))
+        note_hidden(3, torch.randn(long_n, HIDDEN), torch.arange(long_n))
+        self.assertTrue(
+            try_sparse_forward(
+                impl,
+                _Layer("model.layers.3.self_attn.attn"),
+                long_q,
+                long_cache,
+                _Meta(long_n, long_n, hkv, torch.arange(long_n)),
+                torch.zeros_like(long_q),
+            )
+        )
+        self.assertEqual(qsa_stats_snapshot()["prefill"]["sparse_ok"], 1)
+        self.assertEqual(qsa_stats_snapshot()["decode"]["sparse_ok"], 0)
 
 
 if __name__ == "__main__":

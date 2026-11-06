@@ -129,6 +129,24 @@ class Xe2K8V4Metadata(AttentionMetadata):
 class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
     _cudagraph_support = AttentionCGSupport.UNIFORM_BATCH
 
+    @classmethod
+    def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
+        """Drop decode graphs when QSA must run the eager planner.
+
+        ``qsa_sparse_attn`` takes ``seq_len`` as a host integer and
+        ``qsa_visible`` allocates scratch on every launch, so neither op
+        can be replayed from a FULL_DECODE_ONLY graph. vLLM's
+        ``resolve_cudagraph_mode_and_sizes`` turns FULL_DECODE_ONLY plus
+        ``AttentionCGSupport.NEVER`` into ``NONE`` (or ``PIECEWISE`` when
+        attention is a splitting op). Either way the attention forward is
+        outside the graph. ``K8V4_QSA`` alone leaves uniform-batch capture
+        on, and capture stays dense.
+        """
+        del vllm_config, kv_cache_spec
+        if os.environ.get("K8V4_QSA", "0") == "1" and os.environ.get("K8V4_QSA_EAGER", "0") == "1":
+            return AttentionCGSupport.NEVER
+        return cls._cudagraph_support
+
     def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
         _cascade_prealloc(device, kv_cache_spec)
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
