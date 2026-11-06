@@ -6,9 +6,14 @@ module writes the indexer cache, and sparse attention runs only when a query
 would drop a block (or when ``K8V4_QSA_FORCE_ALL=1``). Otherwise the packed
 or eager K8/V4 kernel runs and the output buffer is left untouched.
 
-An XPU graph capture does not run the Python sparse loop. Until
-``libxe2_qsa.so`` is providing the captured op, capture stays on dense
-K8/V4 and does not write the indexer cache.
+An XPU graph replay does not re-enter this function. ``qsa_sparse_attn``
+bakes ``seq_len`` into the launch, and ``qsa_visible`` allocates on every
+call, so the captured decode cannot follow a growing context. Capture
+therefore stays on dense K8/V4. ``K8V4_QSA_EAGER=1`` makes the builder
+report no cudagraph support; vLLM then runs the step eagerly and the
+device planner below can drop blocks. The eager XPU planner keeps the
+visible-token matrix on device. ``K8V4_QSA_STATS=1`` counts each
+decision; ``k8v4_v030.qsa_stats.qsa_stats_snapshot`` reads the counters.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ from k8v4_v030.plan import query_lengths
 from k8v4_v030.qsa_cache import all_banks, bank_for
 from k8v4_v030.qsa_config import (
     is_full_attention_layer,
+    qsa_eager,
     qsa_enabled,
     qsa_force_all,
     weights_path,
@@ -36,9 +42,10 @@ from k8v4_v030.qsa_ops import (
     library_path,
     mask_query_scores,
     packed_visible_rows,
+    rows_from_packed,
     score_pooled,
-    topk_ids,
 )
+from k8v4_v030.qsa_stats import note_qsa, qsa_stats_enabled
 from k8v4_v030.qsa_ref import (
     QsaHyper,
     apply_q_rope,
@@ -167,19 +174,30 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     the sparse result for every query in this step.
     """
     if not qsa_enabled():
+        _mark(query, meta, "disabled")
         return False
     install_if_requested()
     if _capturing():
         clear_hidden()
+        _mark(query, meta, "capturing")
         return False
     layer_idx = resolve_layer(layer)
-    if layer_idx is None or not is_full_attention_layer(layer_idx):
+    if layer_idx is None:
         clear_hidden()
+        _mark(query, meta, "no_layer")
+        return False
+    if not is_full_attention_layer(layer_idx):
+        clear_hidden()
+        _mark(query, meta, "not_full_attn")
         return False
     bank = get_bank()
     weights = None if bank is None else bank.get(layer_idx)
     stashed = take_hidden(layer_idx)
-    if weights is None or stashed is None:
+    if weights is None:
+        _mark(query, meta, "no_weights")
+        return False
+    if stashed is None:
+        _mark(query, meta, "no_hidden")
         return False
     hidden, positions = stashed
     layout = impl.layout
@@ -191,6 +209,7 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     out3 = _as_heads(output, layout)
     n = _step_tokens(query3, meta)
     if n == 0:
+        _mark(query, meta, "empty")
         return False
     if int(hidden.shape[0]) < n or int(hidden.shape[-1]) != hyper.hidden:
         raise RuntimeError(
@@ -224,9 +243,11 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     # count == n_sel + 1 can collapse back to a full set once the own block is
     # forced in, so that case is scored and checked below.
     if not qsa_force_all() and not _over_budget(requests, hyper):
+        _mark(query, meta, "within_budget")
         return False
     plans = _plans(cache, q_idx, requests, meta, hyper)
     if not qsa_force_all() and all(item[5] for item in plans):
+        _mark(query, meta, "full_causal")
         return False
     views = bind_regions(kv_cache, layout)
     ratio = int(meta.pages_per_block)
@@ -240,7 +261,14 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
             ratio,
         )
         out3[q0 : q0 + q_len].copy_(piece)
+    _mark(query, meta, "sparse_ok")
     return True
+
+
+def _mark(query, meta, reason: str) -> None:
+    """Count a fallback. The helper returns before any work when stats are off."""
+    if qsa_stats_enabled():
+        note_qsa(query, meta, reason)
 
 
 def _over_budget(requests, hyper: QsaHyper) -> bool:
@@ -265,35 +293,52 @@ def _plans(cache, q_idx, requests, meta, hyper: QsaHyper):
         cells = cells_for_queries(seq_len, q_len)
         counts = [complete_blocks(cell, hyper.ratio) for cell in cells]
         scores, device_ids = _request_scores(cache, q_req, block_row, counts, ratio, hyper, force)
-        visible_rows: list[list[int]] = []
-        fully = True
         if device_ids is None:
             packed = packed_visible_rows(scores, counts, cells, hyper, force)
-            for local, cell in enumerate(cells):
-                tokens = [int(token) for token in packed[local].tolist() if int(token) >= 0]
-                if tokens != list(range(cell + 1)):
-                    fully = False
-                visible_rows.append(tokens)
+            # An XPU matrix stays on device and is handed to qsa_sparse_attn.
+            # The full-causal check is one boolean, not the token lists.
+            if packed.device.type != "cpu":
+                fully = True if force else _packed_is_full_causal(packed, cells)
+                planned.append((req, q0, q_len, seq_len, packed, fully))
+                continue
+            visible_rows = rows_from_packed(packed)
         else:
-            # XPU top-k already ranked this request. Expand those ids here
-            # until qsa_visible has been compared on a device.
+            visible_rows = []
             for local, cell in enumerate(cells):
                 row = None if scores is None else scores[local]
                 chosen, width = choose_blocks(row, counts[local], cell, hyper, force, device_ids[local])
-                tokens = visible_tokens(cell, chosen, width, hyper.ratio)
-                if tokens != list(range(cell + 1)):
-                    fully = False
-                visible_rows.append(tokens)
+                visible_rows.append(visible_tokens(cell, chosen, width, hyper.ratio))
+        fully = True
+        for cell, tokens in zip(cells, visible_rows):
+            if tokens != list(range(cell + 1)):
+                fully = False
+                break
         planned.append((req, q0, q_len, seq_len, visible_rows, fully))
     return planned
+
+
+def _packed_is_full_causal(packed: torch.Tensor, cells: list[int]) -> bool:
+    """True when every row is ``0 .. cell`` and nothing else.
+
+    ``qsa_visible`` writes ascending unique cells ``<= cell`` and leaves
+    ``-1`` after that prefix, so the row is the full causal set exactly
+    when the prefix length is ``cell + 1``.
+    """
+    if int(packed.shape[0]) != len(cells):
+        raise RuntimeError("QSA visible rows do not match queries")
+    got = (packed >= 0).sum(dim=1)
+    expect = torch.tensor([int(cell) + 1 for cell in cells], dtype=got.dtype, device=got.device)
+    return bool(torch.equal(got, expect))
 
 
 def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper: QsaHyper, force: bool):
     """``(scores, device_ids)`` for one request.
 
-    ``device_ids`` is set when the XPU top-k kernel ranked the rows. CPU
-    scores stay fp64 and are ranked by ``choose_blocks``. No scores are built
-    when every query in the request is inside the budget.
+    XPU scores stay on device. ``packed_visible_rows`` turns them into the
+    visible-token matrix with ``qsa_visible`` and does not copy ids back.
+    CPU scores stay fp64 and are ranked by ``choose_blocks``. No scores are
+    built when every query in the request is inside the budget.
+    ``device_ids`` is only set by a caller that already ranked on the host.
     """
     if force or not counts or max(counts) <= hyper.n_sel:
         return None, None
@@ -309,8 +354,7 @@ def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper
     if use_kernel:
         raw = score_pooled(query, matrix)
         scores = mask_query_scores(raw, counts, valid)
-        ids = topk_ids(scores, hyper.n_sel).detach().to(device="cpu").tolist()
-        return scores, ids
+        return scores, None
     q_cpu = query.detach().to(dtype=torch.float64, device="cpu")
     matrix_cpu = matrix.detach().to(dtype=torch.float64, device="cpu")
     rows = [score_blocks(q_cpu[local], matrix_cpu) for local in range(int(q_cpu.shape[0]))]
@@ -469,11 +513,21 @@ def _wrap_forward(cls: type) -> None:
     original = forward
 
     def wrapped(self, positions, hidden_states, *args, **kwargs):
-        _stash_module(self, hidden_states, positions)
+        # Dynamo's full-graph wrapper rejects ContextVar.set. Skipping the
+        # stash during tracing keeps the compile alive; the eager step
+        # (K8V4_QSA_EAGER) is the one that must record the hidden state.
+        if not torch.compiler.is_compiling():
+            _stash_module(self, hidden_states, positions)
         return original(self, positions, hidden_states, *args, **kwargs)
 
-    wrapped._qsa_wrapped = True  # type: ignore[attr-defined]
-    cls.forward = wrapped  # type: ignore[method-assign]
+    installed = wrapped
+    if qsa_eager():
+        # The compiled graph would otherwise constant-fold the stash away.
+        # Disabling compile on this layer makes the Python forward, and
+        # therefore the sparse planner, run on every eager step.
+        installed = torch.compiler.disable(wrapped)
+    installed._qsa_wrapped = True  # type: ignore[attr-defined]
+    cls.forward = installed  # type: ignore[method-assign]
 
 
 def _stash_module(module, hidden, positions) -> None:

@@ -262,17 +262,30 @@ def topk_ids(scores: torch.Tensor, k: int) -> torch.Tensor:
     return torch.tensor(chosen, dtype=torch.int32, device=scores.device)
 
 
+def rows_from_packed(packed: torch.Tensor) -> list[list[int]]:
+    """Drop ``-1`` padding. The remaining cells stay in row order."""
+    if packed.ndim != 2:
+        raise ValueError("packed visible is [queries, width]")
+    cpu = packed.detach().to(device="cpu")
+    rows: list[list[int]] = []
+    for local in range(int(cpu.shape[0])):
+        rows.append([int(token) for token in cpu[local].tolist() if int(token) >= 0])
+    return rows
+
+
 def attend_selected(
     query: torch.Tensor,
     views: dict[str, torch.Tensor],
     block_row: torch.Tensor,
     seq_len: int,
-    visible: list[list[int]],
+    visible: list[list[int]] | torch.Tensor,
     pages_per_block: int,
 ) -> torch.Tensor:
     """Sparse K8/V4 attention for one request.
 
-    ``query`` is ``[q_len, heads, dim]``. ``visible[q]`` lists token cells.
+    ``query`` is ``[q_len, heads, dim]``. ``visible`` is either one token
+    list per query, or a ``[q_len, width]`` int32 matrix padded with ``-1``.
+    The matrix is the ``qsa_visible`` output and is passed through on XPU.
     The Python path quantizes with ``oracle.quant_k`` after promoting the
     query to fp64, which is exact for fp32 and fp16 values. An XPU query
     whose KV views are also on XPU calls ``qsa_sparse_attn`` when the
@@ -282,6 +295,8 @@ def attend_selected(
     """
     if query.ndim != 3:
         raise ValueError("query is [q_len, heads, dim]")
+    if isinstance(visible, torch.Tensor):
+        return _attend_packed(query, views, block_row, int(seq_len), visible, int(pages_per_block))
     if len(visible) != int(query.shape[0]):
         raise ValueError("one visible list per query")
     q_len = int(query.shape[0])
@@ -301,6 +316,63 @@ def attend_selected(
     return torch.tensor(out, dtype=query.dtype, device=query.device)
 
 
+def _launch_sparse(
+    query: torch.Tensor,
+    views: dict[str, torch.Tensor],
+    block_row: torch.Tensor,
+    visible: torch.Tensor,
+    pages_per_block: int,
+    seq_len: int,
+) -> torch.Tensor:
+    row = block_row if block_row.dtype == torch.int32 else block_row.to(dtype=torch.int32)
+    if row.device != query.device:
+        row = row.to(device=query.device)
+    vis = visible
+    if vis.dtype != torch.int32 or not vis.is_contiguous() or vis.device != query.device:
+        vis = vis.to(device=query.device, dtype=torch.int32).contiguous()
+    out = torch.empty_like(query)
+    ops().qsa_sparse_attn(
+        query,
+        views["k"],
+        views["k_scale"],
+        views["v"],
+        views["v_scale"],
+        views["v_zero"],
+        row,
+        vis,
+        out,
+        int(pages_per_block),
+        int(seq_len),
+    )
+    return out
+
+
+def _attend_packed(
+    query: torch.Tensor,
+    views: dict[str, torch.Tensor],
+    block_row: torch.Tensor,
+    seq_len: int,
+    visible: torch.Tensor,
+    pages_per_block: int,
+) -> torch.Tensor:
+    """Attend a ``-1``-padded id matrix already filtered to causal cells."""
+    if visible.ndim != 2 or int(visible.shape[0]) != int(query.shape[0]):
+        raise ValueError("visible is [q_len, width]")
+    row = block_row if block_row.dtype == torch.int32 else block_row.to(dtype=torch.int32)
+    if row.device != query.device:
+        row = row.to(device=query.device)
+    if _xpu_ready(query, views, row):
+        return _launch_sparse(query, views, row, visible, pages_per_block, seq_len)
+    return attend_selected(
+        query,
+        views,
+        block_row,
+        seq_len,
+        rows_from_packed(visible),
+        pages_per_block,
+    )
+
+
 def _attend_xpu(
     query: torch.Tensor,
     views: dict[str, torch.Tensor],
@@ -318,22 +390,6 @@ def _attend_xpu(
     for i, row in enumerate(rows):
         if row:
             packed[i, : len(row)] = torch.tensor(row, dtype=torch.int32)
-    vis = packed.to(device=query.device)
-    row = block_row if block_row.dtype == torch.int32 else block_row.to(dtype=torch.int32)
-    if row.device != query.device:
-        row = row.to(device=query.device)
-    out = torch.empty_like(query)
-    ops().qsa_sparse_attn(
-        query,
-        views["k"],
-        views["k_scale"],
-        views["v"],
-        views["v_scale"],
-        views["v_zero"],
-        row,
-        vis,
-        out,
-        int(pages_per_block),
-        int(seq_len),
+    return _launch_sparse(
+        query, views, block_row, packed.to(device=query.device), pages_per_block, seq_len
     )
-    return out

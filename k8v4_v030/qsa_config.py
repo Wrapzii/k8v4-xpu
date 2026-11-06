@@ -37,6 +37,16 @@ def qsa_force_all() -> bool:
     return os.environ.get("K8V4_QSA_FORCE_ALL", "0") == "1"
 
 
+def qsa_eager() -> bool:
+    """Run QSA outside an XPU graph.
+
+    Full decode graphs replay the captured kernels and do not re-enter this
+    planner. ``K8V4_QSA_EAGER=1`` is read by the attention builder, which
+    then reports no cudagraph support so vLLM leaves that step eager.
+    """
+    return os.environ.get("K8V4_QSA_EAGER", "0") == "1"
+
+
 def top_tokens() -> int:
     """Token budget. ``K8V4_QSA_TOP_TOKENS`` overrides the 2048 default in tests."""
     raw = os.environ.get("K8V4_QSA_TOP_TOKENS", "").strip()

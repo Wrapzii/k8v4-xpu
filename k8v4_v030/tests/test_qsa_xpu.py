@@ -23,6 +23,7 @@ from k8v4_v030.qsa_ops import (
     library_path,
     mask_query_scores,
     packed_visible_rows,
+    rows_from_packed,
     score_pooled,
     topk_ids,
 )
@@ -135,6 +136,23 @@ class CpuContractTest(unittest.TestCase):
             row = [int(token) for token in forced[local].tolist() if int(token) >= 0]
             self.assertEqual(row, list(range(cell + 1)))
 
+    def test_packed_matrix_matches_token_lists(self):
+        key = deterministic_rows(4, 2, 3)
+        value = deterministic_rows(4, 2, 4)
+        query = deterministic_rows(2, 12, 5)
+        raw, layout, _pages = _cache(2, key, value)
+        views = bind_regions(raw, layout)
+        block_row = torch.arange(1, dtype=torch.int32)
+        lists = [[0, 1, 2], [0, 1, 2, 3]]
+        packed = torch.full((2, 4), -1, dtype=torch.int32)
+        packed[0, :3] = torch.tensor(lists[0], dtype=torch.int32)
+        packed[1, :] = torch.tensor(lists[1], dtype=torch.int32)
+        q = torch.tensor(query)
+        expect = attend_selected(q, views, block_row, 4, lists, 1)
+        got = attend_selected(q, views, block_row, 4, packed, 1)
+        self.assertTrue(torch.equal(got, expect))
+        self.assertEqual(rows_from_packed(packed), lists)
+
 
 def _xpu_available() -> bool:
     return bool(getattr(torch, "xpu", None) and torch.xpu.is_available() and torch.xpu.device_count() > 0)
@@ -214,6 +232,72 @@ class XpuKernelTest(unittest.TestCase):
         print("qsa_xpu_delta", hkv, seq_len, q_len, ratio, mode, str(dtype).replace("torch.", ""), "%.6g" % delta)
         self.assertLessEqual(delta, tol)
         self.assertGreaterEqual(n_pages, 1)
+
+    def test_device_visible_matches_python_rows(self):
+        """qsa_visible's packed matrix is the Python reference, including force-all."""
+        hyper = QsaHyper(top_tokens=8)
+        scores = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [5.0, 4.0, 0.1],
+                [0.1, 5.0, 4.0],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=torch.float64,
+        )
+        counts = [1, 3, 3, 3]
+        cells = [3, 11, 11, 11]
+        cpu_rows = rows_from_packed(packed_visible_rows(scores, counts, cells, hyper, False))
+        device = packed_visible_rows(scores.float().to("xpu"), counts, cells, hyper, False)
+        self.assertEqual(device.device.type, "xpu")
+        self.assertEqual(rows_from_packed(device), cpu_rows)
+        forced_cpu = rows_from_packed(packed_visible_rows(scores, counts, cells, hyper, True))
+        forced = packed_visible_rows(scores.float().to("xpu"), counts, cells, hyper, True)
+        self.assertEqual(rows_from_packed(forced), forced_cpu)
+        for cell, row in zip(cells, forced_cpu):
+            self.assertEqual(row, list(range(cell + 1)))
+
+        # Cells are the real causal ends, so the packed matrix is exactly the
+        # token list the kernel may read. A wider matrix with a mismatched
+        # seq_len would attend past builtin_q_end; qsa_visible does not.
+        seq_len, q_len, hkv = 16, 4, 2
+        live_cells = [seq_len - q_len + j for j in range(q_len)]
+        live_counts = [(cell + 1) // hyper.ratio for cell in live_cells]
+        # Gaps of 1 are exact in fp32, so the fp64 reference and qsa_visible
+        # rank the same blocks. No ties.
+        live_scores = (
+            torch.arange(q_len * max(live_counts), dtype=torch.float32)
+            .reshape(q_len, max(live_counts))
+            .flip(1)
+            .to(torch.float64)
+        )
+        live_cpu = rows_from_packed(packed_visible_rows(live_scores, live_counts, live_cells, hyper, False))
+        live_device = packed_visible_rows(live_scores.float().to("xpu"), live_counts, live_cells, hyper, False)
+        self.assertEqual(rows_from_packed(live_device), live_cpu)
+        forced_live = packed_visible_rows(live_scores.float().to("xpu"), live_counts, live_cells, hyper, True)
+        full = [list(range(cell + 1)) for cell in live_cells]
+        self.assertEqual(rows_from_packed(forced_live), full)
+        hq = 6 * hkv
+        key = deterministic_rows(seq_len, hkv, 30)
+        value = deterministic_rows(seq_len, hkv, 40)
+        query = deterministic_rows(q_len, hq, 50)
+        raw, layout, _pages = _cache(hkv, key, value)
+        views = bind_regions(raw, layout)
+        block_row = torch.arange((seq_len + PAGE - 1) // PAGE, dtype=torch.int32)
+        views_x = bind_regions(raw.to("xpu"), layout)
+        row_x = block_row.to("xpu")
+        for dtype, tol in ((torch.float32, 2e-3), (torch.float16, 2e-2)):
+            q_cpu = _query_tensor(query, dtype, "cpu")
+            q_x = _query_tensor(query, dtype, "xpu")
+            sparse_cpu = attend_selected(q_cpu, views, block_row, seq_len, live_cpu, 1)
+            sparse_x = attend_selected(q_x, views_x, row_x, seq_len, live_device, 1)
+            sparse_delta = (sparse_x.float().cpu() - sparse_cpu.float()).abs().max().item()
+            self.assertLessEqual(sparse_delta, tol)
+            # force-all keeps every causal token, so the sparse kernel matches dense.
+            dense = attend_selected(q_cpu, views, block_row, seq_len, full, 1)
+            dense_x = attend_selected(q_x, views_x, row_x, seq_len, forced_live, 1)
+            dense_delta = (dense_x.float().cpu() - dense.float()).abs().max().item()
+            self.assertLessEqual(dense_delta, tol)
 
 
 if __name__ == "__main__":
