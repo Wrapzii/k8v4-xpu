@@ -681,6 +681,67 @@ static void launch_visible_bucket(sycl::queue &q, const at::Tensor &score_tensor
   printf("qsa_bucket_fallback %d/%d\n", fb, n_query);
 }
 
+// Graph selector epilogue: sort top-k block ids and expand to token cells
+// in one workgroup per query. -1 holes are legal to qsa_direct_attn.
+static void qsa_pack_topk(const at::Tensor &values, const at::Tensor &ids,
+                          const at::Tensor &counts, const at::Tensor &cells,
+                          at::Tensor out, int64_t ratio) {
+  for (const auto &t : {values, ids, counts, cells, out}) {
+    check_xpu(t, "qsa_pack_topk tensor");
+    TORCH_CHECK(t.is_contiguous() && t.device()==values.device(), "qsa_pack_topk device/layout");
+  }
+  TORCH_CHECK(values.scalar_type()==at::kFloat && ids.scalar_type()==at::kLong &&
+              counts.scalar_type()==at::kInt && cells.scalar_type()==at::kInt &&
+              out.scalar_type()==at::kInt && values.dim()==2 && ids.sizes()==values.sizes() &&
+              counts.dim()==1 && cells.dim()==1 && out.dim()==2 &&
+              counts.size(0)==values.size(0) && cells.size(0)==values.size(0) &&
+              out.size(0)==values.size(0) && ratio==4 && values.size(1)<=512 &&
+              out.size(1)==(values.size(1)+1)*ratio, "qsa_pack_topk shapes");
+  const int nq=values.size(0), k=values.size(1), width=out.size(1);
+  const auto *v=values.data_ptr<float>(); const auto *idx=ids.data_ptr<int64_t>();
+  const auto *ct=counts.data_ptr<int32_t>(); const auto *cp=cells.data_ptr<int32_t>();
+  auto *dst=out.data_ptr<int32_t>(); auto &queue=current_xpu_queue();
+  queue.submit([&](sycl::handler &h) {
+    sycl::local_accessor<int32_t,1> sorted(sycl::range<1>(1024),h);
+    h.parallel_for(sycl::nd_range<1>(sycl::range<1>((size_t)nq*256),sycl::range<1>(256)),
+      [=](sycl::nd_item<1> it) {
+        const int qi=it.get_group(0), lane=it.get_local_id(0), cell=cp[qi];
+        int32_t *row=dst+(int64_t)qi*width;
+        if (ct[qi] <= k) {
+          for (int i=lane; i<width; i+=256) row[i]=i<=cell ? i : -1;
+          return;
+        }
+        for (int i=lane; i<1024; i+=256) {
+          int32_t block=INT32_MAX;
+          if (i<k) block=sycl::isfinite(v[(int64_t)qi*k+i]) ? (int32_t)idx[(int64_t)qi*k+i] : -1;
+          else if (i==k) block=cell/4;
+          sorted[i]=block;
+        }
+        it.barrier(sycl::access::fence_space::local_space);
+        for (int size=2; size<=1024; size*=2) {
+          for (int stride=size/2; stride>0; stride/=2) {
+            for (int i=lane; i<1024; i+=256) {
+              const int other=i^stride;
+              if (other>i) {
+                const int a=sorted[i], b=sorted[other];
+                const bool up=(i&size)==0;
+                sorted[i]=up ? sycl::min(a,b) : sycl::max(a,b);
+                sorted[other]=up ? sycl::max(a,b) : sycl::min(a,b);
+              }
+            }
+            it.barrier(sycl::access::fence_space::local_space);
+          }
+        }
+        for (int i=lane; i<width; i+=256) {
+          const int b=i/4, off=i%4, block=sorted[b];
+          const bool distinct=b==0 || block!=sorted[b-1];
+          const int64_t token=(int64_t)block*4+off;
+          row[i]=block>=0 && block!=INT32_MAX && distinct && token<=cell ? (int32_t)token : -1;
+        }
+      });
+  });
+}
+
 static void qsa_visible(const at::Tensor &scores, const at::Tensor &counts, const at::Tensor &cells,
                         at::Tensor out, int64_t k, int64_t ratio, int64_t force) {
   check_xpu(scores, "scores");
@@ -769,11 +830,13 @@ static void qsa_score_paged(const at::Tensor &query, const at::Tensor &pooled,
   auto &queue=current_xpu_queue();
   const int ratio_i = static_cast<int>(ratio);
   if (nq <= 16) {
-    // Decode. One subgroup per block, every query shares that key.
-    // The old launch read the same 512-byte key once per query.
+    // Decode. Graph-stable launch: 1024 workgroups, 16 subgroups each.
+    // Subgroups stride by 16384 blocks and stop at the live device count, so
+    // a 10K decode does not score a captured 65536-wide table.
     constexpr int WG = 256;
     constexpr int nsg = WG / SG;
-    const int nchunks = (nb + nsg - 1) / nsg;
+    constexpr int nchunks = 1024;
+    const int stride = nchunks * nsg;
     const int qwords = nq * IDX_HEADS * D_IDX;
     queue.submit([&](sycl::handler &h) {
       sycl::local_accessor<float, 1> qslm(sycl::range<1>(qwords), h);
@@ -785,35 +848,39 @@ static void qsa_score_paged(const at::Tensor &query, const at::Tensor &pooled,
           const int sg_lane = lane - sg_id * SG;
           for (int i = lane; i < qwords; i += WG) qslm[i] = qp[i];
           it.barrier(sycl::access::fence_space::local_space);
-          const int block = chunk * nsg + sg_id;
-          if (block >= nb) return;
-          const int tok = block * 4, logical = tok / PAGE, off = tok % PAGE;
-          const int page = ratio_i == 1 ? bt[logical] : bt[logical / ratio_i] * ratio_i + logical % ratio_i;
-          const int64_t micro = ((int64_t)page * PAGE + off) / 4;
-          const bool bad = page < 0 || micro < 0 || micro >= np || !ok[micro];
-          float key[8];
-          if (!bad) {
-            const float *src = kp + micro * D_IDX + sg_lane * 8;
-            #pragma unroll
-            for (int d = 0; d < 8; ++d) key[d] = src[d];
-          }
-          auto sg = it.get_sub_group();
-          for (int qi = 0; qi < nq; ++qi) {
-            if (block >= ct[qi] || bad) {
-              if (sg_lane == 0) dst[(int64_t)qi * nb + block] = -INFINITY;
-              continue;
-            }
-            float total = 0.f;
-            #pragma unroll
-            for (int head = 0; head < IDX_HEADS; ++head) {
-              float dot = 0.f;
-              const int base = (qi * IDX_HEADS + head) * D_IDX + sg_lane * 8;
+          int maxc = ct[0];
+          for (int qi = 1; qi < nq; ++qi) maxc = sycl::max(maxc, (int)ct[qi]);
+          if (maxc > nb) maxc = nb;
+          const int block0 = chunk * nsg + sg_id;
+          for (int block = block0; block < maxc; block += stride) {
+            const int tok = block * 4, logical = tok / PAGE, off = tok % PAGE;
+            const int page = ratio_i == 1 ? bt[logical] : bt[logical / ratio_i] * ratio_i + logical % ratio_i;
+            const int64_t micro = ((int64_t)page * PAGE + off) / 4;
+            const bool bad = page < 0 || micro < 0 || micro >= np || !ok[micro];
+            float key[8];
+            if (!bad) {
+              const float *src = kp + micro * D_IDX + sg_lane * 8;
               #pragma unroll
-              for (int d = 0; d < 8; ++d) dot += qslm[base + d] * key[d];
-              dot = sycl::reduce_over_group(sg, dot, sycl::plus<float>());
-              total += sycl::fmax(dot, 0.f);
+              for (int d = 0; d < 8; ++d) key[d] = src[d];
             }
-            if (sg_lane == 0) dst[(int64_t)qi * nb + block] = total;
+            auto sg = it.get_sub_group();
+            for (int qi = 0; qi < nq; ++qi) {
+              if (block >= ct[qi] || bad) {
+                if (sg_lane == 0) dst[(int64_t)qi * nb + block] = -INFINITY;
+                continue;
+              }
+              float total = 0.f;
+              #pragma unroll
+              for (int head = 0; head < IDX_HEADS; ++head) {
+                float dot = 0.f;
+                const int base = (qi * IDX_HEADS + head) * D_IDX + sg_lane * 8;
+                #pragma unroll
+                for (int d = 0; d < 8; ++d) dot += qslm[base + d] * key[d];
+                dot = sycl::reduce_over_group(sg, dot, sycl::plus<float>());
+                total += sycl::fmax(dot, 0.f);
+              }
+              if (sg_lane == 0) dst[(int64_t)qi * nb + block] = total;
+            }
           }
         });
     });
@@ -844,6 +911,27 @@ static void qsa_score_paged(const at::Tensor &query, const at::Tensor &pooled,
         });
     });
   }
+}
+
+static void qsa_score_select_paged(const at::Tensor &query, const at::Tensor &pooled,
+                                  const at::Tensor &valid, const at::Tensor &block_row,
+                                  const at::Tensor &counts, const at::Tensor &cells,
+                                  at::Tensor scores, at::Tensor visible, int64_t ratio,
+                                  int64_t k) {
+  for (const auto &t : {query, pooled, valid, block_row, counts, cells, scores, visible}) {
+    check_xpu(t, "qsa_score_select_paged tensor");
+    TORCH_CHECK(t.is_contiguous() && t.device() == query.device(),
+                "QSA fused score/select device/layout");
+  }
+  TORCH_CHECK(cells.scalar_type() == at::kInt && visible.scalar_type() == at::kInt &&
+                  visible.dim() == 2 && cells.dim() == 1 &&
+                  cells.size(0) == query.size(0) && visible.size(0) == query.size(0) &&
+                  k >= 1 && k <= QSA_MAX_K && ratio >= 1 &&
+                  visible.size(1) == (k + 1) * ratio,
+              "QSA fused score/select shapes");
+  visible.fill_(-1);
+  qsa_score_paged(query, pooled, valid, block_row, counts, scores, ratio);
+  qsa_visible(scores, counts, cells, visible, k, ratio, 0);
 }
 
 static void qsa_topk(const at::Tensor &scores, at::Tensor ids, int64_t k) {
@@ -990,6 +1078,100 @@ static void qsa_cache_update(const at::Tensor &slots, const at::Tensor &keys,
         if (slot<0 || slot>=nslots) return;
         const int64_t micro=slot/4;
         for (int j=0; j<i; ++j) { const int64_t other=sp[j*s_slot]; if (other>=0 && other<nslots && other/4==micro) return; }
+        const int64_t first=micro*4;
+        const bool complete=fc[first] && fc[first+1] && fc[first+2] && fc[first+3];
+        if (lane==0) pv[micro]=complete;
+        if (!complete) return;
+        auto sg=it.get_sub_group(); float x[8]; float sum=0.f;
+        for (int j=0; j<8; ++j) {
+          const int d=lane*8+j;
+          x[j]=(rp[(first+0)*D_IDX+d]+rp[(first+1)*D_IDX+d]+
+                rp[(first+2)*D_IDX+d]+rp[(first+3)*D_IDX+d])*0.25f;
+          sum+=x[j]*x[j];
+        }
+        const float inv=sycl::rsqrt(sycl::reduce_over_group(sg,sum,sycl::plus<float>())/D_IDX+(float)eps);
+        for (int j=0; j<8; ++j) {
+          const int d=lane*8+j; x[j]=x[j]*inv*wp[d*s_w];
+        }
+        for (int j=0; j<8; ++j) {
+          const int d=lane*8+j;
+          const float other=sycl::select_from_group(sg,x[j],(uint32_t)(lane^4));
+          float result=x[j];
+          if (d<64) {
+            const int pair=d%32, axis=pair%3;
+            const float angle=(float)pc[first*4+axis]*fp[pair];
+            const float c=sycl::cos(angle), s=sycl::sin(angle);
+            result=d<32 ? x[j]*c-other*s : other*s+x[j]*c;
+          }
+          po[micro*D_IDX+d]=result;
+        }
+      });
+  });
+  // One hit per full-attention layer. Replay of a full graph does not
+  // re-enter Python, so the counter is the decode sparse_ok source.
+  queue.submit([&](sycl::handler &h) {
+    h.single_task([=]() { hits[0] += 1; });
+  });
+}
+
+// Specialized for one contiguous request, with unique slots.
+static void qsa_cache_prefill_update(const at::Tensor &slots, const at::Tensor &keys,
+                             const at::Tensor &positions, const at::Tensor &weight,
+                             const at::Tensor &freqs, at::Tensor raw, at::Tensor pos_cache,
+                             at::Tensor filled, at::Tensor pooled, at::Tensor valid, double eps,
+                             at::Tensor counter) {
+  for (const auto &t : {slots, keys, positions, weight, freqs, raw, pos_cache, filled, pooled, valid, counter}) {
+    check_xpu(t, "qsa_cache_update tensor");
+    TORCH_CHECK(t.device() == slots.device(), "QSA cache tensors must share a device");
+  }
+  TORCH_CHECK(raw.is_contiguous() && pos_cache.is_contiguous() && filled.is_contiguous() &&
+              pooled.is_contiguous() && valid.is_contiguous() && freqs.is_contiguous(),
+              "QSA cache outputs must be contiguous");
+  TORCH_CHECK(slots.scalar_type()==at::kLong && keys.scalar_type()==at::kFloat &&
+              (positions.scalar_type()==at::kInt || positions.scalar_type()==at::kLong) &&
+              weight.scalar_type()==at::kFloat &&
+              freqs.scalar_type()==at::kFloat && raw.scalar_type()==at::kFloat &&
+              pos_cache.scalar_type()==at::kInt && filled.scalar_type()==at::kBool &&
+              pooled.scalar_type()==at::kFloat && valid.scalar_type()==at::kBool &&
+              counter.scalar_type()==at::kInt && counter.numel()>=1, "QSA cache dtypes");
+  const int n=slots.numel(), nslots=raw.size(0);
+  TORCH_CHECK(n>0 && n<=8192 && slots.dim()==1 && keys.sizes()==at::IntArrayRef({n, D_IDX}) &&
+              positions.sizes()==at::IntArrayRef({n, 4}) && weight.numel()==D_IDX && freqs.numel()==32 &&
+              raw.dim()==2 && raw.size(1)==D_IDX && nslots%4==0 &&
+              pos_cache.sizes()==at::IntArrayRef({nslots,4}) && filled.numel()==nslots &&
+              pooled.sizes()==at::IntArrayRef({nslots/4,D_IDX}) && valid.numel()==nslots/4 && eps>0,
+              "QSA cache shapes");
+  const auto *sp=slots.data_ptr<int64_t>(); const auto *kp=keys.data_ptr<float>();
+  const bool pos64 = positions.scalar_type()==at::kLong;
+  const auto *pp32 = pos64 ? nullptr : positions.data_ptr<int32_t>();
+  const auto *pp64 = pos64 ? positions.data_ptr<int64_t>() : nullptr;
+  const auto *wp=weight.data_ptr<float>();
+  const int64_t s_slot=slots.stride(0), s_k0=keys.stride(0), s_k1=keys.stride(1);
+  const int64_t s_p0=positions.stride(0), s_p1=positions.stride(1), s_w=weight.stride(0);
+  const auto *fp=freqs.data_ptr<float>(); auto *rp=raw.data_ptr<float>();
+  auto *pc=pos_cache.data_ptr<int32_t>(); auto *fc=filled.data_ptr<bool>();
+  auto *po=pooled.data_ptr<float>(); auto *pv=valid.data_ptr<bool>();
+  auto *hits=counter.data_ptr<int32_t>();
+  auto &queue=current_xpu_queue();
+  queue.submit([&](sycl::handler &h) {
+    h.parallel_for(sycl::nd_range<1>(sycl::range<1>((size_t)n*16), sycl::range<1>(16)),
+      [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] {
+        const int i=it.get_group(0), lane=it.get_local_id(0); const int64_t slot=sp[i*s_slot];
+        if (slot<0 || slot>=nslots) return;
+        for (int d=lane; d<D_IDX; d+=16) rp[slot*D_IDX+d]=kp[(int64_t)i*s_k0+d*s_k1];
+        if (lane<4) pc[slot*4+lane]=pos64 ? static_cast<int32_t>(pp64[i*s_p0+lane*s_p1]) : pp32[i*s_p0+lane*s_p1];
+        if (lane==0) fc[slot]=true;
+      });
+  });
+  queue.submit([&](sycl::handler &h) {
+    h.parallel_for(sycl::nd_range<1>(sycl::range<1>((size_t)n*16), sycl::range<1>(16)),
+      [=](sycl::nd_item<1> it) [[sycl::reqd_sub_group_size(16)]] {
+        const int i=it.get_group(0), lane=it.get_local_id(0); const int64_t slot=sp[i*s_slot];
+        if (slot<0 || slot>=nslots) return;
+        const int64_t micro=slot/4;
+        // Single-request prefill slots are unique and each 4-slot microblock
+        // occupies a contiguous run even when physical pages are permuted.
+        if (i>0) { const int64_t prev=sp[(i-1)*s_slot]; if (prev>=0 && prev<nslots && prev/4==micro) return; }
         const int64_t first=micro*4;
         const bool complete=fc[first] && fc[first+1] && fc[first+2] && fc[first+3];
         if (lane==0) pv[micro]=complete;
@@ -2286,8 +2468,11 @@ static void qsa_stream6_attn(const at::Tensor &query, const at::Tensor &k, const
 }  // namespace
 
 TORCH_LIBRARY(xe2_qsa, m) {
+  m.def("qsa_pack_topk(Tensor values, Tensor ids, Tensor counts, Tensor cells, Tensor(a!) out, int ratio) -> ()");
   m.def("qsa_score_paged(Tensor query, Tensor pooled, Tensor valid, Tensor block_row, Tensor counts, Tensor(a!) scores, int ratio) -> ()");
+  m.def("qsa_score_select_paged(Tensor query, Tensor pooled, Tensor valid, Tensor block_row, Tensor counts, Tensor cells, Tensor(a!) scores, Tensor(b!) visible, int ratio, int k) -> ()");
   m.def("qsa_cache_update(Tensor slots, Tensor keys, Tensor positions, Tensor weight, Tensor freqs, Tensor(a!) raw, Tensor(b!) pos_cache, Tensor(c!) filled, Tensor(d!) pooled, Tensor(e!) valid, float eps, Tensor(f!) counter) -> ()");
+  m.def("qsa_cache_prefill_update(Tensor slots, Tensor keys, Tensor positions, Tensor weight, Tensor freqs, Tensor(a!) raw, Tensor(b!) pos_cache, Tensor(c!) filled, Tensor(d!) pooled, Tensor(e!) valid, float eps, Tensor(f!) counter) -> ()");
   m.def("qsa_direct_attn(Tensor query, Tensor k, Tensor ks, Tensor v, Tensor vs, Tensor vz, Tensor block_row, Tensor visible, Tensor(a!) partial, Tensor(b!) ml, Tensor(c!) out, int ratio, int split_width) -> ()");
   m.def("qsa_gqa_attn(Tensor query, Tensor k, Tensor ks, Tensor v, Tensor vs, Tensor vz, Tensor block_row, Tensor visible, Tensor(a!) out, int ratio) -> ()");
   m.def("qsa_pair_attn(Tensor query, Tensor k, Tensor ks, Tensor v, Tensor vs, Tensor vz, Tensor block_row, Tensor visible, Tensor(a!) out, int ratio) -> ()");
@@ -2311,8 +2496,11 @@ TORCH_LIBRARY(xe2_qsa, m) {
 }
 
 TORCH_LIBRARY_IMPL(xe2_qsa, XPU, m) {
+  m.impl("qsa_pack_topk", &qsa_pack_topk);
   m.impl("qsa_score_paged", &qsa_score_paged);
+  m.impl("qsa_score_select_paged", &qsa_score_select_paged);
   m.impl("qsa_cache_update", &qsa_cache_update);
+  m.impl("qsa_cache_prefill_update", &qsa_cache_prefill_update);
   m.impl("qsa_direct_attn", &qsa_direct_attn);
   m.impl("qsa_gqa_attn", &qsa_gqa_attn);
   m.impl("qsa_pair_attn", &qsa_pair_attn);
