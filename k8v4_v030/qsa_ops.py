@@ -174,6 +174,69 @@ def score_pooled_paged(query, pooled, valid, block_row, counts, pages_per_block:
     return scores
 
 
+_SCORE_SCRATCH: dict[tuple, torch.Tensor] = {}
+_VISIBLE_SCRATCH: dict[tuple, torch.Tensor] = {}
+
+
+def score_select_paged(
+    query,
+    pooled,
+    valid,
+    block_row,
+    counts,
+    cells,
+    pages_per_block: int,
+    hyper: QsaHyper,
+    n_blocks: int,
+    out=None,
+):
+    """Score live blocks and pack the visible token row in one native op.
+
+    ``n_blocks`` is the scratch width. The kernel stops at each query's
+    device count, so a graph captured at 65536 still only dots the live
+    context. ``out`` is ``[queries, (n_sel+1)*ratio]`` int32, padded with -1.
+    """
+    q = query.to(dtype=torch.float32).contiguous()
+    row = block_row.to(device=query.device, dtype=torch.int32).contiguous()
+    if torch.is_tensor(counts):
+        lengths = counts.to(device=query.device, dtype=torch.int32).reshape(-1).contiguous()
+    else:
+        if not counts or max(counts) < 1:
+            raise ValueError("paged QSA score needs at least one block")
+        lengths = torch.tensor(counts, dtype=torch.int32, device=query.device)
+    if torch.is_tensor(cells):
+        cells_t = cells.to(device=query.device, dtype=torch.int32).reshape(-1).contiguous()
+    else:
+        cells_t = torch.tensor(cells, dtype=torch.int32, device=query.device)
+    width = max(1, int(n_blocks))
+    k = int(hyper.n_sel)
+    ratio = int(hyper.ratio)
+    vis_w = (k + 1) * ratio
+    nq = int(q.shape[0])
+    device = q.device
+    score_key = (str(device), nq, width)
+    scores = _SCORE_SCRATCH.get(score_key)
+    if scores is None or scores.device != device:
+        scores = torch.empty((nq, width), dtype=torch.float32, device=device)
+        _SCORE_SCRATCH[score_key] = scores
+    if out is None:
+        vis_key = (str(device), nq, vis_w)
+        out = _VISIBLE_SCRATCH.get(vis_key)
+        if out is None or out.device != device:
+            out = torch.empty((nq, vis_w), dtype=torch.int32, device=device)
+            _VISIBLE_SCRATCH[vis_key] = out
+    native = ops()
+    if native is not None and hasattr(native, "qsa_score_select_paged"):
+        native.qsa_score_select_paged(
+            q, pooled, valid, row, lengths, cells_t, scores, out, int(pages_per_block), k,
+        )
+        return out
+    scored = score_pooled_paged(
+        q, pooled, valid, row, lengths, int(pages_per_block), n_blocks=width,
+    )
+    return _visible_graph(scored, lengths, cells_t, hyper, vis_w, premasked=True)
+
+
 def mask_query_scores(
     scores: torch.Tensor,
     counts: list[int],
@@ -348,7 +411,7 @@ def _visible_stable(scores, counts, cells, hyper: QsaHyper, force_all: bool, cou
     return torch.where(within.unsqueeze(1), full, out)
 
 
-def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False) -> torch.Tensor:
+def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False, stable_ties: bool = False) -> torch.Tensor:
     """Decode selection captured inside a full graph.
 
     ``torch.topk`` keeps the scored width cheap at 50k blocks. Ties are not
@@ -376,9 +439,50 @@ def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: i
     if not premasked:
         columns = torch.arange(n_blocks, device=device)
         masked = masked.masked_fill(columns.unsqueeze(0) >= counts_t.unsqueeze(1), float("-inf"))
+    if os.environ.get("K8V4_QSA_FUSED_SELECT", "1") == "1":
+        qsa = ops()
+        if qsa is not None and hasattr(qsa, "qsa_visible"):
+            qsa.qsa_visible(masked.contiguous(), counts_t, cells_t, out, int(budget), int(ratio), 0)
+            return out
     take = min(budget, n_blocks)
     if os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1":
-        values, order = torch.topk(masked, k=take, dim=1, largest=True, sorted=True)
+        fast_values = fast_order = None
+        if stable_ties and os.environ.get("K8V4_QSA_FAST_STABLE", "0") == "1":
+            # The author-compatible stable ordering matters only when the
+            # kth score ties an excluded block. Check that boundary on device;
+            # prefill is eager, so the one scalar read is safe outside graphs.
+            candidate_values, candidate_order = torch.topk(masked, k=take, dim=1, largest=True, sorted=True)
+            threshold = candidate_values[:, -1]
+            finite = torch.isfinite(threshold)
+            match_value = torch.where(finite, threshold, torch.full_like(threshold, float("nan")))
+            selected_ties = (candidate_values == match_value.unsqueeze(1)).sum(dim=1)
+            total_ties = (masked == match_value.unsqueeze(1)).sum(dim=1)
+            crossed = finite & (counts_t > budget) & (total_ties > selected_ties)
+            high_nonfinite = (~torch.isfinite(candidate_values)) & (~torch.isneginf(candidate_values))
+            if not bool((crossed.any() | high_nonfinite.any()).item()):
+                fast_values, fast_order = candidate_values, candidate_order
+        if stable_ties and fast_order is None:
+            # QSA scores are non-negative fp32. Their positive IEEE bit order
+            # follows numeric order; the low 32 bits prefer smaller block IDs.
+            # Non-finite rows are kept at the bottom and filtered by the packer.
+            normalized = torch.where(masked == 0, 0.0, masked).contiguous()
+            bits = normalized.view(torch.int32).to(torch.int64)
+            cols = torch.arange(n_blocks, dtype=torch.int64, device=device)
+            rank_keys = (bits << 32) | (0xffffffff - cols.unsqueeze(0))
+            rank_keys = rank_keys.masked_fill(~torch.isfinite(masked), -(1 << 63))
+            order = torch.topk(rank_keys, k=take, dim=1, largest=True, sorted=False).indices
+            values = torch.gather(masked, 1, order)
+        elif fast_order is not None:
+            values, order = fast_values, fast_order
+        else:
+            values, order = torch.topk(masked, k=take, dim=1, largest=True, sorted=True)
+        if (os.environ.get("K8V4_QSA_PACK_TOPK", "0") == "1" and ratio == 4
+                and width == (take + 1) * ratio and take <= 512 and n_blocks >= budget):
+            qsa = ops()
+            if qsa is None or not hasattr(qsa, "qsa_pack_topk"):
+                raise RuntimeError("QSA top-k packing requires the experimental library")
+            qsa.qsa_pack_topk(values, order, counts_t, cells_t, out, ratio)
+            return out
     else:
         order = torch.argsort(masked, dim=1, descending=True, stable=True)[:, :take]
         values = torch.gather(masked, 1, order)
@@ -747,7 +851,7 @@ def attend_shared_prefill(query, scores, counts, cells, views, block_row, pages_
     token_ratio = 4
     pages_per_block = int(pages_per_block)
     budget = int(budget_blocks)
-    if q_len < 1 or int(scores.shape[0]) != q_len:
+    if q_len < 1 or int(scores.shape[0]) not in (1, q_len):
         raise RuntimeError("shared QSA query count")
     cells_t = torch.tensor(cells, dtype=torch.int64, device=device)
     row = scores[-1]
@@ -831,6 +935,9 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     # A long prefill already has enough queries; one split keeps the partial
     # buffer small.
     split_width = 64 if int(query.shape[0]) <= 16 else max(int(visible.shape[1]), 1)
+    prefill_split = int(os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0"))
+    if int(query.shape[0]) > 16 and prefill_split > 0:
+        split_width = prefill_split
     splits = (width + split_width - 1) // split_width
     key = (query.device.type, query.device.index, int(q_len), int(heads), splits)
     state = _DIRECT_WORK.get(key)
@@ -850,6 +957,12 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     gqa = int(query.shape[1]) // hkv if hkv else 0
     # Three query heads share one KV load. Six heads in one subgroup spilled
     # and was slower; short decode stays on the split direct kernel.
+    if (int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
+            and prefill_split > 0 and hasattr(qsa, "qsa_grp3_split")):
+        qsa.qsa_grp3_split(query, views["k"], views["k_scale"], views["v"],
+                           views["v_scale"], views["v_zero"], block_row, vis,
+                           partial, ml, out, int(pages_per_block), split_width)
+        return out
     if (int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
             and hasattr(qsa, "qsa_grp3_attn")):
         qsa.qsa_grp3_attn(query, views["k"], views["k_scale"], views["v"],
