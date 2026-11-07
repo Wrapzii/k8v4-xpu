@@ -14,6 +14,8 @@ value is the reference pool: mean, block RMSNorm, MRoPE at the first token.
 
 from __future__ import annotations
 
+import os
+
 import torch
 
 from k8v4_v030.layout import PAGE
@@ -41,7 +43,15 @@ class QsaBlockCache:
             raise ValueError("block_size must be a multiple of the QSA ratio")
         if self.block_size % PAGE != 0:
             raise ValueError("block_size must be a multiple of the K8/V4 page")
-        slots = self.num_blocks * self.block_size
+        self.lazy = os.environ.get("K8V4_QSA_LAZY_CACHE", "0") == "1"
+        floor_tokens = int(os.environ.get("K8V4_QSA_GRAPH_TOKENS", "0") or "0")
+        if self.lazy:
+            base_blocks = 2
+            if floor_tokens > 0:
+                base_blocks = max(base_blocks, (floor_tokens + self.block_size - 1) // self.block_size)
+            slots = min(self.num_blocks, base_blocks) * self.block_size
+        else:
+            slots = self.num_blocks * self.block_size
         dim = self.hyper.dim
         dev = self.device
         self.raw = torch.zeros(slots, dim, dtype=dtype, device=dev)
@@ -53,6 +63,34 @@ class QsaBlockCache:
     @property
     def num_slots(self) -> int:
         return self.num_blocks * self.block_size
+
+    def ensure_capacity(self, last_slot: int) -> None:
+        """Grow physical storage to cover a slot, preserving pooled prefixes."""
+        last_slot = int(last_slot)
+        if last_slot < 0:
+            return
+        if last_slot >= self.num_slots:
+            raise IndexError("indexer slot")
+        current = int(self.raw.shape[0])
+        if last_slot < current:
+            return
+        if not self.lazy:
+            raise RuntimeError("indexer cache capacity")
+        required_blocks = (last_slot + self.block_size) // self.block_size
+        current_blocks = current // self.block_size
+        blocks = min(self.num_blocks, max(required_blocks, current_blocks * 2))
+        target = blocks * self.block_size
+
+        def grow(tensor: torch.Tensor, shape: tuple[int, ...]) -> torch.Tensor:
+            out = torch.zeros(shape, dtype=tensor.dtype, device=tensor.device)
+            out[:tensor.shape[0]].copy_(tensor)
+            return out
+
+        self.raw = grow(self.raw, (target, self.hyper.dim))
+        self.pos = grow(self.pos, (target, 4))
+        self.filled = grow(self.filled, (target,))
+        self.pooled = grow(self.pooled, (target // self.hyper.ratio, self.hyper.dim))
+        self.pool_valid = grow(self.pool_valid, (target // self.hyper.ratio,))
 
     def block_slice(self, block_id: int) -> slice:
         block_id = int(block_id)
@@ -72,6 +110,7 @@ class QsaBlockCache:
         slot = int(slot)
         if slot < 0 or slot >= self.num_slots:
             raise IndexError(slot)
+        self.ensure_capacity(slot)
         if tuple(key.shape) != (self.hyper.dim,):
             raise ValueError("indexer key shape %s" % (tuple(key.shape),))
         self.raw[slot] = key.to(dtype=self.raw.dtype, device=self.raw.device)
@@ -103,8 +142,7 @@ class QsaBlockCache:
         idx = slots[valid]
         if int(idx.numel()) == 0:
             return
-        if int(idx.max()) >= self.num_slots:
-            raise IndexError("indexer slot")
+        self.ensure_capacity(int(idx.max()))
         key_rows = keys.to(dtype=self.raw.dtype, device=self.raw.device)[valid]
         pos_rows = pos[valid]
         if int(torch.unique(idx).numel()) != int(idx.numel()):
@@ -152,6 +190,7 @@ class QsaBlockCache:
         for src_id, dst_id in zip(src, dst):
             if src_id == dst_id:
                 continue
+            self.ensure_capacity((max(src_id, dst_id) + 1) * self.block_size - 1)
             s = self.block_slice(src_id)
             d = self.block_slice(dst_id)
             self.raw[d] = self.raw[s]
