@@ -33,6 +33,8 @@ from k8v4_v030.qsa_ref import (
     topk_block_ids,
     visible_tokens,
 )
+from k8v4_v030.qsa_ops import coerce_visible_matrix, mask_query_scores
+
 from k8v4_v030.qsa_rope import mrope, mrope_row, pair_axis
 from k8v4_v030.qsa_weights import IndexerBank, expected_full_numel, load_bank_file, make_random_bank
 
@@ -185,6 +187,47 @@ class IndexerMathTest(unittest.TestCase):
         # Dropped block 0 and block 3. Own block is complete, so all 4 of its tokens stay.
         sparse = visible_tokens(19, [1, 2, 4], 4, 4)
         self.assertEqual(sparse, [4, 5, 6, 7, 8, 9, 10, 11, 16, 17, 18, 19])
+
+
+
+    def test_list_of_rows_becomes_a_visible_matrix(self):
+        """Two requests plan Python rows. The kernel still needs one matrix."""
+        visible = coerce_visible_matrix([[0, 1, 4], [2]], 2, torch.device("cpu"))
+        self.assertEqual(tuple(visible.shape), (2, 3))
+        self.assertEqual(int(visible[0, 0]), 0)
+        self.assertEqual(int(visible[0, 2]), 4)
+        self.assertEqual(int(visible[1, 0]), 2)
+        self.assertEqual(int(visible[1, 2]), -1)
+        one = coerce_visible_matrix(torch.tensor([8, 9, 10]), 1, torch.device("cpu"))
+        self.assertEqual(tuple(one.shape), (1, 3))
+        self.assertEqual(int(one[0, 1]), 9)
+
+    def test_paper_budget_keeps_own_block_and_drops_past_count(self):
+        """Shipped selector: K=2048 plus the own block, past-count columns out."""
+        hyper = QsaHyper(top_tokens=2048)
+        self.assertEqual(hyper.budget + hyper.ratio, 2052)
+        self.assertEqual(hyper.n_sel, 512)
+        n_complete = 520
+        cell = n_complete * hyper.ratio - 1
+        self.assertEqual(complete_blocks(cell, hyper.ratio), n_complete)
+        scores = torch.zeros(n_complete + 3, dtype=torch.float64)
+        scores[n_complete] = 1.0e9
+        scores[3] = 9.0
+        scores[10] = 8.0
+        chosen, width = select_blocks(scores, cell, hyper)
+        own = cell // hyper.ratio
+        self.assertEqual(width, hyper.ratio)
+        self.assertIn(own, chosen)
+        self.assertNotIn(n_complete, chosen)
+        self.assertNotIn(n_complete + 1, chosen)
+        visible = visible_tokens(cell, chosen, width, hyper.ratio)
+        self.assertEqual(len(visible), 2052)
+        self.assertIn(cell, visible)
+        self.assertLessEqual(max(visible), cell)
+        masked = mask_query_scores(scores.unsqueeze(0).float(), [n_complete])
+        self.assertTrue(torch.isneginf(masked[0, n_complete]))
+        self.assertTrue(torch.isfinite(masked[0, n_complete - 1]))
+        self.assertEqual(float(masked[0, 3]), 9.0)
 
     def test_projection_shapes_and_q_rope_changes_a_nonzero_position(self):
         hyper = QsaHyper()

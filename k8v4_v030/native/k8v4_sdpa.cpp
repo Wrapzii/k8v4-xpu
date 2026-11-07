@@ -172,6 +172,90 @@ Partition &partition_for(Engine &engine, int64_t q_len, int64_t kv_len, int64_t 
       static_cast<int32_t>(kv_len), static_cast<int32_t>(q_len)}).first->second;
 }
 
+// QSA masked prefill: the caller provides the exact causal sparse mask.
+// Keep this separate from the production causal graph and its cache.
+Partition &masked_partition_for(Engine &engine, int64_t nq, int64_t nk,
+                                int64_t hq, int64_t hk, int64_t dim) {
+  using dt = logical_tensor::data_type;
+  static std::map<std::tuple<int64_t, int64_t, int64_t, int64_t, int64_t>, Partition> cache;
+  auto key = std::make_tuple(nq, nk, hq, hk, dim);
+  auto it = cache.find(key);
+  if (it != cache.end()) return it->second;
+  const int64_t group = hq / hk;
+  size_t id = 0;
+  logical_tensor q(id++, dt::f16, {1, hk, group, nq, dim},
+                   {hq*nq*dim, group*nq*dim, nq*dim, dim, 1});
+  logical_tensor k(id++, dt::f16, {1, hk, 1, nk, dim},
+                   {hk*nk*dim, nk*dim, nk*dim, dim, 1});
+  logical_tensor score(id++, dt::f32, {1, hk, group, nq, nk}, logical_tensor::layout_type::strided);
+  graph_op bmm1(id++, graph_op::kind::MatMul, "qsa_bmm1");
+  bmm1.set_attr<bool>(graph_op::attr::transpose_b, true);
+  bmm1.add_inputs({q, k}); bmm1.add_outputs({score});
+  logical_tensor divisor(id++, dt::f16, logical_tensor::dims{1}, logical_tensor::layout_type::strided);
+  logical_tensor scaled(id++, dt::f32, {1, hk, group, nq, nk}, logical_tensor::layout_type::strided);
+  graph_op divide(id++, graph_op::kind::Divide, "qsa_scale");
+  divide.add_inputs({score, divisor}); divide.add_outputs({scaled});
+  logical_tensor mask(id++, dt::f32, {1, 1, 1, nq, nk}, logical_tensor::layout_type::strided);
+  logical_tensor masked(id++, dt::f32, {1, hk, group, nq, nk}, logical_tensor::layout_type::strided);
+  graph_op add(id++, graph_op::kind::Add, "qsa_mask");
+  add.add_inputs({scaled, mask}); add.add_outputs({masked});
+  logical_tensor probs(id++, dt::f16, {1, hk, group, nq, nk}, logical_tensor::layout_type::strided);
+  graph_op softmax(id++, graph_op::kind::SoftMax, "qsa_softmax");
+  softmax.set_attr<int64_t>(graph_op::attr::axis, -1);
+  softmax.set_attr<std::string>(graph_op::attr::mode, "inf_as_zero");
+  softmax.add_inputs({masked}); softmax.add_outputs({probs});
+  logical_tensor v(id++, dt::f16, {1, hk, 1, nk, dim},
+                   {hk*nk*dim, nk*dim, nk*dim, dim, 1});
+  logical_tensor out(id++, dt::f16, {1, hk, group, nq, dim},
+                     {hq*nq*dim, group*nq*dim, nq*dim, dim, 1});
+  graph_op bmm2(id++, graph_op::kind::MatMul, "qsa_bmm2");
+  bmm2.add_inputs({probs, v}); bmm2.add_outputs({out});
+  dnnl::graph::graph graph(dnnl::engine::kind::gpu);
+  for (graph_op *op : {&bmm1, &divide, &add, &softmax, &bmm2}) graph.add_op(*op);
+  graph.finalize();
+  auto parts = graph.get_partitions();
+  TORCH_CHECK(parts.size() == 1, "oneDNN QSA mask did not fuse (", parts.size(), " partitions)");
+  std::vector<logical_tensor> inputs{q, k, divisor, mask, v};
+  std::vector<logical_tensor> outputs{out};
+  auto compiled = parts[0].compile(inputs, outputs, engine.eng);
+  return cache.emplace(key, Partition{std::move(compiled), std::move(inputs),
+                                     std::move(outputs), (int32_t)nk, (int32_t)nq}).first->second;
+}
+
+void sdpa_masked(at::Tensor query, at::Tensor key, at::Tensor value, at::Tensor mask,
+                 at::Tensor out, double scale) {
+  TORCH_CHECK(query.is_xpu() && key.device() == query.device() && value.device() == query.device() &&
+              mask.device() == query.device() && out.device() == query.device(), "QSA SDPA device");
+  TORCH_CHECK(query.scalar_type() == at::kHalf && key.scalar_type() == at::kHalf &&
+              value.scalar_type() == at::kHalf && out.scalar_type() == at::kHalf &&
+              mask.scalar_type() == at::kFloat, "QSA SDPA dtypes");
+  TORCH_CHECK(query.is_contiguous() && key.is_contiguous() && value.is_contiguous() &&
+              mask.is_contiguous() && out.is_contiguous(), "QSA SDPA contiguous");
+  TORCH_CHECK(query.dim() == 3 && key.dim() == 3 && value.sizes() == key.sizes() &&
+              out.sizes() == query.sizes() && mask.dim() == 2, "QSA SDPA shapes");
+  const int64_t hq=query.size(0), nq=query.size(1), dim=query.size(2);
+  const int64_t hk=key.size(0), nk=key.size(1);
+  TORCH_CHECK(hk > 0 && hq % hk == 0 && key.size(2) == dim &&
+              mask.size(0) == nq && mask.size(1) == nk && scale > 0, "QSA SDPA dimensions");
+  auto &queue = c10::xpu::getCurrentXPUStream(query.device().index()).queue();
+  auto &engine = engine_for(queue);
+  auto &part = masked_partition_for(engine, nq, nk, hq, hk, dim);
+  auto &host = scale_for(query.device().index());
+  if (!host.ready || host.scale != scale) {
+    host.divisor = at::full({1}, static_cast<float>(1.0 / scale), query.options().dtype(at::kHalf));
+    host.scale = scale; host.ready = true;
+  }
+  using tensor = dnnl::graph::tensor;
+  std::vector<tensor> inputs{tensor(part.inputs[0], engine.eng, query.data_ptr()),
+                             tensor(part.inputs[1], engine.eng, key.data_ptr()),
+                             tensor(part.inputs[2], engine.eng, host.divisor.data_ptr()),
+                             tensor(part.inputs[3], engine.eng, mask.data_ptr()),
+                             tensor(part.inputs[4], engine.eng, value.data_ptr())};
+  std::vector<tensor> outputs{tensor(part.outputs[0], engine.eng, out.data_ptr())};
+  dnnl::graph::sycl_interop::execute(part.compiled, engine.stream, inputs, outputs);
+  engine.stream.wait();
+}
+
 void sdpa_len(at::Tensor query, at::Tensor key, at::Tensor value, at::Tensor out, double scale, int64_t len_k,
               int64_t len_q) {
   TORCH_CHECK(query.scalar_type() == at::kHalf && key.scalar_type() == at::kHalf && value.scalar_type() == at::kHalf &&
@@ -230,9 +314,11 @@ void sdpa_len(at::Tensor query, at::Tensor key, at::Tensor value, at::Tensor out
 }  // namespace
 
 TORCH_LIBRARY(k8v4_sdpa, m) {
+  m.def("sdpa_masked(Tensor q, Tensor k, Tensor v, Tensor mask, Tensor(a!) out, float scale) -> ()");
   m.def("sdpa_len(Tensor q, Tensor k, Tensor v, Tensor(a!) out, float scale, int len_k, int len_q) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(k8v4_sdpa, XPU, m) {
+  m.impl("sdpa_masked", &sdpa_masked);
   m.impl("sdpa_len", &sdpa_len);
 }

@@ -68,11 +68,38 @@ def _compute_dtype(values: torch.Tensor) -> torch.dtype:
     return torch.float32
 
 
+_PROJ_READY: dict[tuple, torch.Tensor] = {}
+
+
+def _prepared(weight: torch.Tensor, dtype: torch.dtype, device: torch.device, transpose: bool) -> torch.Tensor:
+    """Reuse one contiguous copy. Building it during XPU graph capture waits and aborts."""
+    key = (int(weight.data_ptr()), str(dtype), str(device), bool(transpose))
+    got = _PROJ_READY.get(key)
+    if got is not None:
+        return got
+    capturing = False
+    xpu = getattr(torch, "xpu", None)
+    fn = getattr(xpu, "is_current_stream_capturing", None) if xpu is not None else None
+    if fn is not None:
+        try:
+            capturing = bool(fn())
+        except Exception:
+            capturing = False
+    if capturing:
+        raise RuntimeError("QSA weight was not prepared before graph capture")
+    out = weight.detach().to(dtype=dtype, device=device)
+    if transpose:
+        out = out.transpose(0, 1)
+    out = out.contiguous()
+    _PROJ_READY[key] = out
+    return out
+
+
 def rmsnorm(values: torch.Tensor, weight: torch.Tensor, eps: float = RMS_EPS) -> torch.Tensor:
     """``x * rsqrt(mean(x^2) + eps) * weight`` over the last dimension."""
     work = _compute_dtype(values)
-    x = values.to(work)
-    w = weight.to(dtype=work, device=x.device)
+    x = values if values.dtype == work else values.to(work)
+    w = _prepared(weight, work, x.device, False)
     var = x.pow(2).mean(dim=-1, keepdim=True)
     return x * torch.rsqrt(var + float(eps)) * w
 
@@ -94,11 +121,11 @@ def project_indexer(
     if hidden.ndim != 2 or int(hidden.shape[1]) != hyper.hidden:
         raise ValueError("hidden must be [tokens, %d]" % hyper.hidden)
     work = _compute_dtype(hidden)
-    h = hidden.to(work)
-    q = h @ q_proj.to(dtype=work, device=h.device).transpose(0, 1)
+    h = hidden if hidden.dtype == work else hidden.to(work)
+    q = h @ _prepared(q_proj, work, h.device, True)
     q = q.reshape(h.shape[0], hyper.heads, hyper.dim)
     q = rmsnorm(q, q_norm, hyper.eps)
-    k = h @ k_proj.to(dtype=work, device=h.device).transpose(0, 1)
+    k = h @ _prepared(k_proj, work, h.device, True)
     k = rmsnorm(k, k_norm, hyper.eps)
     return q, k
 

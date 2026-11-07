@@ -1,0 +1,19 @@
+You are working autonomously, all day, in this repo worktree (~/agent-work/k8v4-qsa, branch k8v4-qsa, branched from k8v4-trackI-esimd of ~/agent-work/k8v4-attnprof-20261104). Do not stop to ask questions; keep iterating and committing locally.
+
+GOAL: Add full QSA (Qwen Sparse Attention) support to Daniel's vLLM as an expansion of his existing K8V4 attention backend (INT8 K / INT4 V KV cache on 2x Intel Arc Pro B60, vLLM XPU, TP=2, model Swift-1.5-Qwen3.8-27B-GPTQ served in docker container vllm-k8v4-tp2). Port what https://github.com/kuraneko1/Qwen3.8-27B-QSA-llama.cpp does in llama.cpp. Clone it read-only into ~/agent-work/qsa-ref (shallow clone). Paper: arXiv 2608.30320.
+
+What QSA is (verified): on the 16 full-attention layers (every 4th of 64; the 48 Gated DeltaNet layers are unchanged) a lightweight MQA indexer (4 Q heads, 1 shared K, head_dim 128, ~52.4M FP32 params total over 80 tensors) average-pools keys into 4-token micro-blocks, scores blocks with ReLU(Q.K) summed over heads, selects top 2048 tokens (~512 blocks) plus the current incomplete block, and core attention runs only over those. Full KV is still stored; there is an extra indexer-key / pooled-block cache. In the fork see src/models/qwen35.cpp, llama-memory-hybrid-idx, CUDA qsa-attn.cu and lightning-indexer.cu, Vulkan topk_qsa, SYCL lightning indexer; also conversion_manifest.json and research/ in the HF repo higa2515/Qwen3.8-27B-QSA-BF16.
+
+DELIVERABLE: a patch set for vLLM (find where the K8V4 backend lives in this repo, e.g. k8v4_v030/, deploy/, kstudy/) that covers: (1) model loading of indexer weights for Qwen3.8 full-attention layers (optional; model runs dense if absent); (2) an indexer KV cache stored alongside K8V4 cache (pooled 4-token block keys), allocated in the cache spec and handled by prefix caching/block tables; (3) XPU SYCL/ESIMD kernels for the lightning indexer scoring + top-k block selection; (4) a K8V4 sparse-attention kernel that attends only over selected blocks, reading INT8 K / INT4 V directly, for decode, the multi-query speculative verifier path and chunked prefill; (5) a config flag to enable QSA (default off, dense K8V4 unchanged when off); (6) correctness tests: with selection forced to all blocks it must match dense K8V4 output; plus a reference PyTorch implementation to compare the sparse path against. Write a design doc docs/qsa-k8v4-design.md first, then implement in steps, committing locally after each. Keep a log in results/qsa/qsa-log.txt.
+
+TESTING: Swift has no trained indexers yet (they will be trained separately later), so test with random or base-model indexer weights for kernel correctness only. Any GPU run must go through results/mp/gpubench.sh or ~/.local/bin/bench-hold acquire/wait-idle/release; keep GPU runs short. Never load a second full model on the GPUs while vLLM is serving.
+
+HARD RULES:
+- Hermes, vLLM and Hermes Face are persistent services: never stop, kill, restart, exec into to modify, or block them. Do not touch the running vllm-k8v4-tp2 container or its image; build test images/libs under new names only.
+- Pause CI only via results/mp/ci_hold.sh (timed hold file). Never systemctl/docker stop any runner.
+- Do not modify production kernels, binaries, profiler or config; never run launch_production.sh; never restart vLLM; do not promote anything to production.
+- No git push, no PRs. Do not touch the other worktree's branches or stash "wip-before-trackI".
+- Do not touch /srv (read-only reading of model config.json is OK), Forgejo data, ~/.hermes, ComfyUI, or epyc01. Do not start any model training. Do not delete files outside your own build outputs.
+- Watch disk: keep root under 85%; put large build outputs under /mnt/hdd-500gb/model-validation/qsa-k8v4/.
+- Never print or copy credentials, tokens or env secrets.
+- Do not claim speedups without measurements.

@@ -67,20 +67,70 @@ def mrope_row(
 def normalize_positions(pos: torch.Tensor, n_tokens: int) -> torch.Tensor:
     """Return int64 ``[n_tokens, 4]``.
 
-    A 1-D tensor is a text position broadcast onto every axis. ``[4, T]``
-    is the vLLM MRoPE layout. ``[T, 4]`` is already per token.
+    A 1-D tensor is a text position copied onto every axis. That matches
+    llama.cpp ``cell_rope_pos`` (a 1-D cell fills every section) and the
+    training capture, which expands one ``arange`` to three equal MRoPE
+    rows before ``Qwen3_5TextRotaryEmbedding``. ``[4, T]`` is the four-axis
+    vLLM layout. ``[T, 4]`` is already per token. ``[3, T]`` is Qwen3.8's
+    ``(t, h, w)`` MRoPE. The fourth section has width 0, and the author
+    runtime still stores the text position there, so the fourth axis is a
+    copy of ``t``: ``[row0, row1, row2, row0]``. ``[T, 3]`` is that layout
+    token-major. A square ``[3, 3]`` is read axes-first, the same way
+    ``[4, 4]`` is. ``[1, T]`` and ``[T, 1]`` are one text position and
+    broadcast like 1-D. A two-axis tensor is not a layout this model
+    forwards.
     """
     if pos.ndim == 1:
         if int(pos.shape[0]) != n_tokens:
             raise ValueError("position length %s is not %s" % (tuple(pos.shape), n_tokens))
-        return pos.to(torch.int64).unsqueeze(1).expand(n_tokens, 4).contiguous()
+        return _broadcast_text(pos, n_tokens)
     if pos.ndim != 2:
         raise ValueError("positions rank %d" % pos.ndim)
     if pos.shape[0] == 4 and pos.shape[1] == n_tokens:
         return pos.to(torch.int64).transpose(0, 1).contiguous()
     if pos.shape[0] == n_tokens and pos.shape[1] == 4:
         return pos.to(torch.int64).contiguous()
+    repeated = _repeat_three_axis(pos, n_tokens)
+    if repeated is not None:
+        return repeated
+    text = _one_axis_text(pos, n_tokens)
+    if text is not None:
+        return text
     raise ValueError("positions shape %s does not match %d tokens" % (tuple(pos.shape), n_tokens))
+
+
+def _broadcast_text(pos: torch.Tensor, n_tokens: int) -> torch.Tensor:
+    """Copy one text position onto all four MRoPE axes."""
+    flat = pos.to(torch.int64).reshape(n_tokens)
+    return flat.unsqueeze(1).expand(n_tokens, 4).contiguous()
+
+
+def _repeat_three_axis(pos: torch.Tensor, n_tokens: int) -> torch.Tensor | None:
+    """``[3, T]`` or ``[T, 3]`` becomes ``[t, h, w, t]``. Square ``[3, 3]`` is axes-first."""
+    rows = int(pos.shape[0])
+    cols = int(pos.shape[1])
+    if rows == 3 and cols == n_tokens:
+        axes = pos.to(torch.int64)
+    elif cols == 3 and rows == n_tokens and rows != 3:
+        axes = pos.to(torch.int64).transpose(0, 1).contiguous()
+    else:
+        return None
+    four = torch.cat((axes, axes[0:1]), dim=0)
+    return four.transpose(0, 1).contiguous()
+
+
+def _one_axis_text(pos: torch.Tensor, n_tokens: int) -> torch.Tensor | None:
+    """``[1, T]`` or ``[T, 1]`` is a single text position."""
+    rows = int(pos.shape[0])
+    cols = int(pos.shape[1])
+    if rows == 1 and cols == n_tokens:
+        return _broadcast_text(pos, n_tokens)
+    if cols == 1 and rows == n_tokens and rows != 1:
+        return _broadcast_text(pos, n_tokens)
+    return None
+
+
+_ROPE_CONST = {}
 
 
 def mrope(
@@ -99,15 +149,30 @@ def mrope(
     if pos4.ndim == values.ndim - 1:
         pos4 = pos4.unsqueeze(-2)
     half = n_rot // 2
-    axes = torch.tensor(
-        [pair_axis(int(p), sections) for p in range(half)],
-        dtype=torch.int64,
-        device=values.device,
-    )
     # CPU stays on fp64 so the reference tests are exact. Device RoPE is fp32.
     work = torch.float64 if values.device.type == "cpu" else torch.float32
     scale = theta_scale(n_rot, theta)
-    freq_scale = torch.tensor([scale ** p for p in range(half)], dtype=work)
+    key = (
+        values.device.type,
+        values.device.index,
+        int(n_rot),
+        tuple(sections),
+        float(theta),
+        str(work),
+    )
+    cached = _ROPE_CONST.get(key)
+    if cached is None:
+        axes = torch.tensor(
+            [pair_axis(int(p), sections) for p in range(half)],
+            dtype=torch.int64,
+            device=values.device,
+        )
+        freq_scale = torch.tensor(
+            [scale ** p for p in range(half)], dtype=work, device=values.device
+        )
+        cached = (axes, freq_scale)
+        _ROPE_CONST[key] = cached
+    axes, freq_scale = cached
     chosen = pos4.to(work)[..., axes]
     freq = chosen * freq_scale.to(chosen.device)
     cos_t = torch.cos(freq)

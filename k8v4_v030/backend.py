@@ -128,6 +128,9 @@ class Xe2K8V4Metadata(AttentionMetadata):
 
 class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
     _cudagraph_support = AttentionCGSupport.UNIFORM_BATCH
+    # Draft steps advance seq_lens in place. Rebuilding the block table
+    # between those steps copies the long context. The kernels read the tensor.
+    supports_draft_decode_metadata_update = True
 
     @classmethod
     def get_cudagraph_support(cls, vllm_config, kv_cache_spec):
@@ -142,9 +145,15 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         outside the graph. ``K8V4_QSA`` alone leaves uniform-batch capture
         on, and capture stays dense.
         """
-        del vllm_config, kv_cache_spec
-        if os.environ.get("K8V4_QSA", "0") == "1" and os.environ.get("K8V4_QSA_EAGER", "0") == "1":
+        del kv_cache_spec
+        # QSA's planner reads the hidden state and writes a fresh top-2048
+        # list every step. A FULL decode graph would replay the captured
+        # list. NEVER plus the default attention splitting ops downgrades
+        # FULL_DECODE_ONLY to PIECEWISE, so GEMMs stay compiled and the
+        # planner runs on every step. --enforce-eager is not required.
+        if os.environ.get("K8V4_QSA", "0") == "1" and os.environ.get("K8V4_QSA_GRAPH", "0") != "1":
             return AttentionCGSupport.NEVER
+        del vllm_config
         return cls._cudagraph_support
 
     def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
@@ -154,9 +163,14 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         # one GPU); scratch geometry follows it instead of a module constant.
         self.layout = PageLayout(kv_cache_spec.num_kv_heads)
         if os.environ.get("K8V4_QSA", "0") == "1":
-            from k8v4_v030.qsa_runtime import install_if_requested
+            from k8v4_v030.qsa_runtime import install_if_requested, register_qsa_split
 
+            register_qsa_split(vllm_config)
             install_if_requested()
+        if os.environ.get("K8V4_QSA_GRAPH", "0") == "1":
+            from k8v4_v030.qsa_runtime import ensure_layer_hits
+
+            ensure_layer_hits(self.device)
         logger.info_once(
             "K8/V4 local heads: %d KV / %d Q", self.layout.hkv, self.layout.hq
         )
@@ -195,6 +209,17 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         )
         ensure_scratch(self.device, self.layout, nprog, store_tokens, out_tokens)
 
+
+    def update_draft_decode_metadata(self, metadata) -> None:
+        """Drop host copies so the next eager read sees the advanced seq_lens.
+
+        The draft loop updates that tensor in place and passes the new token
+        slot through the forward context. A cached host length from the
+        previous draft token would attend the wrong block.
+        """
+        metadata._qsa_actual_seq_lens = None
+        metadata._qsa_max_slot = None
+
     def build(
         self,
         common_prefix_len: int,
@@ -208,7 +233,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         starts_cpu = cam.query_start_loc_cpu
         starts = tuple(int(x) for x in starts_cpu.tolist())
         spec = self.kv_cache_spec
-        return Xe2K8V4Metadata(
+        meta = Xe2K8V4Metadata(
             seq_lens=cam.seq_lens,
             slot_mapping=cam.slot_mapping,
             block_table=cam.block_table_tensor,
@@ -222,6 +247,18 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             packed_q_len=uniform_packed_q_len(starts),
             layout=self.layout,
         )
+        if (
+            os.environ.get("K8V4_QSA", "0") == "1"
+            and os.environ.get("K8V4_QSA_GRAPH", "0") == "1"
+            and int(cam.max_query_len) <= 16
+        ):
+            from k8v4_v030.qsa_runtime import flush_layer_hits
+            from k8v4_v030.qsa_stats import note_qsa_decode_layers
+
+            # Hits belong to the forward that just replayed, one per
+            # full-attention layer. MTP drafts never call the counter.
+            note_qsa_decode_layers(flush_layer_hits(self.device), 2048 + 4)
+        return meta
 
 
 def attention_pages(manager_block: int, kernel_block: int | None) -> int:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -11,6 +12,27 @@ from k8v4_v030.qsa_ref import QsaHyper, pool_block
 
 
 class CacheTest(unittest.TestCase):
+    def test_lazy_cache_grows_and_preserves_blocks_and_prefix_copies(self):
+        with patch.dict("os.environ", {"K8V4_QSA_LAZY_CACHE": "1"}):
+            lazy = QsaBlockCache(num_blocks=16, block_size=64)
+        with patch.dict("os.environ", {"K8V4_QSA_LAZY_CACHE": "0"}):
+            eager = QsaBlockCache(num_blocks=16, block_size=64)
+        self.assertEqual(lazy.raw.shape[0], 128)
+        norm = torch.ones(128)
+        for start in (0, 128, 448):
+            slots = torch.arange(start, start + 4, dtype=torch.int64)
+            keys = torch.arange(4 * 128, dtype=torch.float32).view(4, 128) + start
+            pos = torch.arange(start, start + 4).view(4, 1).expand(4, 4)
+            lazy.write_tokens(slots, keys, pos, norm)
+            eager.write_tokens(slots, keys, pos, norm)
+        lazy.copy_blocks([0], [12])
+        eager.copy_blocks([0], [12])
+        for name in ("raw", "pos", "filled", "pooled", "pool_valid"):
+            a, b = getattr(lazy, name), getattr(eager, name)
+            self.assertTrue(torch.equal(a, b[:a.shape[0]]), name)
+        with self.assertRaises(IndexError):
+            lazy.ensure_capacity(16 * 64)
+
     def setUp(self):
         reset_caches()
 

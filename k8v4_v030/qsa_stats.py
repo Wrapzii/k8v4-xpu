@@ -26,14 +26,19 @@ REASONS = (
     "empty",
     "within_budget",
     "full_causal",
+    "fast_prefill",
     "sparse_ok",
 )
 PHASES = ("prefill", "decode")
 _INTERVAL_S = 1.0
 
 _lock = threading.Lock()
+_handle = None
+_handle_path = ""
 _counts = {phase: {reason: 0 for reason in REASONS} for phase in PHASES}
 _last_write = 0.0
+_attn_width: int | None = None
+_layer_hits_note: int | None = None
 _atexit_armed = False
 
 
@@ -63,6 +68,7 @@ def qsa_stats_reset() -> None:
             for reason in REASONS:
                 _counts[phase][reason] = 0
         _last_write = 0.0
+_attn_width: int | None = None
 
 
 def qsa_stats_flush() -> None:
@@ -72,6 +78,32 @@ def qsa_stats_flush() -> None:
     _arm_atexit()
     with _lock:
         _write_locked()
+
+
+def note_qsa_width(width: int) -> None:
+    """Remember the widest selected row. Written on the next stats snapshot."""
+    global _attn_width
+    if not qsa_stats_enabled():
+        return
+    _attn_width = int(width)
+
+
+def note_qsa_decode_layers(hits: int, width: int = 2052) -> None:
+    """Count graph-replayed full-attention layers as decode sparse_ok.
+
+    Each hit is one shipped ``qsa_cache_update`` on a full-attention layer.
+    The write is immediate so a short generation window still has a raw line.
+    """
+    global _attn_width, _layer_hits_note
+    if not qsa_stats_enabled() or int(hits) <= 0:
+        return
+    _arm_atexit()
+    with _lock:
+        _counts["decode"]["sparse_ok"] += int(hits)
+        _attn_width = int(width)
+        _layer_hits_note = int(hits)
+        _write_locked()
+        _layer_hits_note = None
 
 
 def note_qsa(query, meta, reason: str) -> None:
@@ -124,6 +156,10 @@ def _flush_atexit() -> None:
 def _write_locked() -> None:
     global _last_write
     row = {"t": time.time()}
+    if _attn_width is not None:
+        row["attn_width"] = int(_attn_width)
+    if _layer_hits_note:
+        row["layer_hits"] = int(_layer_hits_note)
     row.update(
         {
             phase: {reason: int(_counts[phase][reason]) for reason in REASONS}
@@ -131,11 +167,23 @@ def _write_locked() -> None:
         }
     )
     path = qsa_stats_file()
+    global _handle, _handle_path
     try:
-        with open(path, "a", encoding="utf-8") as handle:
-            handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+        if _handle is None or _handle_path != path:
+            if _handle is not None:
+                _handle.close()
+            _handle = open(path, "a", encoding="utf-8")
+            _handle_path = path
+        _handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+        _handle.flush()
     except OSError:
         # A missing path must not retry on every layer. The next interval will.
         _last_write = time.monotonic()
+        if _handle is not None:
+            try:
+                _handle.close()
+            except OSError:
+                pass
+            _handle = None
         return
     _last_write = time.monotonic()
