@@ -7,7 +7,7 @@
   "model": {
     "name": "Swift-1.5-Qwen3.8-27B",
     "quantization": "GPTQ-Int4 baked, int8 embedding",
-    "checkpoint_dir": "/data-ssd/models/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8",
+    "checkpoint_dir": "${MODEL_DIR}",
     "container_path": "/model",
     "served_name": "Swift-Qwen-27B-TP2CP2",
     "dtype": "float16",
@@ -102,11 +102,11 @@
     "-v",
     "/dev/dri/by-path:/dev/dri/by-path:ro",
     "-v",
-    "/data-ssd/models/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8:/model:ro",
+    "${MODEL_DIR}:/model:ro",
     "-v",
-    "/path/to/workspace/AI/k8v4-tp2cp2-qual/templates/chat_template.jinja:/model/chat_template.jinja:ro",
+    "${CHAT_TEMPLATE}:/model/chat_template.jinja:ro",
     "-v",
-    "/path/to/workspace/AI/k8v4-tp2cp2-qual/.cache/cpqual-tp2:/root/.cache/vllm",
+    "${VLLM_CACHE_DIR}:/root/.cache/vllm",
     "-e",
     "K8V4_CP=1",
     "-e",
@@ -238,9 +238,9 @@
   "mounts": [
     "/dev/dri:/dev/dri",
     "/dev/dri/by-path:/dev/dri/by-path:ro",
-    "/data-ssd/models/Swift-1.5-Qwen3.8-27b-GPTQ-Int4-baked-v1-embed-int8:/model:ro",
-    "/path/to/workspace/AI/k8v4-tp2cp2-qual/templates/chat_template.jinja:/model/chat_template.jinja:ro",
-    "/path/to/workspace/AI/k8v4-tp2cp2-qual/.cache/cpqual-tp2:/root/.cache/vllm"
+    "${MODEL_DIR}:/model:ro",
+    "${CHAT_TEMPLATE}:/model/chat_template.jinja:ro",
+    "${VLLM_CACHE_DIR}:/root/.cache/vllm"
   ],
   "measured": {
     "harness": "fixed-shape screen: one 300-token code prompt per request, temperature 0, streamed; decode = tokens / (first-to-last delta), token counts from the server usage block; prefill = prompt_tokens / time-to-first-token on a nonce-salted cold prefix",

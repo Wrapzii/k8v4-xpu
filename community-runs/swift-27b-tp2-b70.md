@@ -116,3 +116,5 @@ not a free option, and it was not A/B'd here.
   B70_UTIL=0.90`), both in the qualification fork of this branch. The `docker_argv`,
   `gpu_env` and `vllm_argv` in the JSON are the authoritative reproduction input; the
   scripts only generate them.
+
+Host mount paths in the accompanying JSON use placeholders.
