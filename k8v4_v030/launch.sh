@@ -140,6 +140,14 @@ fi
 if [ -n "${XE2_KV_S2_PARALLEL:-}" ]; then
   extra+=(-e "XE2_KV_S2_PARALLEL=${XE2_KV_S2_PARALLEL}")
 fi
+# Optional fp16 S1 partial outputs (about -18% on the q7 verify attention op at 128K). Off unless set.
+if [ -n "${XE2_KV_PARTIAL_FP16:-}" ]; then
+  extra+=(-e "XE2_KV_PARTIAL_FP16=${XE2_KV_PARTIAL_FP16}")
+fi
+# Sub-group-parallel S1 for the 1-token draft is on by default; set 0 to disable.
+if [ -n "${XE2_KV_SMALL_S1:-}" ]; then
+  extra+=(-e "XE2_KV_SMALL_S1=${XE2_KV_SMALL_S1}")
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \

@@ -1,0 +1,17 @@
+{
+  "tag": "argmax",
+  "backup": "vllm-k8v4-tp2-before-argmax-20261014204535",
+  "flag": "use_local_argmax_reduction",
+  "state": "healthy",
+  "old_spec": {
+    "method": "mtp",
+    "num_speculative_tokens": 6,
+    "use_local_argmax_reduction": true
+  },
+  "new_spec": {
+    "method": "mtp",
+    "num_speculative_tokens": 6,
+    "use_local_argmax_reduction": true
+  },
+  "smoke": "\n\nready"
+}

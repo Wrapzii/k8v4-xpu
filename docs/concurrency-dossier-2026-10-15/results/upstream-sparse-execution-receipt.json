@@ -1,0 +1,10 @@
+{
+  "started": "2026-10-15T01:22:20.585041+00:00",
+  "budget": "two synthetic GQA controls plus four frozen-capture executor tests; zero model generation; 300s helper timeout",
+  "production_container": "28136a70ca30038781fa2965b297d509fb5c6bed54019fd54bbee56f26423515",
+  "image": "sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742",
+  "original_backend_sha256": "c2639e06e517f4a37ede269997c76fda411e9e718eeaefe81682474db82576df",
+  "probe_returncode": 0,
+  "restored_healthy": true,
+  "ended": "2026-10-15T01:29:59.188104+00:00"
+}

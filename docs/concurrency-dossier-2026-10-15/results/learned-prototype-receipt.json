@@ -1,0 +1,366 @@
+{
+  "budget": "144 existing valid snapshots; four rank16 layer models,128 optimizer steps each,seed61141; no hyperparameter sweep/no generation",
+  "teacher_frames": 144,
+  "teacher_query_positions": 1008,
+  "train_frames": 64,
+  "test_frames": 80,
+  "split": "CODE32K+128K train; CODE200K length extrapolation and all TOOLS held out; correlated prompts/positions, not independent tasks",
+  "teacher_seconds": 14.031712199997855,
+  "feature": "per-page mean/min/max dequantized K; last8+sink mandatory, not learned rank targets; separate parameters per FA layer/KV group",
+  "serving_enabled": false,
+  "models": [
+    {
+      "layer": 3,
+      "parameters": 73728,
+      "training_frames": 16,
+      "KL_first16_mean": 0.8775388710200787,
+      "KL_last16_mean": 0.4166237087920308
+    },
+    {
+      "layer": 15,
+      "parameters": 73728,
+      "training_frames": 16,
+      "KL_first16_mean": 0.972870972007513,
+      "KL_last16_mean": 1.283243801444769
+    },
+    {
+      "layer": 31,
+      "parameters": 73728,
+      "training_frames": 16,
+      "KL_first16_mean": 2.301066119223833,
+      "KL_last16_mean": 1.7301253154873848
+    },
+    {
+      "layer": 63,
+      "parameters": 73728,
+      "training_frames": 16,
+      "KL_first16_mean": 0.9961312636733055,
+      "KL_last16_mean": 1.3904621005058289
+    }
+  ],
+  "heldout_distribution": [
+    {
+      "file": "code-200000-layer15-position0.pt",
+      "test_KL": 0.5680389404296875
+    },
+    {
+      "file": "code-200000-layer15-position1.pt",
+      "test_KL": 1.2329267263412476
+    },
+    {
+      "file": "code-200000-layer15-position2.pt",
+      "test_KL": 1.4299296140670776
+    },
+    {
+      "file": "code-200000-layer15-position3.pt",
+      "test_KL": 1.1806681156158447
+    },
+    {
+      "file": "code-200000-layer15-position4.pt",
+      "test_KL": 1.1021314859390259
+    },
+    {
+      "file": "code-200000-layer15-position5.pt",
+      "test_KL": 1.267768144607544
+    },
+    {
+      "file": "code-200000-layer15-position6.pt",
+      "test_KL": 1.1819864511489868
+    },
+    {
+      "file": "code-200000-layer15-position7.pt",
+      "test_KL": 0.5655277371406555
+    },
+    {
+      "file": "code-200000-layer3-position0.pt",
+      "test_KL": 0.8541256785392761
+    },
+    {
+      "file": "code-200000-layer3-position1.pt",
+      "test_KL": 0.8715959787368774
+    },
+    {
+      "file": "code-200000-layer3-position2.pt",
+      "test_KL": 0.9795960783958435
+    },
+    {
+      "file": "code-200000-layer3-position3.pt",
+      "test_KL": 0.9676413536071777
+    },
+    {
+      "file": "code-200000-layer3-position4.pt",
+      "test_KL": 0.9040582776069641
+    },
+    {
+      "file": "code-200000-layer3-position5.pt",
+      "test_KL": 0.97296142578125
+    },
+    {
+      "file": "code-200000-layer3-position6.pt",
+      "test_KL": 1.0202877521514893
+    },
+    {
+      "file": "code-200000-layer3-position7.pt",
+      "test_KL": 1.028407096862793
+    },
+    {
+      "file": "code-200000-layer31-position0.pt",
+      "test_KL": 3.268852710723877
+    },
+    {
+      "file": "code-200000-layer31-position1.pt",
+      "test_KL": 3.324213743209839
+    },
+    {
+      "file": "code-200000-layer31-position2.pt",
+      "test_KL": 2.501469850540161
+    },
+    {
+      "file": "code-200000-layer31-position3.pt",
+      "test_KL": 3.8780148029327393
+    },
+    {
+      "file": "code-200000-layer31-position4.pt",
+      "test_KL": 2.0750393867492676
+    },
+    {
+      "file": "code-200000-layer31-position5.pt",
+      "test_KL": 2.2485718727111816
+    },
+    {
+      "file": "code-200000-layer31-position6.pt",
+      "test_KL": 2.279637336730957
+    },
+    {
+      "file": "code-200000-layer31-position7.pt",
+      "test_KL": 3.426704168319702
+    },
+    {
+      "file": "code-200000-layer63-position0.pt",
+      "test_KL": 0.7051688432693481
+    },
+    {
+      "file": "code-200000-layer63-position1.pt",
+      "test_KL": 0.8100026845932007
+    },
+    {
+      "file": "code-200000-layer63-position2.pt",
+      "test_KL": 0.7631592154502869
+    },
+    {
+      "file": "code-200000-layer63-position3.pt",
+      "test_KL": 0.9044117331504822
+    },
+    {
+      "file": "code-200000-layer63-position4.pt",
+      "test_KL": 0.951321542263031
+    },
+    {
+      "file": "code-200000-layer63-position5.pt",
+      "test_KL": 0.9198788404464722
+    },
+    {
+      "file": "code-200000-layer63-position6.pt",
+      "test_KL": 0.8387619853019714
+    },
+    {
+      "file": "code-200000-layer63-position7.pt",
+      "test_KL": 0.8024188280105591
+    },
+    {
+      "file": "tools-131072-layer3-position0.pt",
+      "test_KL": 0.27698785066604614
+    },
+    {
+      "file": "tools-131072-layer3-position1.pt",
+      "test_KL": 0.254476398229599
+    },
+    {
+      "file": "tools-131072-layer3-position2.pt",
+      "test_KL": 0.25713855028152466
+    },
+    {
+      "file": "tools-131072-layer3-position3.pt",
+      "test_KL": 0.22749444842338562
+    },
+    {
+      "file": "tools-131072-layer3-position4.pt",
+      "test_KL": 0.28862300515174866
+    },
+    {
+      "file": "tools-131072-layer3-position5.pt",
+      "test_KL": 0.26690474152565
+    },
+    {
+      "file": "tools-131072-layer3-position6.pt",
+      "test_KL": 0.27929261326789856
+    },
+    {
+      "file": "tools-131072-layer3-position7.pt",
+      "test_KL": 0.3655073940753937
+    },
+    {
+      "file": "tools-200000-layer15-position0.pt",
+      "test_KL": 0.46018585562705994
+    },
+    {
+      "file": "tools-200000-layer15-position1.pt",
+      "test_KL": 0.7142694592475891
+    },
+    {
+      "file": "tools-200000-layer15-position2.pt",
+      "test_KL": 0.5873008966445923
+    },
+    {
+      "file": "tools-200000-layer15-position3.pt",
+      "test_KL": 0.6394845247268677
+    },
+    {
+      "file": "tools-200000-layer15-position4.pt",
+      "test_KL": 0.7332364320755005
+    },
+    {
+      "file": "tools-200000-layer15-position5.pt",
+      "test_KL": 0.559803307056427
+    },
+    {
+      "file": "tools-200000-layer15-position6.pt",
+      "test_KL": 0.865385115146637
+    },
+    {
+      "file": "tools-200000-layer15-position7.pt",
+      "test_KL": 0.9527050852775574
+    },
+    {
+      "file": "tools-200000-layer3-position0.pt",
+      "test_KL": 0.49654144048690796
+    },
+    {
+      "file": "tools-200000-layer3-position1.pt",
+      "test_KL": 0.6947929263114929
+    },
+    {
+      "file": "tools-200000-layer3-position2.pt",
+      "test_KL": 0.650477945804596
+    },
+    {
+      "file": "tools-200000-layer3-position3.pt",
+      "test_KL": 0.6594052910804749
+    },
+    {
+      "file": "tools-200000-layer3-position4.pt",
+      "test_KL": 0.5624020099639893
+    },
+    {
+      "file": "tools-200000-layer3-position5.pt",
+      "test_KL": 0.7743071913719177
+    },
+    {
+      "file": "tools-200000-layer3-position6.pt",
+      "test_KL": 0.7819860577583313
+    },
+    {
+      "file": "tools-200000-layer3-position7.pt",
+      "test_KL": 0.879531979560852
+    },
+    {
+      "file": "tools-200000-layer31-position0.pt",
+      "test_KL": 3.935432195663452
+    },
+    {
+      "file": "tools-200000-layer31-position1.pt",
+      "test_KL": 3.592881441116333
+    },
+    {
+      "file": "tools-200000-layer31-position2.pt",
+      "test_KL": 4.413651466369629
+    },
+    {
+      "file": "tools-200000-layer31-position3.pt",
+      "test_KL": 2.924410104751587
+    },
+    {
+      "file": "tools-200000-layer31-position4.pt",
+      "test_KL": 4.186694145202637
+    },
+    {
+      "file": "tools-200000-layer31-position5.pt",
+      "test_KL": 3.7636334896087646
+    },
+    {
+      "file": "tools-200000-layer31-position6.pt",
+      "test_KL": 3.2682814598083496
+    },
+    {
+      "file": "tools-200000-layer31-position7.pt",
+      "test_KL": 2.4043052196502686
+    },
+    {
+      "file": "tools-200000-layer63-position0.pt",
+      "test_KL": 0.9300726652145386
+    },
+    {
+      "file": "tools-200000-layer63-position1.pt",
+      "test_KL": 0.7723378539085388
+    },
+    {
+      "file": "tools-200000-layer63-position2.pt",
+      "test_KL": 1.1563799381256104
+    },
+    {
+      "file": "tools-200000-layer63-position3.pt",
+      "test_KL": 1.0414226055145264
+    },
+    {
+      "file": "tools-200000-layer63-position4.pt",
+      "test_KL": 1.0935754776000977
+    },
+    {
+      "file": "tools-200000-layer63-position5.pt",
+      "test_KL": 1.0023499727249146
+    },
+    {
+      "file": "tools-200000-layer63-position6.pt",
+      "test_KL": 0.8099251389503479
+    },
+    {
+      "file": "tools-200000-layer63-position7.pt",
+      "test_KL": 0.8329533338546753
+    },
+    {
+      "file": "tools-32768-layer3-position0.pt",
+      "test_KL": 0.47337207198143005
+    },
+    {
+      "file": "tools-32768-layer3-position1.pt",
+      "test_KL": 0.6843299865722656
+    },
+    {
+      "file": "tools-32768-layer3-position2.pt",
+      "test_KL": 0.44479110836982727
+    },
+    {
+      "file": "tools-32768-layer3-position3.pt",
+      "test_KL": 0.35614705085754395
+    },
+    {
+      "file": "tools-32768-layer3-position4.pt",
+      "test_KL": 0.25457245111465454
+    },
+    {
+      "file": "tools-32768-layer3-position5.pt",
+      "test_KL": 0.3239572048187256
+    },
+    {
+      "file": "tools-32768-layer3-position6.pt",
+      "test_KL": 0.30604857206344604
+    },
+    {
+      "file": "tools-32768-layer3-position7.pt",
+      "test_KL": 0.24420006573200226
+    }
+  ],
+  "detailed_frames": 20,
+  "detailed_rows": 300,
+  "elapsed_seconds": 33.7903354999944
+}

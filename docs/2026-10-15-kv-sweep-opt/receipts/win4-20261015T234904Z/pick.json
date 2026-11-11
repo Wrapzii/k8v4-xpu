@@ -1,0 +1,1 @@
+{"flags": ["XE2_KV_CASCADE=1"], "why": ["drafter cascade ok=True", "reg8m: exact=True fp64=True graph=True fast=False mean_q7_ms=14.161 serial=6.044", "reg16m: exact=True fp64=True graph=True fast=False mean_q7_ms=14.228 serial=6.044"]}

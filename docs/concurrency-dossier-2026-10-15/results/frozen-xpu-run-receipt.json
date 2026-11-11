@@ -1,0 +1,10 @@
+{
+  "started": "2026-10-15T02:20:26.671420+00:00",
+  "mode": "xpu train+heldout; reuse teacher-dataset.pt; no generation",
+  "device": "xpu:0",
+  "production_changed": true,
+  "returncode": 0,
+  "restoration_started": true,
+  "restored_healthy": true,
+  "ended": "2026-10-15T02:33:32.487470+00:00"
+}

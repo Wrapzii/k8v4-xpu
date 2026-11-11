@@ -1,0 +1,8 @@
+{
+  "production_changed": false,
+  "library": "/mnt/hdd-500gb/model-validation/launch80-20261013/perf-continue-20261014/libxe2_kv_parbatch.so",
+  "serial_rc": 0,
+  "parallel_rc": 1,
+  "restoration_started": true,
+  "restored_healthy": true
+}

@@ -1,0 +1,24 @@
+{
+  "budget": "two capacities per available FA layer; fixed256steps/model; all valid held-out frames evaluated; no hyperparameter sweep",
+  "rank": 16,
+  "MLP_hidden": 64,
+  "seed": 61142,
+  "learning_rate": 0.0003,
+  "objective": "dense-mass KL plus2x weighted hard-negative page ranking; importance mixes mean and max of six dense-head masses",
+  "budgets": [
+    0.05,
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7
+  ],
+  "L2_threshold": 0.01,
+  "split": "existing CODE32K/128K plus new CODE128K train; all CODE200K and every TOOLS frame held out; no adjacent-position shuffle across split",
+  "acceptance": "learned must beat best matched heuristic accuracy versus actual global physical page union, below1% output L2, before fusion",
+  "generation_requests": 0,
+  "target_model_updates": 0,
+  "input_frames": 528
+}

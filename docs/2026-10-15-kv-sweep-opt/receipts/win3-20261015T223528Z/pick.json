@@ -1,0 +1,1 @@
+{"flags": ["XE2_KV_CASCADE=1"], "why": ["drafter cascade ok", "casc: exact=True fast=False safe0=True mean_shared_ms=7.127", "vsg2: exact=True fast=False safe0=True mean_shared_ms=6.608", "vsg4: exact=True fast=False safe0=True mean_shared_ms=7.430", "q7 graph replay of pick bitwise: False"]}

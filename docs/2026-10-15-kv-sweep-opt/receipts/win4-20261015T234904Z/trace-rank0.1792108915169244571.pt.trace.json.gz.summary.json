@@ -1,0 +1,365 @@
+{
+ "device_pid": 0,
+ "n_device_events": 1644,
+ "steps_est": 5.0,
+ "wall_ms": 12292.034366210937,
+ "busy_ms": 4109.820127685547,
+ "idle_ms": 8182.214238525391,
+ "per_step_ms": {
+  "wall": 2458.4068732421874,
+  "busy": 821.9640255371094,
+  "idle": 1636.4428477050783
+ },
+ "buckets_ms_per_step": {
+  "allreduce": 809.818,
+  "fa_k8v4": 6.384,
+  "gemm": 4.844,
+  "other": 0.759,
+  "memcpy": 0.113,
+  "norm_act": 0.025,
+  "sampler": 0.02,
+  "rope_kvstore": 0.005
+ },
+ "bucket_launches_per_step": {
+  "other": 131.2,
+  "memcpy": 58.4,
+  "sampler": 4.0,
+  "allreduce": 21.6,
+  "rope_kvstore": 0.8,
+  "gemm": 40.8,
+  "fa_k8v4": 68.0,
+  "norm_act": 4.0
+ },
+ "gap_hist_us": {
+  "<5": 655,
+  "5-20": 8,
+  "20-100": 0,
+  "100-1000": 1,
+  ">=1000": 971
+ },
+ "gap_ms_per_step_by_size": {
+  "<20us": 0.227,
+  "20-100us": 0.0,
+  "100us-1ms": 0.198,
+  ">=1ms": 1636.018
+ },
+ "top_gaps": [
+  {
+   "us": 427582.4,
+   "after": "Memcpy M2D (MEMORY(Unknown) -> DEVICE)",
+   "before": "at::native::xpu::IndexKernelFunctor<at::native::xpu::IndexFu"
+  },
+  {
+   "us": 412462.1,
+   "after": "Memcpy M2D (MEMORY(Unknown) -> DEVICE)",
+   "before": "at::native::xpu::IndexKernelFunctor<at::native::xpu::IndexFu"
+  },
+  {
+   "us": 170377.9,
+   "after": "_prepare_rope_positions_kernel",
+   "before": "at::native::xpu::VectorizedGatherKernel<16, long>"
+  },
+  {
+   "us": 164463.6,
+   "after": "_prepare_rope_positions_kernel",
+   "before": "at::native::xpu::VectorizedGatherKernel<16, long>"
+  },
+  {
+   "us": 151479.0,
+   "after": "Memcpy D2D (DEVICE -> DEVICE)",
+   "before": "_prepare_decode_inputs_kernel"
+  },
+  {
+   "us": 138242.5,
+   "after": "_prepare_rope_positions_kernel",
+   "before": "at::native::xpu::VectorizedGatherKernel<16, long>"
+  },
+  {
+   "us": 138233.7,
+   "after": "_prepare_rope_positions_kernel",
+   "before": "at::native::xpu::VectorizedGatherKernel<16, long>"
+  },
+  {
+   "us": 54814.7,
+   "after": "Memcpy D2D (DEVICE -> DEVICE)",
+   "before": "_prepare_decode_inputs_kernel"
+  },
+  {
+   "us": 51724.6,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51449.8,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51363.2,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51289.8,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51262.4,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51249.6,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  },
+  {
+   "us": 51168.7,
+   "after": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt",
+   "before": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_tr"
+  }
+ ],
+ "top_kernels": [
+  {
+   "name": "oneccl_allreduce_pcie<sycl::_V1::detail::half_impl::half, Rt64_128_PCIE, false, 16, TwoShotsTransmit>",
+   "ms_per_step": 618.554,
+   "launches_per_step": 12.8,
+   "us_per_launch": 48324.5
+  },
+  {
+   "name": "oneccl_allgatherv_pcie<float, Rt64_PCIE, false, 16>",
+   "ms_per_step": 105.164,
+   "launches_per_step": 4.0,
+   "us_per_launch": 26291.0
+  },
+  {
+   "name": "oneccl_allgatherv_pcie<sycl::_V1::detail::half_impl::half, Rt64_128_PCIE, false, 16>",
+   "ms_per_step": 86.101,
+   "launches_per_step": 4.8,
+   "us_per_launch": 17937.7
+  },
+  {
+   "name": "gemm_kernel",
+   "ms_per_step": 4.791,
+   "launches_per_step": 24.8,
+   "us_per_launch": 193.2
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvCascadeS1PackedKernel<2, true>",
+   "ms_per_step": 4.272,
+   "launches_per_step": 4.0,
+   "us_per_launch": 1068.1
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvCascadeS2Half32<2>",
+   "ms_per_step": 1.253,
+   "launches_per_step": 16.0,
+   "us_per_launch": 78.3
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvTorchAbiS1PagedSmallKernel<2, true>",
+   "ms_per_step": 0.529,
+   "launches_per_step": 16.0,
+   "us_per_launch": 33.1
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvTorchAbiPackQquantKernel<2>",
+   "ms_per_step": 0.281,
+   "launches_per_step": 20.0,
+   "us_per_launch": 14.1
+  },
+  {
+   "name": "at::native::xpu::UnrolledElementwiseKernel<at::native::xpu::CopyScalarFunc<c10::Half>, at::detail::Array<char*",
+   "ms_per_step": 0.11,
+   "launches_per_step": 4.8,
+   "us_per_launch": 23.0
+  },
+  {
+   "name": "at::native::xpu::ReduceKernel<1, at::native::xpu::ReduceOp<c10::Half, at::native::xpu::MaxOps<c10::Half>, unsi",
+   "ms_per_step": 0.108,
+   "launches_per_step": 4.0,
+   "us_per_launch": 26.9
+  },
+  {
+   "name": "Memcpy D2D (DEVICE -> DEVICE)",
+   "ms_per_step": 0.07,
+   "launches_per_step": 44.0,
+   "us_per_launch": 1.6
+  },
+  {
+   "name": "at::native::xpu::VectorizedElementwiseKernel<8, at::native::xpu::CopyScalarFunc<c10::Half>, at::detail::Array<",
+   "ms_per_step": 0.068,
+   "launches_per_step": 8.8,
+   "us_per_launch": 7.8
+  },
+  {
+   "name": "_compute_local_logits_stats_kernel",
+   "ms_per_step": 0.059,
+   "launches_per_step": 0.8,
+   "us_per_launch": 73.7
+  },
+  {
+   "name": "_compute_slot_mappings_kernel",
+   "ms_per_step": 0.043,
+   "launches_per_step": 4.8,
+   "us_per_launch": 8.9
+  },
+  {
+   "name": "at::native::xpu::ReduceKernel<1, at::native::xpu::ReduceOp<float, at::native::xpu::ArgMaxOps<float>, unsigned ",
+   "ms_per_step": 0.032,
+   "launches_per_step": 4.0,
+   "us_per_launch": 8.0
+  },
+  {
+   "name": "at::native::xpu::IndexSelectSmallIndexFunctor<c10::Half, long, unsigned int, 2, 2, -2>",
+   "ms_per_step": 0.029,
+   "launches_per_step": 4.0,
+   "us_per_launch": 7.2
+  },
+  {
+   "name": "at::native::xpu::IndexKernelFunctor<at::native::xpu::IndexFunctor<at::native::xpu::OpaqueType<4> >, char*, Off",
+   "ms_per_step": 0.029,
+   "launches_per_step": 6.4,
+   "us_per_launch": 4.5
+  },
+  {
+   "name": "triton_red_fused__to_copy_add_fused_add_rms_norm_3",
+   "ms_per_step": 0.025,
+   "launches_per_step": 4.0,
+   "us_per_launch": 6.2
+  },
+  {
+   "name": "triton_red_fused__to_copy_add_fused_add_rms_norm_mlp_gemm_transpose_1",
+   "ms_per_step": 0.023,
+   "launches_per_step": 4.0,
+   "us_per_launch": 5.7
+  },
+  {
+   "name": "triton_poi_fused_4",
+   "ms_per_step": 0.02,
+   "launches_per_step": 4.0,
+   "us_per_launch": 5.0
+  },
+  {
+   "name": "triton_red_fused_0",
+   "ms_per_step": 0.019,
+   "launches_per_step": 4.0,
+   "us_per_launch": 4.8
+  },
+  {
+   "name": "Memcpy H2D (HOST -> DEVICE)",
+   "ms_per_step": 0.018,
+   "launches_per_step": 6.4,
+   "us_per_launch": 2.9
+  },
+  {
+   "name": "_update_draft_inputs_kernel",
+   "ms_per_step": 0.018,
+   "launches_per_step": 4.0,
+   "us_per_launch": 4.5
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvTorchAbiVstorePagedKernel<2>",
+   "ms_per_step": 0.017,
+   "launches_per_step": 4.0,
+   "us_per_launch": 4.3
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvCascadePlanKernel",
+   "ms_per_step": 0.016,
+   "launches_per_step": 4.0,
+   "us_per_launch": 4.0
+  },
+  {
+   "name": "at::native::xpu::ScatterGatherElementwiseKernelFunctor<at::native::xpu::ScatterGatherInternalKernelLoopFunctor",
+   "ms_per_step": 0.016,
+   "launches_per_step": 6.4,
+   "us_per_launch": 2.5
+  },
+  {
+   "name": "(anonymous namespace)::Xe2KvTorchAbiKstorePagedKernel<2>",
+   "ms_per_step": 0.015,
+   "launches_per_step": 4.0,
+   "us_per_launch": 3.8
+  },
+  {
+   "name": "triton_red_fused_3",
+   "ms_per_step": 0.014,
+   "launches_per_step": 4.0,
+   "us_per_launch": 3.5
+  },
+  {
+   "name": "triton_poi_fused_add_bitwise_and_bitwise_not_bitwise_or_ge_lt_mul_sub_0",
+   "ms_per_step": 0.014,
+   "launches_per_step": 4.8,
+   "us_per_launch": 2.9
+  },
+  {
+   "name": "at::native::xpu::UnrolledElementwiseKernel<at::native::xpu::CopyScalarFunc<long>, at::detail::Array<char*, 2>,",
+   "ms_per_step": 0.013,
+   "launches_per_step": 4.8,
+   "us_per_launch": 2.8
+  },
+  {
+   "name": "at::native::xpu::CatArrayBatchedCopy_contig<at::native::xpu::OpaqueType<4u>, unsigned int, 2, 64, 1>",
+   "ms_per_step": 0.012,
+   "launches_per_step": 4.0,
+   "us_per_launch": 3.1
+  },
+  {
+   "name": "at::native::xpu::UnrolledElementwiseKernel<at::native::xpu::CopyScalarFunc<float>, at::detail::Array<char*, 2>",
+   "ms_per_step": 0.012,
+   "launches_per_step": 4.0,
+   "us_per_launch": 3.0
+  },
+  {
+   "name": "at::native::xpu::VectorizedElementwiseKernel<4, at::native::xpu::BUnaryFunctor<int, int, int, at::native::xpu:",
+   "ms_per_step": 0.012,
+   "launches_per_step": 5.6,
+   "us_per_launch": 2.1
+  },
+  {
+   "name": "triton_poi_fused_int4_gemm_w4a16_mul_sigmoid_t_view_0",
+   "ms_per_step": 0.012,
+   "launches_per_step": 4.0,
+   "us_per_launch": 2.9
+  },
+  {
+   "name": "at::native::xpu::ElementwiseGlobalRangeKernel<at::native::xpu::LegacyKernelScalarFunctor<c10::Half, 3, OffsetC",
+   "ms_per_step": 0.012,
+   "launches_per_step": 4.8,
+   "us_per_launch": 2.4
+  },
+  {
+   "name": "at::native::xpu::ElementwiseGlobalRangeKernel<at::native::xpu::LegacyKernelScalarFunctor<float, 2, OffsetCalcu",
+   "ms_per_step": 0.011,
+   "launches_per_step": 4.0,
+   "us_per_launch": 2.8
+  },
+  {
+   "name": "Memcpy M2D (MEMORY(Unknown) -> DEVICE)",
+   "ms_per_step": 0.01,
+   "launches_per_step": 4.8,
+   "us_per_launch": 2.1
+  },
+  {
+   "name": "postprocess_mamba_fused_kernel",
+   "ms_per_step": 0.01,
+   "launches_per_step": 0.8,
+   "us_per_launch": 12.2
+  },
+  {
+   "name": "triton_poi_fused_mlp_gemm_mul_silu_slice_transpose_2",
+   "ms_per_step": 0.009,
+   "launches_per_step": 4.0,
+   "us_per_launch": 2.3
+  },
+  {
+   "name": "at::native::xpu::UnrolledElementwiseKernel<at::native::xpu::BinaryFunctor<int, int, int, at::native::xpu::AddF",
+   "ms_per_step": 0.009,
+   "launches_per_step": 2.4,
+   "us_per_launch": 3.9
+  }
+ ]
+}

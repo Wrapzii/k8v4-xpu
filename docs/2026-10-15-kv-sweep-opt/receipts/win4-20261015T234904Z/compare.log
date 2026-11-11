@@ -1,0 +1,26 @@
+{
+ "q1/share0.98/B4/seq200000/r33": {
+  "bitwise": true,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r33": {
+  "bitwise": true,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q1/share0.98/B4/seq200000/r1": {
+  "bitwise": true,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ },
+ "q7/share0.98/B4/seq200000/r1": {
+  "bitwise": true,
+  "max_abs": 0.0,
+  "max_rel": 0.0,
+  "finite": true
+ }
+}
