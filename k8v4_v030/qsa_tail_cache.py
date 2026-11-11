@@ -260,20 +260,27 @@ class QsaXpuTailCache:
         if self.pooled_key_dtype == 'int8':
             self.pooled = torch.zeros(rows,128,dtype=torch.int8,device=dev)
             self.pooled_scale = torch.zeros(rows,dtype=torch.float32,device=dev)
+            # Score reads this. The writer refreshes the rows it stored so a
+            # decode step does not cast the whole pool on every layer.
+            self.pooled_fp32 = torch.zeros(rows,128,dtype=torch.float32,device=dev)
         else:
             self.pooled = torch.zeros(rows,128,dtype=torch.float32,device=dev)
             self.pooled_scale = None
+            self.pooled_fp32 = None
         self.pool_valid = torch.zeros(rows,dtype=torch.bool,device=dev)
         self.status = torch.zeros(1,dtype=torch.int32,device=dev)
         step = float(self.hyper.theta) ** (-2.0/float(self.hyper.n_rot))
         self.freq = torch.tensor([step**p for p in range(32)],dtype=torch.float32,device=dev)
         import json
         scale_bytes = 0 if self.pooled_scale is None else self.pooled_scale.numel()*self.pooled_scale.element_size()
+        mirror = getattr(self, 'pooled_fp32', None)
+        mirror_bytes = 0 if mirror is None else mirror.numel()*mirror.element_size()
         print('QSA_COMPACT_ALLOCATION '+json.dumps({
             'device':str(dev),'num_blocks':num_blocks,'block_size':block_size,
             'tail_tokens':tail_tokens,'storage_contract':self.storage_contract,
             'tensor_bytes':sum(t.numel()*t.element_size() for t in self._tensors())
-                           + self.freq.numel()*self.freq.element_size() + scale_bytes}),flush=True)
+                           + self.freq.numel()*self.freq.element_size() + scale_bytes + mirror_bytes,
+            'mirror_bytes':mirror_bytes}),flush=True)
 
     @property
     def num_slots(self):
@@ -286,6 +293,23 @@ class QsaXpuTailCache:
 
     def _tensors(self):
         return (self.raw,self.pos,self.raw_slots,self.filled,self.pooled,self.pool_valid,self.status)
+
+    def _sync_mirror_slots(self, slots):
+        """Refresh the fp32 mirror for the token slots just written.
+
+        Row 0 is refreshed for a negative slot. That matches the int8
+        value already stored there and does not read the host.
+        """
+        mirror = getattr(self, "pooled_fp32", None)
+        if mirror is None or not torch.is_tensor(slots) or slots.numel() == 0:
+            return
+        from k8v4_v030.qsa_pooled_quant import refresh_mirror_rows
+        rows = torch.div(
+            slots.reshape(-1).to(dtype=torch.int64).clamp(min=0),
+            4,
+            rounding_mode="floor",
+        )
+        refresh_mirror_rows(self.pooled, self.pooled_scale, mirror, rows)
 
     def write_tokens(self, slots, keys, positions, block_norm):
         if slots.ndim != 1:
@@ -308,12 +332,14 @@ class QsaXpuTailCache:
             if int8:
                 native(s,k,p,m,w,self.freq,*self._tensors(),self.pooled_scale,
                        self.block_size,self.tail_tokens,float(self.hyper.eps))
+                self._sync_mirror_slots(s)
             else:
                 native(s,k,p,m,w,self.freq,*self._tensors(),self.block_size,self.tail_tokens,float(self.hyper.eps))
         elif int8:
             _compact_int8_op('qsa_tail_v1', 'update_i8')(
                 slots,keys,positions,block_norm,self.freq,*self._tensors(),self.pooled_scale,
                 self.block_size,self.tail_tokens,float(self.hyper.eps))
+            self._sync_mirror_slots(slots)
         else:
             torch.ops.qsa_tail_v1.update(slots,keys,positions,block_norm,self.freq,*self._tensors(),
                                          self.block_size,self.tail_tokens,float(self.hyper.eps))
@@ -334,6 +360,9 @@ class QsaXpuTailCache:
             if self.pooled_scale is not None:
                 _compact_int8_op('qsa_tail_lifecycle', 'copy_block_i8')(
                     *self._tensors(),self.pooled_scale,self.block_size,self.tail_tokens,s,d)
+                if self.pooled_fp32 is not None:
+                    m = self.block_size // 4
+                    self.pooled_fp32[d*m:(d+1)*m].copy_(self.pooled_fp32[s*m:(s+1)*m])
             else:
                 torch.ops.qsa_tail_lifecycle.copy_block(*self._tensors(),self.block_size,self.tail_tokens,s,d)
 
@@ -344,6 +373,9 @@ class QsaXpuTailCache:
             if self.pooled_scale is not None:
                 _compact_int8_op('qsa_tail_lifecycle', 'reset_block_i8')(
                     *self._tensors(),self.pooled_scale,self.block_size,self.tail_tokens,i)
+                if self.pooled_fp32 is not None:
+                    m = self.block_size // 4
+                    self.pooled_fp32[i*m:(i+1)*m].zero_()
             else:
                 torch.ops.qsa_tail_lifecycle.reset_block(*self._tensors(),self.block_size,self.tail_tokens,i)
 

@@ -7,3 +7,5 @@ The original experimental setup loaded several separately built native libraries
 The experiments used model weights and a modified vLLM XPU environment that are not bundled. The host-specific build paths have been replaced with configurable paths. The broader test suite was reported to have failures and the speed and quality results are still being investigated. Results from synthetic tests, differing cache states, or short responses should not be treated as validated production throughput.
 
 The current code snapshot comes from the local speed-fix repository at its 2026-11-11 `cd0097d` state. It is published for inspection and collaboration; do not deploy this branch without independently validating correctness, build provenance, concurrency, memory limits and end-to-end performance.
+
+The INT8 pooled-key row-mirror change from local commit 08547cb is also included. It has not been established as a measured end-to-end speedup.

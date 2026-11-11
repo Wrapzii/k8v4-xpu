@@ -50,3 +50,17 @@ def dequantize_pooled_rows(quantized: torch.Tensor, scales: torch.Tensor | None)
     if scale.ndim != 1 or int(scale.shape[0]) != int(quantized.shape[0]):
         raise ValueError("one fp32 scale per pooled row")
     return quantized.to(dtype=torch.float32) * scale.unsqueeze(-1)
+
+
+def refresh_mirror_rows(pooled, scales, mirror, rows):
+    """Write dequantized ``rows`` into ``mirror``.
+
+    ``rows`` may repeat. Only those rows are cast. The rest of the pool
+    stays as it was, which is what makes a per-step score avoid the
+    full-pool int8 cast.
+    """
+    rows = rows.to(dtype=torch.int64).reshape(-1)
+    hat = pooled.index_select(0, rows).to(dtype=torch.float32)
+    hat = hat * scales.index_select(0, rows).unsqueeze(-1)
+    mirror.index_copy_(0, rows, hat)
+    return mirror

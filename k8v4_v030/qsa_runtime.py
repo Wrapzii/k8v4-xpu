@@ -616,10 +616,11 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
                             del mask
                         del raw
                 else:
+                    pool, scales = _scoring_pool(cache)
                     scores = score_pooled_paged(
-                        q_idx[q0+start:q0+end], cache.pooled, cache.pool_valid, block_row,
+                        q_idx[q0+start:q0+end], pool, cache.pool_valid, block_row,
                         tile_counts, int(meta.pages_per_block), n_blocks=max(tile_counts),
-                        scales=_pooled_scales(cache),
+                        scales=scales,
                     )
                 if tile_mask is None:
                     counts_t = torch.tensor(tile_counts, device=query3.device, dtype=torch.int32)
@@ -817,6 +818,18 @@ def _identity_pages(device) -> torch.Tensor:
 def _pooled_scales(cache):
     """FP32 per-row scales when pooled keys are INT8, else ``None``."""
     return getattr(cache, "pooled_scale", None)
+
+
+def _scoring_pool(cache):
+    """Pooled tensor for the score kernel, plus scales when it is still int8.
+
+    The compact int8 cache keeps ``pooled_fp32`` aligned with the rows the
+    writer stored. Scoring that mirror skips the full-pool cast.
+    """
+    mirror = getattr(cache, "pooled_fp32", None)
+    if torch.is_tensor(mirror):
+        return mirror, None
+    return cache.pooled, _pooled_scales(cache)
 
 
 def _logical_blocks(cache, count: int):
@@ -1062,9 +1075,10 @@ def _run_c4_graph_decode(query3, out3, hidden, positions, meta, kv_cache,
             flush=True,
         )
     cache = states[0]["cache"]
+    pool, scales = _scoring_pool(cache)
     rows = score_paged_multi(
-        query_b, cache.pooled, cache.pool_valid, table_b, counts_b,
-        states[0]["ratio"], width_b, scales=_pooled_scales(cache),
+        query_b, pool, cache.pool_valid, table_b, counts_b,
+        states[0]["ratio"], width_b, scales=scales,
     )
     if int(rows.shape[0]) != len(states) or int(rows.shape[1]) != int(width_b):
         raise RuntimeError(
@@ -1113,8 +1127,8 @@ def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, h
         state["q_idx"],
         state["counts_t"],
         lambda q_rep, counts_rep: score_pooled_paged(
-            q_rep, cache.pooled, cache.pool_valid, block_row,
-            counts_rep, ratio, n_blocks=width, scales=_pooled_scales(cache),
+            q_rep, _scoring_pool(cache)[0], cache.pool_valid, block_row,
+            counts_rep, ratio, n_blocks=width, scales=_scoring_pool(cache)[1],
         ),
         valid=state["valid"],
     )
@@ -1485,15 +1499,16 @@ def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper
                 query,
                 counts_t,
                 lambda q_rep, counts_rep: score_pooled_paged(
-                    q_rep, cache.pooled, cache.pool_valid, block_row,
+                    q_rep, _scoring_pool(cache)[0], cache.pool_valid, block_row,
                     counts_rep, pages_per_block, n_blocks=max_count,
-                    scales=_pooled_scales(cache),
+                    scales=_scoring_pool(cache)[1],
                 ),
             ), None
+        pool, scales = _scoring_pool(cache)
         return score_pooled_paged(
-            query, cache.pooled, cache.pool_valid, block_row,
+            query, pool, cache.pool_valid, block_row,
             counts, pages_per_block, n_blocks=max_count,
-            scales=_pooled_scales(cache),
+            scales=scales,
         ), None
     matrix, valid = (cache.gather_blocks(block_row, max_count, pages_per_block)
                      if cached_blocks is None else cached_blocks)
