@@ -14,7 +14,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--ctx", type=int, default=204800); ap.add_argument("--variants", required=True)
 ap.add_argument("--rounds", type=int, default=6); ap.add_argument("--iters", type=int, default=20)
 ap.add_argument("--drop", type=float, default=1.05); ap.add_argument("--out", required=True)
-ap.add_argument("--metrics", default="http://<PRIVATE_ADDRESS>:8100/metrics")
+ap.add_argument("--metrics", default="http://127.0.0.1:8100/metrics")
 a = ap.parse_args()
 def vllm_running():
     try:

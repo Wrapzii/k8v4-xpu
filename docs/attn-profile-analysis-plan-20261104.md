@@ -81,7 +81,7 @@ separate process while vLLM is stopped or GPU memory is free:
 | `XE2_KV_COMPACT_SLM` 0/1 (q_len 7) | - | S1 changes with SLM/occupancy | - | - |
 | ctx sweep 2K..262K | slope ~ (KV+ws) bytes/BW | slope ~ pages x per-WG cost | slope ~ V bytes | slope ~ KV/456 GB/s |
 
-Ones that need a kernel build (not done, needs operator's OK): a *skip-V-dequant* variant
+Ones that need a kernel build (not done, needs the operator's OK): a *skip-V-dequant* variant
 (feed fp16 zeros for V to isolate dequant), a *16-byte load* V decode (uint4/`vec<uint8_t,16>`
 block loads vs the current 8-byte memcpy), *multi-page splits* (2-8 pages per WG, which cuts
 partials and S2 length by 2-8x), and `reqd_sub_group_size(32)` / BM=16-row tiles for draft.
