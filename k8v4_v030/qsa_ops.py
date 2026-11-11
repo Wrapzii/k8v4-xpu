@@ -1181,6 +1181,19 @@ def coerce_visible_matrix(visible, q_len: int, device) -> torch.Tensor:
     return out
 
 
+def _direct_state(tag, query, heads, splits):
+    key = (tag, query.device.type, query.device.index, int(query.shape[0]), int(heads), int(splits))
+    state = _DIRECT_WORK.get(key)
+    if state is None:
+        q_len = int(query.shape[0])
+        state = (
+            torch.empty((q_len, int(heads), int(splits), D), dtype=torch.float32, device=query.device),
+            torch.empty((q_len, int(heads), int(splits), 2), dtype=torch.float32, device=query.device),
+        )
+        _DIRECT_WORK[key] = state
+    return state
+
+
 def attend_decode_direct(query, views, block_row, visible, pages_per_block: int, out=None):
     """Split-key attention directly over selected quantized cache cells."""
     if query.device.type != "xpu" or query.dtype != torch.float16:
@@ -1190,57 +1203,63 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     if visible.shape[0] != q_len:
         raise RuntimeError("direct QSA decode query count")
     width = int(visible.shape[1])
-    # Short queries need many key splits so the 2048-token walk is parallel.
-    # A long prefill already has enough queries; one split keeps the partial
-    # buffer small.
-    split_width = 64 if int(query.shape[0]) <= 16 else max(int(visible.shape[1]), 1)
-    splits = (width + split_width - 1) // split_width
-    key = (query.device.type, query.device.index, int(q_len), int(heads), splits)
-    state = _DIRECT_WORK.get(key)
-    if state is None:
-        partial = torch.empty((q_len, heads, splits, D), dtype=torch.float32, device=query.device)
-        ml = torch.empty((q_len, heads, splits, 2), dtype=torch.float32, device=query.device)
-        state = (partial, ml)
-        _DIRECT_WORK[key] = state
-    partial, ml = state
+    q_len_i = int(q_len)
+    heads_i = int(heads)
+    hkv = int(views["k"].shape[2])
+    gqa = heads_i // hkv if hkv and heads_i % hkv == 0 else 0
     if out is None:
         out = torch.empty_like(query)
     qsa = ops()
     if qsa is None or not hasattr(qsa, "qsa_direct_attn"):
         raise RuntimeError("direct QSA decode requires an updated libxe2_qsa.so")
     vis = visible.to(device=query.device, dtype=torch.int32)
-    hkv = int(views["k"].shape[2])
-    gqa = int(query.shape[1]) // hkv if hkv else 0
-    # Explicitly opt into parallel selected-key walks for eager prefill only.
-    # Online-softmax partial merging changes FP32 reduction order; decode and
-    # the default path remain byte-for-byte unchanged.
-    if (os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0") == "1"
-            and int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
-            and hasattr(qsa, "qsa_grp3_split")):
-        split_width = 128
-        ns = (width + split_width - 1) // split_width
-        split_key = ("grp3-prefill-split", query.device.type, query.device.index,
-                     int(q_len), int(heads), ns)
-        state = _DIRECT_WORK.get(split_key)
-        if state is None:
-            state = (torch.empty((q_len, heads, ns, D), dtype=torch.float32, device=query.device),
-                     torch.empty((q_len, heads, ns, 2), dtype=torch.float32, device=query.device))
-            _DIRECT_WORK[split_key] = state
-        qsa.qsa_grp3_split(query, views["k"], views["k_scale"], views["v"],
-                           views["v_scale"], views["v_zero"], block_row, vis,
-                           state[0], state[1], out, int(pages_per_block), split_width)
+    from k8v4_v030.qsa_batch_score import batch_ops
+    from k8v4_v030.qsa_direct_plan import decode_attn_kind, decode_split_width
+
+    batch = batch_ops()
+    has_gqa6 = batch is not None and hasattr(batch, "qsa_gqa6_split")
+    kind = decode_attn_kind(
+        q_len_i,
+        gqa,
+        has_gqa6=has_gqa6,
+        has_grp3_split=hasattr(qsa, "qsa_grp3_split"),
+        has_grp3=hasattr(qsa, "qsa_grp3_attn"),
+        prefill_split=os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0") == "1",
+    )
+    # The shared-load kernel addresses K and V as packed lanes. Any other
+    # layout keeps the kernel that already accepts strided cache views.
+    if kind == "gqa6_split":
+        if int(views["k"].stride(-1)) != 1 or int(views["v"].stride(-1)) != 1:
+            kind = (
+                "grp3_decode_split"
+                if hasattr(qsa, "qsa_grp3_split") and gqa % 3 == 0
+                else "direct"
+            )
+    if kind == "grp3":
+        qsa.qsa_grp3_attn(
+            query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
+            block_row, vis, out, int(pages_per_block),
+        )
         return out
-    # Three query heads share one KV load. Six heads in one subgroup spilled
-    # and was slower; short decode stays on the split direct kernel.
-    if (int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
-            and hasattr(qsa, "qsa_grp3_attn")):
-        qsa.qsa_grp3_attn(query, views["k"], views["k_scale"], views["v"],
-                          views["v_scale"], views["v_zero"], block_row, vis,
-                          out, int(pages_per_block))
+    split_width = decode_split_width(kind, q_len_i, width)
+    splits = (width + split_width - 1) // split_width
+    partial, ml = _direct_state(kind, query, heads_i, splits)
+    if kind == "gqa6_split":
+        batch.qsa_gqa6_split(
+            query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
+            block_row, vis, partial, ml, out, int(pages_per_block), int(split_width),
+        )
         return out
-    qsa.qsa_direct_attn(query, views["k"], views["k_scale"], views["v"],
-                         views["v_scale"], views["v_zero"], block_row,
-                         vis, partial, ml, out, int(pages_per_block), split_width)
+    if kind in ("grp3_prefill_split", "grp3_decode_split"):
+        qsa.qsa_grp3_split(
+            query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
+            block_row, vis, partial, ml, out, int(pages_per_block), int(split_width),
+        )
+        return out
+    qsa.qsa_direct_attn(
+        query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
+        block_row, vis, partial, ml, out, int(pages_per_block), int(split_width),
+    )
     return out
 
 
