@@ -10,16 +10,19 @@ from __future__ import annotations
 
 import os
 import time
+import threading
+import hashlib
 
 import torch
 
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.layout import D, PAGE, PageLayout, builtin_q_end
+from k8v4_v030.qsa_pooled_quant import dequantize_pooled_rows
 from k8v4_v030.qsa_quant_attn import allow_tokens, sparse_from_views
 from k8v4_v030.qsa_ref import QsaHyper, finish_selection, score_blocks, topk_block_ids, visible_tokens
 
 _LOADED: str | None = None
-_DEFAULT_LIB = "/mnt/hdd-500gb/model-validation/qsa-k8v4/libxe2_qsa.so"
+_DEFAULT_LIB = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "build", "qsa", "libxe2_qsa.so"))
 _VIEW_KEYS = ("k", "k_scale", "v", "v_scale", "v_zero")
 
 
@@ -86,13 +89,22 @@ def _xpu_ready(query: torch.Tensor, views: dict[str, torch.Tensor], block_row: t
     return library_path() is not None
 
 
-def score_pooled(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor:
+def _as_fp32_pooled(pooled: torch.Tensor, scales: torch.Tensor | None) -> torch.Tensor:
+    """``qsa_score`` requires FP32. INT8 storage is expanded with its row scales."""
+    if pooled.dtype != torch.int8:
+        return pooled
+    return dequantize_pooled_rows(pooled, scales)
+
+
+def score_pooled(query: torch.Tensor, pooled: torch.Tensor, scales: torch.Tensor | None = None) -> torch.Tensor:
     """Sum of ``relu(q · k)`` over indexer heads.
 
     ``query`` is ``[queries, 4, 128]`` and ``pooled`` is ``[blocks, 128]``.
     An XPU pair uses ``qsa_score`` when the library is present. The result
-    is fp32 on that device. CPU stays on the fp64 reference.
+    is fp32 on that device. CPU stays on the fp64 reference. INT8 pooled
+    rows are dequantized with ``scales`` before that FP32 path.
     """
+    pooled = _as_fp32_pooled(pooled, scales)
     if (query.device.type == "xpu" and pooled.device.type == "xpu"
             and os.environ.get("K8V4_QSA_GEMM_SCORE", "0") == "1"
             and int(query.shape[0]) > 16):
@@ -110,15 +122,119 @@ def score_pooled(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor:
     return score_blocks(query, pooled)
 
 
-def score_pooled_gemm(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor:
+_FUSED_PID = os.getpid()
+_FUSED_LOCK = threading.Lock()
+_FUSED_PATH = None
+_FUSED_SHA256 = "e17ed2202cd23c4dad439d5b8485b5ae4c4dfb646f17825a090cf1fdd2b6f8f7"
+
+
+def prewarm_fused_score():
+    """Explicit per-spawned-worker registration; call before any capture."""
+    global _FUSED_PATH
+    if os.getpid() != _FUSED_PID:
+        raise RuntimeError("fused score requires a spawned worker")
+    path = os.environ.get("K8V4_QSA_FUSED_SCORE_LIB", "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError("fused score requires an absolute library path")
+    with _FUSED_LOCK:
+        if _FUSED_PATH is not None:
+            if path != _FUSED_PATH:
+                raise RuntimeError("fused score library path changed")
+            return
+        capture = getattr(getattr(torch, "xpu", None), "is_current_stream_capturing", None)
+        if not callable(capture):
+            raise RuntimeError("cannot determine XPU capture state")
+        try:
+            active = capture()
+        except Exception as exc:
+            raise RuntimeError("cannot determine XPU capture state") from exc
+        if active:
+            raise RuntimeError("fused score prewarm must be outside capture")
+        with open(path, "rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if digest != _FUSED_SHA256:
+            raise RuntimeError("fused score library hash mismatch")
+        torch.ops.load_library(path)
+        if not hasattr(torch.ops.qsa_score_fused_exp, "run"):
+            raise RuntimeError("fused score registration missing")
+        _FUSED_PATH = path
+
+
+def _fused_score_op():
+    if os.getpid() != _FUSED_PID or _FUSED_PATH is None:
+        raise RuntimeError("fused score requires per-worker prewarm before capture")
+    if os.environ.get("K8V4_QSA_FUSED_SCORE_LIB", "").strip() != _FUSED_PATH:
+        raise RuntimeError("fused score library path changed")
+    return torch.ops.qsa_score_fused_exp.run
+
+
+def _fused_score_epilogue(part):
+    # Experimental direct path: no full reference allocation or reduction.
+    # This is a qualification candidate, not a universally proven FP32 path.
+    out = torch.empty((part.shape[0], part.shape[2]), dtype=part.dtype, device=part.device)
+    _fused_score_op()(part, out)
+    return out
+
+
+# The pinned XPU image ships this manifest. A machine without it still imports;
+# the fused epilogue then matches no shape and the FP32 reduction stays in place.
+_FUSED_MANIFEST = "/owned/fused-manifest.json"
+_QUALIFIED_EPILOGUE_SHAPES = (
+    frozenset(map(tuple, __import__("json").load(open(_FUSED_MANIFEST))["shapes"]))
+    if os.path.isfile(_FUSED_MANIFEST) else frozenset()
+)
+
+def _fused_score_supported(query, pooled):
+    # Restrict to whole GEMM shapes actually exercised in the pinned XPU run.
+    return (os.environ.get("QSA_UNQUALIFIED_TEST_ONLY", "0") == "1"
+            and os.environ.get("K8V4_QSA_FUSED_SCORE", "0") == "1"
+            and torch.__version__ == "2.13.0+xpu"
+            and query.device.type == "xpu" and pooled.device == query.device
+            and torch.xpu.get_device_name(query.device) == "Intel(R) Arc(TM) Pro B60 Graphics"
+            and not torch.is_grad_enabled()
+            and query.dtype == torch.float32 and pooled.dtype == torch.float32
+            and query.is_contiguous() and pooled.is_contiguous()
+            and tuple(query.shape[1:]) == (4, 128)
+            and int(query.shape[0]) > 0 and int(pooled.shape[0]) > 0)
+
+
+def _score_int8_experimental(query, pooled):
+    """Approximate, experimental per-row symmetric INT8 indexer scoring."""
+    tokens, heads, dim = query.shape
+    blocks = pooled.shape[0]
+    def quant(x):
+        maximum = x.abs().amax(-1, keepdim=True)
+        scale = torch.where(maximum == 0, torch.ones_like(maximum), maximum / 127)
+        return torch.round(x / scale).clamp(-127, 127).to(torch.int8).contiguous(), scale
+    q, qs = quant(query.reshape(-1, dim).float())
+    k, ks = quant(pooled.float())
+    kt = k.T.contiguous()
+    ks = ks.contiguous().reshape(-1)
+    out = torch.empty((tokens, blocks), dtype=torch.float32, device=query.device)
+    chunk = 128 if blocks <= 32768 else 64
+    for start in range(0, tokens, chunk):
+        end = min(tokens, start + chunk)
+        acc = torch._int_mm(q[start * heads:end * heads].contiguous(), kt)
+        torch.ops.qsa_int8_epi_exp.run(acc, qs[start * heads:end * heads].contiguous(), ks, out[start:end])
+    return out
+
+
+def score_pooled_gemm(query: torch.Tensor, pooled: torch.Tensor, scales: torch.Tensor | None = None) -> torch.Tensor:
     """Reference rectified per-head scores, chunked to 64 MiB of matmul output.
 
     XPU prefill uses one fp16 GEMM plus an fp16 relu-sum. The head reduction
     stays in fp16 because promoting the full score matrix to fp32 is slower
-    than the GEMM. CPU callers keep the fp32 reference path.
+    than the GEMM. CPU callers keep the fp32 reference path. INT8 pooled
+    rows are dequantized with ``scales`` before the GEMM.
     """
+    pooled = _as_fp32_pooled(pooled, scales)
     if query.ndim != 3 or pooled.ndim != 2 or query.shape[-1] != pooled.shape[-1]:
         raise ValueError("QSA score expects [tokens, heads, dim] and [blocks, dim]")
+    if (os.environ.get("K8V4_QSA_SCORE_INT8_EXPERIMENTAL", "0") == "1"
+            and query.device.type == "xpu" and not torch.is_grad_enabled()
+            and tuple(query.shape) == (512, 4, 128) and 8192 <= pooled.shape[0] <= 65536
+            and hasattr(torch.ops.qsa_int8_epi_exp, "run")):
+        return _score_int8_experimental(query, pooled)
     if (query.device.type == "xpu" and os.environ.get("K8V4_QSA_SCORE_FP16", "0") == "1"
             and int(pooled.shape[0]) > 0 and int(query.shape[0]) > 0):
         tokens, heads, dim = query.shape
@@ -137,9 +253,35 @@ def score_pooled_gemm(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor
     blocks = int(pooled.shape[0])
     if blocks == 0:
         return torch.empty((tokens, 0), dtype=torch.float32, device=query.device)
-    chunk = max(1, min(int(tokens), (64 << 20) // (blocks * int(heads) * 4)))
+    chunk = max(1, min(int(tokens), (256 << 20) // (blocks * int(heads) * 4)))
     q = query.to(dtype=torch.float32)
     k = pooled.to(device=query.device, dtype=torch.float32).contiguous().transpose(0, 1)
+    if _fused_score_supported(query, pooled):
+        # Require prewarm before doing work, not opportunistic capture-time load.
+        _fused_score_op()
+        prealloc = os.environ.get("K8V4_QSA_SCORE_PREALLOC", "0") == "1"
+        result = torch.empty((tokens, blocks), dtype=torch.float32, device=query.device) if prealloc else None
+        pieces = []
+        for start in range(0, int(tokens), chunk):
+            end = min(start + chunk, int(tokens))
+            part = q[start:end].reshape(-1, dim).matmul(k).reshape(-1, heads, blocks)
+            if (end - start, blocks) in _QUALIFIED_EPILOGUE_SHAPES:
+                reduced = _fused_score_epilogue(part)
+            else:
+                reduced = part.relu_().sum(dim=1)
+            if prealloc:
+                result[start:end].copy_(reduced)
+            else:
+                pieces.append(reduced)
+        return result if prealloc else torch.cat(pieces, dim=0)
+    # Default-off: write the exact FP32 reduction directly into final rows.
+    if os.environ.get("K8V4_QSA_SCORE_PREALLOC", "0") == "1" and not torch.is_grad_enabled():
+        result = torch.empty((tokens, blocks), dtype=torch.float32, device=query.device)
+        for start in range(0, int(tokens), chunk):
+            end = min(start + chunk, int(tokens))
+            part = q[start:end].reshape(-1, dim).matmul(k)
+            torch.sum(part.reshape(-1, heads, blocks).relu_(), dim=1, out=result[start:end])
+        return result
     pieces = []
     for start in range(0, int(tokens), chunk):
         part = q[start:start+chunk].reshape(-1, dim).matmul(k)
@@ -147,13 +289,15 @@ def score_pooled_gemm(query: torch.Tensor, pooled: torch.Tensor) -> torch.Tensor
     return torch.cat(pieces, dim=0) if pieces else torch.empty((0, blocks), dtype=torch.float32, device=query.device)
 
 
-def score_pooled_paged(query, pooled, valid, block_row, counts, pages_per_block: int, n_blocks: int | None = None):
+def score_pooled_paged(query, pooled, valid, block_row, counts, pages_per_block: int, n_blocks: int | None = None, scales: torch.Tensor | None = None):
     """Decode scores directly from the physical pooled cache.
 
     ``n_blocks`` fixes the scored width so a CUDA graph captured on a short
     dummy sequence still replays across a long context. Columns past each
-    query's count stay ``-inf``.
+    query's count stay ``-inf``. ``qsa_score_paged`` reads FP32 pooled rows,
+    so INT8 storage is dequantized with ``scales`` before that call.
     """
+    pooled = _as_fp32_pooled(pooled, scales)
     q = query.to(dtype=torch.float32).contiguous()
     row = block_row.to(device=query.device, dtype=torch.int32).contiguous()
     if torch.is_tensor(counts):
@@ -172,69 +316,6 @@ def score_pooled_paged(query, pooled, valid, block_row, counts, pages_per_block:
         raise RuntimeError("paged QSA score requires an updated libxe2_qsa.so")
     native.qsa_score_paged(q, pooled, valid, row, lengths, scores, int(pages_per_block))
     return scores
-
-
-_SCORE_SCRATCH: dict[tuple, torch.Tensor] = {}
-_VISIBLE_SCRATCH: dict[tuple, torch.Tensor] = {}
-
-
-def score_select_paged(
-    query,
-    pooled,
-    valid,
-    block_row,
-    counts,
-    cells,
-    pages_per_block: int,
-    hyper: QsaHyper,
-    n_blocks: int,
-    out=None,
-):
-    """Score live blocks and pack the visible token row in one native op.
-
-    ``n_blocks`` is the scratch width. The kernel stops at each query's
-    device count, so a graph captured at 65536 still only dots the live
-    context. ``out`` is ``[queries, (n_sel+1)*ratio]`` int32, padded with -1.
-    """
-    q = query.to(dtype=torch.float32).contiguous()
-    row = block_row.to(device=query.device, dtype=torch.int32).contiguous()
-    if torch.is_tensor(counts):
-        lengths = counts.to(device=query.device, dtype=torch.int32).reshape(-1).contiguous()
-    else:
-        if not counts or max(counts) < 1:
-            raise ValueError("paged QSA score needs at least one block")
-        lengths = torch.tensor(counts, dtype=torch.int32, device=query.device)
-    if torch.is_tensor(cells):
-        cells_t = cells.to(device=query.device, dtype=torch.int32).reshape(-1).contiguous()
-    else:
-        cells_t = torch.tensor(cells, dtype=torch.int32, device=query.device)
-    width = max(1, int(n_blocks))
-    k = int(hyper.n_sel)
-    ratio = int(hyper.ratio)
-    vis_w = (k + 1) * ratio
-    nq = int(q.shape[0])
-    device = q.device
-    score_key = (str(device), nq, width)
-    scores = _SCORE_SCRATCH.get(score_key)
-    if scores is None or scores.device != device:
-        scores = torch.empty((nq, width), dtype=torch.float32, device=device)
-        _SCORE_SCRATCH[score_key] = scores
-    if out is None:
-        vis_key = (str(device), nq, vis_w)
-        out = _VISIBLE_SCRATCH.get(vis_key)
-        if out is None or out.device != device:
-            out = torch.empty((nq, vis_w), dtype=torch.int32, device=device)
-            _VISIBLE_SCRATCH[vis_key] = out
-    native = ops()
-    if native is not None and hasattr(native, "qsa_score_select_paged"):
-        native.qsa_score_select_paged(
-            q, pooled, valid, row, lengths, cells_t, scores, out, int(pages_per_block), k,
-        )
-        return out
-    scored = score_pooled_paged(
-        q, pooled, valid, row, lengths, int(pages_per_block), n_blocks=width,
-    )
-    return _visible_graph(scored, lengths, cells_t, hyper, vis_w, premasked=True)
 
 
 def mask_query_scores(
@@ -411,6 +492,173 @@ def _visible_stable(scores, counts, cells, hyper: QsaHyper, force_all: bool, cou
     return torch.where(within.unsqueeze(1), full, out)
 
 
+_PREFIX_EQUAL_PID = os.getpid()
+_PREFIX_EQUAL_PATH = None
+_PREFIX_EQUAL_LOCK = threading.Lock()
+
+
+def _prefix_equal_stable_topk(masked, take):
+    """Eager-only opt-in selector. Every chunk synchronizes status before pack."""
+    global _PREFIX_EQUAL_PATH
+    if os.getpid() != _PREFIX_EQUAL_PID:
+        raise RuntimeError("QSA prefix selector requires a spawned worker")
+    path = os.environ.get("K8V4_QSA_PREFIX_EQUAL_LIB", "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError("QSA prefix selector requires an explicit absolute library path")
+    with _PREFIX_EQUAL_LOCK:
+        if _PREFIX_EQUAL_PATH is None:
+            if not os.path.isfile(path):
+                raise FileNotFoundError(path)
+            torch.ops.load_library(path)
+            if not hasattr(torch.ops.qsa_prefix_equal_exp, "select"):
+                raise RuntimeError("QSA prefix selector is not registered")
+            _PREFIX_EQUAL_PATH = path
+        elif _PREFIX_EQUAL_PATH != path:
+            raise RuntimeError("QSA prefix selector library path changed")
+    rows, width = masked.shape
+    chunk = min(rows, (256 * 1024 * 1024) // (20 * width))
+    if chunk < 1:
+        raise RuntimeError("QSA prefix selector scratch exceeds budget")
+    values, ids = [], []
+    for start in range(0, rows, chunk):
+        scores = masked[start:start + chunk].contiguous()
+        v = torch.empty((scores.shape[0], take), dtype=torch.float32, device=masked.device)
+        i = torch.empty((scores.shape[0], take), dtype=torch.int64, device=masked.device)
+        status = torch.zeros(scores.shape[0], dtype=torch.int32, device=masked.device)
+        torch.ops.qsa_prefix_equal_exp.select(scores, v, i, status)
+        # Explicit eager host synchronization. Never publish/pack failed output.
+        if bool((status.cpu() != 0).any()):
+            raise RuntimeError("QSA prefix selector invalid input/status; packing withheld")
+        values.append(v)
+        ids.append(i)
+    return torch.cat(values, dim=0), torch.cat(ids, dim=0)
+
+
+def _prefix_equal_eager_enabled(masked, take, stable_ties, queries, shortlist):
+    # Keep the older broad diagnostic switch separate from this measured gate.
+    diagnostic = os.environ.get("K8V4_QSA_PREFIX_EQUAL", "0") == "1"
+    gated = os.environ.get("K8V4_QSA_PREFIX_EQUAL_GATED", "0") == "1"
+    if not diagnostic and not gated:
+        return False
+    if not diagnostic and (masked.ndim != 2 or masked.shape != (512, 65264) or queries != 512 or take != 512):
+        return False
+    capture = getattr(getattr(torch, "xpu", None), "is_current_stream_capturing", None)
+    if not callable(capture):
+        if not diagnostic:
+            return False
+        raise RuntimeError("QSA prefix selector cannot determine capture state")
+    try:
+        capturing = capture()
+    except Exception as exc:
+        if not diagnostic:
+            return False
+        raise RuntimeError("QSA prefix selector cannot determine capture state") from exc
+    # Preserve original dispatch during graph capture; no status host read.
+    if capturing:
+        return False
+    return (not shortlist and stable_ties and queries > 16 and masked.device.type == "xpu"
+            and masked.dtype == torch.float32 and masked.is_contiguous()
+            and 0 < take <= 512 and take <= masked.shape[1] <= 65536)
+
+
+_RADIX_PID = os.getpid()
+_RADIX_LOCK = threading.Lock()
+_RADIX_LOADED = None
+_RADIX_ERROR = None
+
+
+def _load_radix_selector():
+    """Register the mounted native library in each spawned worker before use."""
+    global _RADIX_LOADED, _RADIX_ERROR
+    if os.getpid() != _RADIX_PID:
+        raise RuntimeError("QSA radix selector requires a spawned worker")
+    path = os.environ.get("K8V4_QSA_RADIX_LIB", "/radix/libqsa_radix_selector.so").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError("QSA radix selector requires an absolute library path")
+    with _RADIX_LOCK:
+        if _RADIX_ERROR is not None:
+            raise RuntimeError("QSA radix selector registration previously failed") from _RADIX_ERROR
+        if _RADIX_LOADED is not None:
+            if path != _RADIX_LOADED:
+                raise RuntimeError("QSA radix selector library path changed")
+            return
+        if not os.path.isfile(path):
+            raise FileNotFoundError("QSA radix selector library is missing: %s" % path)
+        if torch.xpu.is_initialized() and torch.xpu.is_current_stream_capturing():
+            raise RuntimeError("QSA radix selector must be registered before graph capture")
+        try:
+            torch.ops.load_library(path)
+            if not hasattr(torch.ops.qsa_radix_selector, "select"):
+                raise RuntimeError("QSA radix selector library did not register select")
+        except Exception as exc:
+            _RADIX_ERROR = exc
+            raise RuntimeError("QSA radix selector library registration failed") from exc
+        _RADIX_LOADED = path
+
+
+def _radix_stable_topk(masked, take):
+    # The exact native core keeps finite FP32 scores and ascending logical IDs.
+    _load_radix_selector()
+    values = torch.empty((masked.shape[0], take), dtype=torch.float32, device=masked.device)
+    order = torch.empty((masked.shape[0], take), dtype=torch.int64, device=masked.device)
+    torch.ops.qsa_radix_selector.select(masked, values, order)
+    return values, order
+
+
+_SHORTLIST_PID = os.getpid()
+_SHORTLIST_LOCK = threading.Lock()
+_SHORTLIST_LOADED = None
+_SHORTLIST_ERROR = None
+
+
+def _load_shortlist_selector():
+    """Load the explicitly configured selector once, before graph capture.
+
+    Each spawned worker imports this module independently. Forking after import
+    is deliberately rejected; inherited native registrations are not qualified.
+    """
+    global _SHORTLIST_LOADED, _SHORTLIST_ERROR
+    if os.getpid() != _SHORTLIST_PID:
+        raise RuntimeError("QSA shortlist requires a spawned worker, not fork")
+    path = os.environ.get("K8V4_QSA_SHORTLIST_LIB", "").strip()
+    if not path or not os.path.isabs(path):
+        raise RuntimeError("K8V4_QSA_SHORTLIST_LIB must be an explicit absolute path")
+    with _SHORTLIST_LOCK:
+        if _SHORTLIST_ERROR is not None:
+            raise RuntimeError("QSA shortlist library load previously failed") from _SHORTLIST_ERROR
+        if _SHORTLIST_LOADED is not None:
+            if path != _SHORTLIST_LOADED:
+                raise RuntimeError("QSA shortlist library path changed after loading")
+            return
+        if not os.path.isfile(path):
+            raise FileNotFoundError("QSA shortlist library is not at %s" % path)
+        capture = getattr(getattr(torch, "xpu", None), "is_current_stream_capturing", None)
+        if not callable(capture):
+            raise RuntimeError("QSA shortlist cannot determine XPU capture state")
+        try:
+            capturing = capture()
+        except Exception as exc:
+            raise RuntimeError("QSA shortlist cannot determine XPU capture state") from exc
+        if capturing:
+            raise RuntimeError("QSA shortlist library must be loaded before XPU graph capture")
+        try:
+            torch.ops.load_library(path)
+            if not hasattr(torch.ops.qsa_shortlist_equal_exp, "select"):
+                raise RuntimeError("QSA shortlist library did not register select")
+        except Exception as exc:
+            _SHORTLIST_ERROR = exc
+            raise RuntimeError("QSA shortlist library load or registration failed") from exc
+        _SHORTLIST_LOADED = path
+
+
+def _shortlist_stable_topk(masked, take):
+    _load_shortlist_selector()
+    values = torch.empty((masked.shape[0], take), dtype=torch.float32, device=masked.device)
+    order = torch.empty((masked.shape[0], take), dtype=torch.int64, device=masked.device)
+    torch.ops.qsa_shortlist_equal_exp.select(masked, values, order)
+    return values, order
+
+
 def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False, stable_ties: bool = False) -> torch.Tensor:
     """Decode selection captured inside a full graph.
 
@@ -439,15 +687,26 @@ def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: i
     if not premasked:
         columns = torch.arange(n_blocks, device=device)
         masked = masked.masked_fill(columns.unsqueeze(0) >= counts_t.unsqueeze(1), float("-inf"))
-    if os.environ.get("K8V4_QSA_FUSED_SELECT", "1") == "1":
-        qsa = ops()
-        if qsa is not None and hasattr(qsa, "qsa_visible"):
-            qsa.qsa_visible(masked.contiguous(), counts_t, cells_t, out, int(budget), int(ratio), 0)
-            return out
     take = min(budget, n_blocks)
+    shortlist = os.environ.get("K8V4_QSA_SHORTLIST", "0") == "1" and stable_ties and queries > 16 and not (n_blocks >= 60000 and queries < 256) and n_blocks >= budget and ratio == 4 and width == (take + 1) * ratio and os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1" and os.environ.get("K8V4_QSA_PACK_TOPK", "0") == "1" and 0 < take <= 512 and n_blocks <= 2**24
+    if shortlist and not (os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1"
+                          and os.environ.get("K8V4_QSA_PACK_TOPK", "0") == "1"
+                          and ratio == 4 and width == (take + 1) * ratio
+                          and 0 < take <= 512 and take <= n_blocks <= 2**24
+                          and n_blocks >= budget):
+        raise RuntimeError("QSA shortlist target requires supported topk/native-pack configuration")
     if os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1":
         fast_values = fast_order = None
-        if stable_ties and os.environ.get("K8V4_QSA_FAST_STABLE", "0") == "1":
+        prefix_equal = _prefix_equal_eager_enabled(masked, take, stable_ties, queries, shortlist)
+        radix_stable = (not shortlist and not prefix_equal and stable_ties and queries > 16 and 0 < take <= 512 and n_blocks <= 2**24
+                        and os.environ.get("K8V4_QSA_RADIX_STABLE", "0") == "1")
+        if shortlist:
+            fast_values, fast_order = _shortlist_stable_topk(masked, take)
+        elif prefix_equal:
+            fast_values, fast_order = _prefix_equal_stable_topk(masked, take)
+        elif radix_stable:
+            fast_values, fast_order = _radix_stable_topk(masked, take)
+        if not shortlist and not prefix_equal and not radix_stable and stable_ties and os.environ.get("K8V4_QSA_FAST_STABLE", "0") == "1":
             # The author-compatible stable ordering matters only when the
             # kth score ties an excluded block. Check that boundary on device;
             # prefill is eager, so the one scalar read is safe outside graphs.
@@ -935,9 +1194,6 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     # A long prefill already has enough queries; one split keeps the partial
     # buffer small.
     split_width = 64 if int(query.shape[0]) <= 16 else max(int(visible.shape[1]), 1)
-    prefill_split = int(os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0"))
-    if int(query.shape[0]) > 16 and prefill_split > 0:
-        split_width = prefill_split
     splits = (width + split_width - 1) // split_width
     key = (query.device.type, query.device.index, int(q_len), int(heads), splits)
     state = _DIRECT_WORK.get(key)
@@ -955,14 +1211,27 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     vis = visible.to(device=query.device, dtype=torch.int32)
     hkv = int(views["k"].shape[2])
     gqa = int(query.shape[1]) // hkv if hkv else 0
-    # Three query heads share one KV load. Six heads in one subgroup spilled
-    # and was slower; short decode stays on the split direct kernel.
-    if (int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
-            and prefill_split > 0 and hasattr(qsa, "qsa_grp3_split")):
+    # Explicitly opt into parallel selected-key walks for eager prefill only.
+    # Online-softmax partial merging changes FP32 reduction order; decode and
+    # the default path remain byte-for-byte unchanged.
+    if (os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0") == "1"
+            and int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
+            and hasattr(qsa, "qsa_grp3_split")):
+        split_width = 128
+        ns = (width + split_width - 1) // split_width
+        split_key = ("grp3-prefill-split", query.device.type, query.device.index,
+                     int(q_len), int(heads), ns)
+        state = _DIRECT_WORK.get(split_key)
+        if state is None:
+            state = (torch.empty((q_len, heads, ns, D), dtype=torch.float32, device=query.device),
+                     torch.empty((q_len, heads, ns, 2), dtype=torch.float32, device=query.device))
+            _DIRECT_WORK[split_key] = state
         qsa.qsa_grp3_split(query, views["k"], views["k_scale"], views["v"],
                            views["v_scale"], views["v_zero"], block_row, vis,
-                           partial, ml, out, int(pages_per_block), split_width)
+                           state[0], state[1], out, int(pages_per_block), split_width)
         return out
+    # Three query heads share one KV load. Six heads in one subgroup spilled
+    # and was slower; short decode stays on the split direct kernel.
     if (int(query.shape[0]) > 16 and gqa > 0 and gqa % 3 == 0
             and hasattr(qsa, "qsa_grp3_attn")):
         qsa.qsa_grp3_attn(query, views["k"], views["k_scale"], views["v"],

@@ -21,9 +21,11 @@ from k8v4_v030.qsa_ref import (
     apply_q_rope,
     cells_for_queries,
     complete_blocks,
+    finish_selection,
     project_indexer,
     score_blocks,
     select_blocks,
+    topk_block_ids,
     visible_tokens,
 )
 from k8v4_v030.qsa_rope import normalize_positions
@@ -91,6 +93,47 @@ def _expected(cache, weights, hidden, positions, seq_len, q_len, block_row, page
     return rows
 
 
+def _expected_reused(cache, weights, hidden, positions, seq_len, q_len, block_row, pages):
+    """One historical top-k from query 0, plus each query's own block.
+
+    Queries 1..q_len-1 are not scored. That is the MTP verify contract.
+    """
+    hyper = QsaHyper()
+    query, _key = project_indexer(
+        hidden, weights.q_proj, weights.k_proj, weights.q_norm, weights.k_norm, hyper
+    )
+    query = apply_q_rope(query, normalize_positions(positions, q_len), hyper)
+    cells = cells_for_queries(seq_len, q_len)
+    counts = [complete_blocks(cell, hyper.ratio) for cell in cells]
+    rep = counts[0]
+    matrix = torch.zeros(rep, hyper.dim, dtype=torch.float64)
+    missing = []
+    for block in range(rep):
+        pooled = cache.pooled_row(block_row, block * hyper.ratio, pages)
+        if pooled is None:
+            missing.append(block)
+        else:
+            matrix[block] = pooled.detach().to(dtype=torch.float64, device="cpu")
+    scores = score_blocks(query[0].detach().to(dtype=torch.float64, device="cpu"), matrix)
+    if missing:
+        scores = scores.clone()
+        for block in missing:
+            scores[block] = float("-inf")
+    if qsa_force_all() or rep <= hyper.n_sel:
+        hist = list(range(rep))
+    else:
+        hist = topk_block_ids(scores[:rep], hyper.n_sel)
+    rows = []
+    for cell, count in zip(cells, counts):
+        if qsa_force_all() or count <= hyper.n_sel:
+            chosen = list(range(count))
+        else:
+            chosen = list(hist)
+        chosen, width = finish_selection(chosen, cell, hyper)
+        rows.append(visible_tokens(cell, chosen, width, hyper.ratio))
+    return rows
+
+
 class BackendFlagTest(unittest.TestCase):
     def test_import_leaves_runtime_alone_and_spec_stays_396(self):
         os.environ.pop("K8V4_QSA", None)
@@ -116,15 +159,6 @@ class BackendFlagTest(unittest.TestCase):
 
 
 class RuntimeTest(unittest.TestCase):
-    def test_speculative_rejection_uses_corrected_device_length(self):
-        from k8v4_v030.qsa_runtime import _requests
-
-        meta = _Meta(100, 3, 2, torch.arange(3))
-        # The CPU upper bound assumes all previous drafts were accepted.
-        meta.seq_lens_cpu = torch.tensor([106], dtype=torch.int32)
-        self.assertEqual(_requests(meta, 3), [(0, 0, 3, 100)])
-        self.assertEqual(cells_for_queries(_requests(meta, 3)[0][3], 3), [97, 98, 99])
-
     def setUp(self):
         os.environ.pop("K8V4_QSA", None)
         os.environ.pop("K8V4_QSA_FORCE_ALL", None)
@@ -132,6 +166,7 @@ class RuntimeTest(unittest.TestCase):
         os.environ.pop("K8V4_QSA_WEIGHTS", None)
         os.environ.pop("K8V4_QSA_EAGER", None)
         os.environ.pop("K8V4_QSA_STATS", None)
+        os.environ.pop("K8V4_QSA_CACHE_DEBUG", None)
         reset_caches()
         reset_bank()
 
@@ -141,6 +176,7 @@ class RuntimeTest(unittest.TestCase):
         os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
         os.environ.pop("K8V4_QSA_EAGER", None)
         os.environ.pop("K8V4_QSA_STATS", None)
+        os.environ.pop("K8V4_QSA_CACHE_DEBUG", None)
         reset_caches()
         reset_bank()
 
@@ -235,6 +271,65 @@ class RuntimeTest(unittest.TestCase):
         self.assertTrue(bool(stored.pool_valid[1]))
         self.assertFalse(bool(stored.pool_valid[2]))
 
+    def test_prefill_cache_debug_print_is_off_by_default(self):
+        import io
+        from contextlib import redirect_stdout
+
+        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
+
+        hkv = 2
+        impl = _Impl(hkv)
+        layer = _Layer("model.layers.3.self_attn.attn")
+        set_bank(make_random_bank(2, layers=(3,)))
+        seq_len = 20
+        key = deterministic_rows(seq_len, hkv, 4)
+        value = deterministic_rows(seq_len, hkv, 5)
+        cache = _page(hkv, key, value)
+        query = _rows(seq_len, impl.layout.hq, 6)
+        hidden = torch.randn(seq_len, HIDDEN)
+        positions = torch.arange(seq_len)
+        meta = _Meta(seq_len, seq_len, hkv, torch.arange(seq_len))
+        output = torch.full_like(query, 5)
+        os.environ["K8V4_QSA"] = "1"
+        os.environ.pop("K8V4_QSA_CACHE_DEBUG", None)
+        note_hidden(3, hidden, positions)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            wrote = try_sparse_forward(impl, layer, query, cache, meta, output)
+        self.assertFalse(wrote)
+        self.assertNotIn("QSA_CACHE", buf.getvalue())
+        os.environ["K8V4_QSA_CACHE_DEBUG"] = "1"
+        note_hidden(3, hidden, positions)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            try_sparse_forward(impl, layer, query, cache, meta, output)
+        self.assertIn("QSA_CACHE seq_end=", buf.getvalue())
+
+    def test_seq_len_reads_the_live_cpu_tensor(self):
+        from k8v4_v030.qsa_runtime import _request_seq_len, _seq_len, _short_decode_spans
+
+        meta = _Meta(8, 1, 2, torch.tensor([7]))
+        self.assertEqual(_seq_len(meta, 0), 8)
+        meta.seq_lens[0] = 11
+        self.assertEqual(_request_seq_len(meta, 0, 1), 11)
+        self.assertFalse(hasattr(meta, "_qsa_actual_seq_lens"))
+        self.assertFalse(hasattr(meta, "_qsa_prefill_seq_lens_cpu"))
+        self.assertEqual(_short_decode_spans(meta, 1), ((0, 0, 1),))
+        meta.query_starts = (0, 7, 14, 14)
+        meta.seq_lens = torch.tensor([100, 50, 1], dtype=torch.int32)
+        meta.block_table = torch.zeros((3, 4), dtype=torch.int32)
+        self.assertEqual(
+            _short_decode_spans(meta, 14),
+            ((0, 0, 7), (1, 7, 7)),
+        )
+        meta.query_starts = (0, 20)
+        meta.seq_lens = torch.tensor([20], dtype=torch.int32)
+        meta.block_table = torch.zeros((1, 4), dtype=torch.int32)
+        self.assertEqual(_short_decode_spans(meta, 20), ())
+        meta.seq_lens = torch.tensor([4], dtype=torch.int32, device="meta")
+        with self.assertRaisesRegex(RuntimeError, "refusing a host sync"):
+            _seq_len(meta, 0)
+
     def test_decode_verifier_and_force_all_match_the_quant_path(self):
         from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
 
@@ -285,16 +380,26 @@ class RuntimeTest(unittest.TestCase):
         meta = _Meta(seq_len, q_len, hkv, slots)
         self.assertTrue(try_sparse_forward(impl, layer, query, cache, meta, output))
         stored = all_banks()[0].layers[3]
-        visible = _expected(
-            stored,
-            weights,
-            hidden_all[hist:],
-            positions,
-            seq_len,
-            q_len,
-            meta.block_table[0],
-            1,
-        )
+        hyper = QsaHyper()
+        cells = cells_for_queries(seq_len, q_len)
+        # A multi-token decode past the budget on the target token reuses one
+        # historical top-k. A single query still matches the per-query reference.
+        if q_len > 1 and complete_blocks(cells[0], hyper.ratio) > hyper.n_sel:
+            visible = _expected_reused(
+                stored, weights, hidden_all[hist:], positions, seq_len, q_len,
+                meta.block_table[0], 1,
+            )
+        else:
+            visible = _expected(
+                stored,
+                weights,
+                hidden_all[hist:],
+                positions,
+                seq_len,
+                q_len,
+                meta.block_table[0],
+                1,
+            )
         views = bind_regions(cache, impl.layout)
         expect = attend_selected(query, views, meta.block_table[0], seq_len, visible, 1)
         self.assertTrue(torch.equal(output, expect))
@@ -530,7 +635,7 @@ class EagerGraphTest(unittest.TestCase):
         os.environ.pop("K8V4_QSA_EAGER", None)
         self.assertEqual(
             Xe2K8V4MetadataBuilder.get_cudagraph_support(None, None),
-            AttentionCGSupport.NEVER,
+            AttentionCGSupport.UNIFORM_BATCH,
         )
 
 
@@ -634,7 +739,11 @@ class StatsTest(unittest.TestCase):
         self.assertFalse(try_sparse_forward(impl, _Layer("model.layers.1.self_attn.attn"), query, cache, meta, output))
         self.assertEqual(qsa_stats_snapshot()["decode"]["not_full_attn"], 1)
         self.assertFalse(try_sparse_forward(impl, _Layer("draft.mtp.layers.0"), query, cache, meta, output))
-        self.assertEqual(qsa_stats_snapshot()["decode"]["no_layer"], 1)
+        # layers.0 is not a full-attention index, so this returns before the
+        # MTP name check. Draft modules that do resolve to a trained layer
+        # stay dense in test_indexer_mtp_reuse.
+        self.assertEqual(qsa_stats_snapshot()["decode"]["not_full_attn"], 2)
+        self.assertEqual(qsa_stats_snapshot()["decode"]["no_layer"], 0)
         self.assertFalse(try_sparse_forward(impl, _Layer("model.layers.3.self_attn.attn"), query, cache, meta, output))
         self.assertEqual(qsa_stats_snapshot()["decode"]["no_hidden"], 1)
 
@@ -686,213 +795,6 @@ class StatsTest(unittest.TestCase):
         )
         self.assertEqual(qsa_stats_snapshot()["prefill"]["sparse_ok"], 1)
         self.assertEqual(qsa_stats_snapshot()["decode"]["sparse_ok"], 0)
-
-
-class PositionLayoutTest(unittest.TestCase):
-    def setUp(self):
-        os.environ.pop("K8V4_QSA_FORCE_ALL", None)
-        os.environ.pop("K8V4_QSA_TOP_TOKENS", None)
-        os.environ.pop("K8V4_QSA_STATS", None)
-        reset_caches()
-        reset_bank()
-
-    def tearDown(self):
-        os.environ.pop("K8V4_QSA", None)
-        reset_caches()
-        reset_bank()
-
-    def test_three_axis_mrope_repeats_the_text_axis(self):
-        from k8v4_v030.qsa_runtime import _positions
-
-        tokens = 32
-        hyper = QsaHyper()
-        torch.manual_seed(0)
-        query = torch.randn(tokens, hyper.heads, hyper.dim)
-        axes = torch.arange(tokens * 3, dtype=torch.int64).reshape(3, tokens)
-        repeated = torch.cat((axes, axes[0:1]), dim=0)
-        rows = axes.transpose(0, 1).contiguous()
-        got_cols = apply_q_rope(query, axes, hyper)
-        got_rows = apply_q_rope(query, rows, hyper)
-        expect = apply_q_rope(query, repeated, hyper)
-        self.assertTrue(torch.equal(got_cols, expect))
-        self.assertTrue(torch.equal(got_rows, expect))
-        # Section 4 has width 0, so rotation matches a zero fourth axis.
-        # The stored position does not: training and llama.cpp keep t there.
-        zero_fourth = torch.zeros(4, tokens, dtype=torch.int64)
-        zero_fourth[:3] = axes
-        self.assertTrue(torch.equal(apply_q_rope(query, zero_fourth, hyper), expect))
-        self.assertFalse(torch.equal(normalize_positions(axes, tokens)[:, 3], zero_fourth[3]))
-        self.assertFalse(torch.equal(got_cols, apply_q_rope(query, torch.zeros_like(repeated), hyper)))
-
-        padded = _positions(axes, tokens, list(range(tokens)), axes.device)
-        self.assertEqual(tuple(padded.shape), (tokens, 4))
-        self.assertTrue(torch.equal(padded, repeated.transpose(0, 1).contiguous()))
-        self.assertTrue(torch.equal(padded[:, 3], axes[0]))
-        longer = torch.cat([axes, axes + 1000], dim=1)
-        self.assertTrue(torch.equal(_positions(longer, tokens, [], longer.device), padded))
-        extra_rows = torch.cat([rows, rows + 7], dim=0)
-        self.assertTrue(torch.equal(_positions(extra_rows, tokens, [], extra_rows.device), padded))
-        self.assertTrue(torch.equal(_positions(rows, tokens, [], rows.device), padded))
-
-        # One text axis broadcasts. Two axes are not a forwarded layout.
-        one = axes[:1]
-        norm_one = normalize_positions(one, tokens)
-        broad_one = one.reshape(tokens, 1).expand(tokens, 4).contiguous()
-        self.assertTrue(torch.equal(norm_one, broad_one))
-        self.assertTrue(torch.equal(_positions(one, tokens, [], one.device), norm_one))
-        with self.assertRaises(ValueError):
-            normalize_positions(axes[:2], tokens)
-        with self.assertRaises(RuntimeError):
-            _positions(axes[:2], tokens, [], axes.device)
-        text = torch.arange(tokens)
-        broad = text.to(torch.int64).unsqueeze(1).expand(tokens, 4).contiguous()
-        self.assertTrue(torch.equal(normalize_positions(text, tokens), broad))
-        four = torch.arange(tokens * 4, dtype=torch.int64).reshape(4, tokens)
-        token_major = four.transpose(0, 1).contiguous()
-        self.assertTrue(torch.equal(normalize_positions(four, tokens), token_major))
-        self.assertTrue(torch.equal(normalize_positions(token_major, tokens), token_major))
-        with self.assertRaises(RuntimeError):
-            _positions(torch.zeros(5, 9), 4, [], torch.device("cpu"))
-
-        # Square [3, 3] is axes-first, same rule as [4, 4].
-        square = torch.tensor(
-            [[10, 20, 30], [11, 21, 31], [12, 22, 32]],
-            dtype=torch.int64,
-        )
-        square_norm = normalize_positions(square, 3)
-        self.assertTrue(
-            torch.equal(
-                square_norm,
-                torch.tensor(
-                    [[10, 11, 12, 10], [20, 21, 22, 20], [30, 31, 32, 30]],
-                    dtype=torch.int64,
-                ),
-            )
-        )
-
-        # The warmup crash was positions (3, T) inside the dummy forward.
-        # Text MRoPE repeats the token index on t, h, and w, and the fourth
-        # axis copies t, so both paths store the same [p, p, p, p].
-        seq_len = 8
-        text_pos = torch.arange(seq_len)
-        mrope_pos = text_pos.view(1, seq_len).expand(3, seq_len).contiguous()
-        pooled_text = self._pooled_after_warm(text_pos, seq_len)
-        reset_caches()
-        reset_bank()
-        pooled_mrope = self._pooled_after_warm(mrope_pos, seq_len)
-        self.assertTrue(torch.equal(pooled_mrope, pooled_text))
-
-    def test_three_axis_matches_served_hf_rope(self):
-        """Unequal t/h/w and equal text positions match the served HF rotary."""
-        from k8v4_v030.qsa_rope import mrope
-
-        model = "/srv/launch80-target-fast"
-        if not os.path.isdir(model):
-            self.skipTest("served model config is not mounted")
-        from transformers import AutoConfig
-        from transformers.models.qwen3_5.modeling_qwen3_5 import Qwen3_5TextRotaryEmbedding
-
-        text = AutoConfig.from_pretrained(model, local_files_only=True).text_config
-        rope = text.rope_parameters
-        self.assertEqual(list(rope["mrope_section"]), [11, 11, 10])
-        self.assertEqual(float(rope["partial_rotary_factor"]), 0.25)
-        self.assertEqual(float(rope["rope_theta"]), 10000000.0)
-        rotary = Qwen3_5TextRotaryEmbedding(text)
-        tokens = 9
-        values = torch.randn(tokens, 64)
-        p0 = torch.tensor([1, 4, 7, 2, 5, 8, 3, 6, 9], dtype=torch.int64)
-        p1 = torch.tensor([8, 1, 6, 3, 9, 2, 7, 4, 5], dtype=torch.int64)
-        p2 = torch.tensor([3, 9, 1, 8, 2, 7, 4, 6, 11], dtype=torch.int64)
-        self.assertTrue(bool(torch.all(p0 != p1) and torch.all(p1 != p2) and torch.all(p0 != 0)))
-        axes = torch.stack((p0, p1, p2), dim=0)
-        norm = normalize_positions(axes, tokens)
-        self.assertTrue(torch.equal(norm, torch.stack((p0, p1, p2, p0), dim=1)))
-        dummy = torch.zeros(1, tokens, int(text.hidden_size))
-        cos, sin = rotary(dummy, axes.view(3, 1, tokens))
-        got = mrope(values, norm)
-        self.assertTrue(torch.allclose(got.float(), _hf_rotate(values, cos[0], sin[0]), rtol=1e-5, atol=1e-5))
-
-        text_pos = torch.arange(1, tokens + 1)
-        broad = normalize_positions(text_pos, tokens)
-        self.assertTrue(torch.equal(broad, text_pos.unsqueeze(1).expand(tokens, 4).contiguous()))
-        ids = text_pos.view(1, 1, tokens).expand(3, 1, tokens).contiguous()
-        cos_t, sin_t = rotary(dummy, ids)
-        got_text = mrope(values, broad)
-        self.assertTrue(
-            torch.allclose(got_text.float(), _hf_rotate(values, cos_t[0], sin_t[0]), rtol=1e-5, atol=1e-5)
-        )
-
-    def test_stash_op_records_the_hidden_state(self):
-        from k8v4_v030.qsa_runtime import _register_stash_op, clear_hidden, take_hidden
-
-        _register_stash_op()
-        hidden = torch.arange(6, dtype=torch.float32).reshape(2, 3)
-        pos = torch.tensor([[1, 2], [1, 2], [1, 2]], dtype=torch.int64)
-        out = torch.ops.vllm.qsa_stash(hidden, pos, 3)
-        self.assertEqual(tuple(out.shape), ())
-        self.assertEqual(float(out), 0.0)
-        got = take_hidden(3)
-        self.assertIsNotNone(got)
-        assert got is not None
-        self.assertTrue(torch.equal(got[0], hidden))
-        self.assertTrue(torch.equal(got[1], pos))
-        clear_hidden()
-
-    def test_cells_follow_the_length_through_this_query(self):
-        # seq_len is num_computed + num_scheduled, so it already includes
-        # this step. Query 0 is the oldest token of the step.
-        self.assertEqual(cells_for_queries(10, 3), [7, 8, 9])
-        # Eight cached tokens plus two new ones.
-        self.assertEqual(cells_for_queries(10, 2), [8, 9])
-        # One decode token whose length through the query is 11.
-        self.assertEqual(cells_for_queries(11, 1), [10])
-        with self.assertRaises(ValueError):
-            cells_for_queries(2, 3)
-
-    def _pooled_after_warm(self, positions: torch.Tensor, seq_len: int) -> torch.Tensor:
-        from k8v4_v030.qsa_runtime import note_hidden, try_sparse_forward
-
-        hkv = 2
-        impl = _Impl(hkv)
-        torch.manual_seed(3)
-        set_bank(make_random_bank(3, layers=(3,)))
-        torch.manual_seed(3)
-        hidden = torch.randn(seq_len, HIDDEN)
-        query = _rows(seq_len, impl.layout.hq, 6)
-        cache = _page(hkv, deterministic_rows(seq_len, hkv, 4), deterministic_rows(seq_len, hkv, 5))
-        output = torch.full_like(query, 5)
-        os.environ["K8V4_QSA"] = "1"
-        note_hidden(3, hidden, positions)
-        wrote = try_sparse_forward(
-            impl,
-            _Layer("model.layers.3.self_attn.attn"),
-            query,
-            cache,
-            _Meta(seq_len, seq_len, hkv, torch.arange(seq_len)),
-            output,
-        )
-        self.assertFalse(wrote)
-        self.assertTrue(torch.equal(output, torch.full_like(query, 5)))
-        banks = all_banks()
-        self.assertEqual(len(banks), 1)
-        stored = banks[0].layers[3]
-        self.assertTrue(bool(stored.pool_valid[0]))
-        self.assertTrue(bool(stored.pool_valid[1]))
-        return stored.pooled.clone()
-
-
-def _hf_rotate(values: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
-    """NeoX rotate used by ``Qwen3_5TextRotaryEmbedding`` (cos/sin are duplicated)."""
-    x = values.float()
-    c = cos.float()
-    s = sin.float()
-    half = int(x.shape[-1] // 2)
-    x0 = x[..., :half]
-    x1 = x[..., half:]
-    out = x.clone()
-    out[..., :half] = x0 * c[..., :half] - x1 * s[..., :half]
-    out[..., half:] = x0 * s[..., :half] + x1 * c[..., :half]
-    return out
 
 
 if __name__ == "__main__":

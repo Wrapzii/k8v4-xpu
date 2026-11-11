@@ -48,7 +48,6 @@ from k8v4_v030.qsa_ops import (
     rows_from_packed,
     score_pooled,
     score_pooled_paged,
-    score_select_paged,
 )
 from k8v4_v030.qsa_stats import note_qsa, note_qsa_width, qsa_stats_enabled
 from k8v4_v030.qsa_ref import (
@@ -71,6 +70,60 @@ _ATTN_CLASSES = ("Qwen3NextAttention",)
 
 
 
+def _descriptor_is_exact_mtp6(desc) -> bool:
+    """True for one MTP6 exact-verifier key of 1..8 requests.
+
+    Eight requests is 56 tokens, the top of the speedfix capture list.
+    Nine is outside max-num-seqs 8. A test double may pass a mode whose
+    ``name`` is ``FULL``; the live key is ``CUDAGraphMode.FULL``.
+    """
+    if desc is None or getattr(desc, "qsa_exact_verifier", None) is not True:
+        return False
+    from vllm.config.compilation import CUDAGraphMode
+    mode = getattr(desc, "cg_mode", None)
+    if mode != CUDAGraphMode.FULL and getattr(mode, "name", None) != "FULL":
+        return False
+    reqs = getattr(desc, "num_reqs", None)
+    if type(reqs) is not int or not 1 <= reqs <= 8:
+        return False
+    if getattr(desc, "uniform_token_count", None) != 7 or getattr(desc, "num_ubatches", None) != 1:
+        return False
+    return getattr(desc, "num_tokens", None) == 7 * reqs
+
+
+def _verified_v2_graph_descriptor():
+    """Return only the manager's exact-seven descriptor, never a v1 hint."""
+    if os.environ.get("K8V4_QSA_V2_EXACT7", "0") != "1":
+        return None
+    try:
+        from vllm.forward_context import get_forward_context
+        from vllm.v1.worker.gpu.cudagraph_utils import BatchExecutionDescriptor
+        ctx = get_forward_context()
+    except (ImportError, AssertionError, RuntimeError):
+        return None
+    desc = getattr(ctx, "qsa_exact_verifier_descriptor", None)
+    if not isinstance(desc, BatchExecutionDescriptor):
+        return None
+    if not _descriptor_is_exact_mtp6(desc):
+        return None
+    return desc
+
+
+def _verified_v2_graph_padding(ntok, device=None):
+    """Return the live token mask, without reading tensor contents on the host."""
+    desc = _verified_v2_graph_descriptor()
+    if desc is None or desc.num_tokens != ntok:
+        return None
+    from vllm.forward_context import get_forward_context
+    mask = getattr(get_forward_context(), "is_padding", None)
+    if (not torch.is_tensor(mask) or mask.dtype != torch.bool or mask.ndim != 1
+            or mask.shape[0] != ntok or not mask.is_contiguous()
+            or (device is not None and mask.device != torch.device(device))):
+        return None
+    return mask
+
+
+
 def _stage(label: str, start: float, extra: str = "") -> float:
     """Sync and append one stage time. No-op unless K8V4_QSA_STAGE=1."""
     if os.environ.get("K8V4_QSA_STAGE", "0") != "1":
@@ -90,6 +143,9 @@ _LAST_HIDDEN: dict = {}
 def note_hidden(layer_idx: int, hidden: torch.Tensor, positions: torch.Tensor | None) -> None:
     """Record the hidden state for the matching ``impl.forward`` call."""
     _STASH.set((int(layer_idx), hidden, positions))
+    # This is the fallback for the current stash op, not a layer history.
+    # Dummy/profile forwards may never call the attention consumer.
+    _LAST_HIDDEN.clear()
     _LAST_HIDDEN[int(layer_idx)] = (hidden, positions)
 
 
@@ -101,9 +157,10 @@ def take_hidden(layer_idx: int) -> tuple[torch.Tensor, torch.Tensor | None] | No
     """
     got = _STASH.get()
     _STASH.set(None)
+    fallback = _LAST_HIDDEN.pop(int(layer_idx), None)
     if got is not None and int(got[0]) == int(layer_idx):
         return got[1], got[2]
-    return _LAST_HIDDEN.get(int(layer_idx))
+    return fallback
 
 
 def clear_hidden() -> None:
@@ -193,6 +250,12 @@ def install_if_requested() -> None:
     if not qsa_enabled():
         return
     if not _INSTALLED:
+        if os.environ.get("K8V4_QSA_SHORTLIST", "0") == "1":
+            from k8v4_v030.qsa_ops import _load_shortlist_selector
+            _load_shortlist_selector()
+        if os.environ.get("K8V4_QSA_FUSED_MASK", "0") == "1":
+            from k8v4_v030.qsa_fused_mask_candidate import prewarm
+            prewarm()
         path = weights_path()
         if path and get_bank() is None:
             set_bank(load_bank_file(path))
@@ -266,63 +329,38 @@ def _module_text(layer) -> str:
     return " ".join(parts)
 
 
-def _remember_visible(layer_idx: int, req: int, visible: torch.Tensor) -> None:
+def _remember_visible(layer_idx: int, visible: torch.Tensor) -> None:
     """Keep the target selection so a later MTP step can attend the same tokens."""
-    key = (int(layer_idx), int(req))
+    key = int(layer_idx)
     buf = _REUSE.get(key)
     if buf is None or tuple(buf.shape) != tuple(visible.shape) or buf.device != visible.device:
         if _capturing():
             return
         _REUSE[key] = visible.detach()
-        _REUSE[("last", int(req))] = _REUSE[key]
         return
     buf.copy_(visible)
-    _REUSE[("last", int(req))] = buf
-
-
-def _own_block_column(cells_t: torch.Tensor) -> torch.Tensor:
-    """One extra visible token: this query's own cell.
-
-    Target selection already forced the rest of the own block. A draft token
-    that lands in a new block, or one token past the target, is otherwise
-    missing. Duplicates are not created because the cell is new.
-    """
-    return cells_t.to(dtype=torch.int32).view(-1, 1)
 
 
 def _reuse_mtp(impl, query3, out3, meta, kv_cache, layout, layer_idx: int, n: int) -> bool:
-    """Attend with the target's last selection plus each draft token's own cell."""
-    if os.environ.get("K8V4_QSA_MTP_REUSE", "1") != "1":
-        return False
-    starts = tuple(int(x) for x in meta.query_starts)
-    batch = _decode_batch(starts, n)
-    if batch is None:
+    """Attend with the target's last selection. The paper reuses QSA indices for MTP."""
+    src = _REUSE.get(int(layer_idx))
+    if src is None or int(src.shape[0]) < 1 or n < 1:
         return False
     from k8v4_v030.cache_views import bind_regions
     from k8v4_v030.qsa_ops import attend_decode_direct
-    views = bind_regions(kv_cache, layout)
-    ratio = max(int(meta.pages_per_block), 1)
-    for req, q0, q_len in batch:
-        src = _REUSE.get((int(layer_idx), int(req))) or _REUSE.get(("last", int(req)))
-        if src is None or int(src.shape[0]) < 1:
+    width = int(src.shape[1])
+    key = (int(layer_idx), n, width, str(src.device))
+    rows = _REUSE_ROWS.get(key)
+    if rows is None:
+        if _capturing():
             return False
-        width = int(src.shape[1])
-        key = (int(layer_idx), int(req), q_len, width, str(src.device))
-        rows = _REUSE_ROWS.get(key)
-        if rows is None:
-            if _capturing():
-                return False
-            rows = torch.empty((q_len, width + 1), dtype=torch.int32, device=src.device)
-            _REUSE_ROWS[key] = rows
-        seq = meta.seq_lens[req]
-        idx = torch.arange(q_len, device=src.device)
-        cells_t = (seq.to(device=src.device, dtype=torch.int64) - int(q_len)) + idx
-        rows[:, :width].copy_(src[-1].view(1, -1).expand(q_len, width))
-        rows[:, width:] = _own_block_column(cells_t)
-        attend_decode_direct(
-            query3[q0:q0 + q_len], views, meta.block_table[req], rows, ratio,
-            out=out3[q0:q0 + q_len],
-        )
+        rows = torch.empty((n, width), dtype=torch.int32, device=src.device)
+        _REUSE_ROWS[key] = rows
+    rows.copy_(src[-1].view(1, -1).expand(n, width))
+    block_row = meta.block_table[0]
+    ratio = max(int(meta.pages_per_block), 1)
+    views = bind_regions(kv_cache, layout)
+    attend_decode_direct(query3[:n], views, block_row, rows, ratio, out=out3[:n])
     return True
 
 
@@ -339,22 +377,15 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     # Capture pads some batches. The live token count, not the storage shape,
     # decides whether this decode can be recorded into the graph.
     n_live = _step_tokens(query, meta)
-    # Decode graphs are 7/14/21/28 tokens (1..4 requests * MTP-6). Prefill
-    # chunks are 4224. 32 is the cutoff between those two regimes.
+    graph_enabled = os.environ.get("K8V4_QSA_GRAPH", "0") == "1"
+    c4_spans = _c4_graph_spans(meta, n_live) if graph_enabled else ()
     if _capturing() and not (
-        os.environ.get("K8V4_QSA_GRAPH", "0") == "1" and n_live <= 32
+        graph_enabled and (n_live <= 16 or c4_spans)
     ):
         clear_hidden()
         _mark(query, meta, "capturing")
         return False
     layer_idx = resolve_layer(layer)
-    if "mtp" in _module_text(layer).lower():
-        # Leave the draft on production's captured dense graph. Reuse-from-target
-        # never has a visible row after dense prefill, and intercepting MTP
-        # drops the FULL_DECODE_ONLY draft replay.
-        clear_hidden()
-        _mark(query, meta, "no_layer")
-        return False
     if layer_idx is None:
         clear_hidden()
         _mark(query, meta, "no_layer")
@@ -396,18 +427,34 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
             "QSA hidden %s does not cover %d tokens of width %d"
             % (tuple(hidden.shape), n, hyper.hidden)
         )
-    if os.environ.get("K8V4_QSA_GRAPH", "0") == "1" and n <= 32:
+    if "mtp" in _module_text(layer).lower():
+        # Reusing the target row raised acceptance only by locking the draft
+        # onto one token. The 200K answer then repeated "(V)". Leave the draft
+        # dense until the reused indices include each draft token's own block.
+        clear_hidden()
+        _mark(query, meta, "no_layer")
+        return False
+    if graph_enabled and (n <= 16 or c4_spans):
+        if c4_spans and positions is not None:
+            return _run_c4_graph_decode(
+                query3, out3, hidden, positions, meta, kv_cache, layout,
+                hyper, weights, layer_idx, n, c4_spans,
+            )
         starts = tuple(meta.query_starts)
-        # Capture pads query_start_loc out to max_num_seqs. 7/14/21/28 are
-        # 1..4 decode requests of 7 MTP tokens each.
-        if _decode_batch(starts, n) is not None and positions is not None:
+        # Capture pads query_start_loc out to max_num_seqs. A real one-request
+        # decode is the same shape: one span of n and then empty tails.
+        if _one_decode_span(starts, n) and positions is not None:
             if _run_graph_decode(
                 query3, out3, hidden, positions, meta, kv_cache, layout, hyper, weights, layer_idx, n
             ):
                 return True
         if _capturing():
-            if not getattr(try_sparse_forward, "_span_logged", False):
-                try_sparse_forward._span_logged = True
+            seen = getattr(try_sparse_forward, "_span_logged_ns", None)
+            if seen is None:
+                seen = set()
+                try_sparse_forward._span_logged_ns = seen
+            if n not in seen:
+                seen.add(n)
                 print(
                     "QSA_GRAPH skip starts=%s n=%s pos=%s" % (starts, n, positions is not None),
                     flush=True,
@@ -415,6 +462,22 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
             clear_hidden()
             _mark(query, meta, "capturing")
             return False
+    # Eager XPU decode reads corrected lengths from meta.seq_lens. The Python
+    # planner copies that tensor to the host, and the draft loop used to drop
+    # the copy on every token. Short decode already has a fixed-shape device
+    # body; use it for every decode-sized step so the sync cannot come back.
+    if (
+        not _capturing()
+        and positions is not None
+        and torch.device(meta.seq_lens.device).type == "xpu"
+        and library_path() is not None
+    ):
+        device_spans = _short_decode_spans(meta, n)
+        if device_spans:
+            return _run_c4_graph_decode(
+                query3, out3, hidden, positions, meta, kv_cache, layout,
+                hyper, weights, layer_idx, n, device_spans,
+            )
     requests = _requests(meta, n)
     cells: list[int] = []
     for _req, _q0, q_len, seq_len in requests:
@@ -435,33 +498,55 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
     # Default hyper shares one bank per KV-head count. A fresh QsaHyper()
     # each forward must not allocate a new bank.
     cache = bank_for(layout.hkv).layer(layer_idx, num_blocks, block_size, hidden.device)
+    # Share physical ownership with K8/V4; logical cells restart per request.
+    logical = torch.cat([
+        cache.logical_slots(meta.block_table[req],
+                            torch.tensor(cells_for_queries(seq_len, q_len),
+                                         dtype=torch.int64, device=hidden.device),
+                            int(meta.pages_per_block))
+        for req, _q0, q_len, seq_len in requests
+    ])
     lengths = query_lengths(tuple(int(x) for x in meta.query_starts))
-    ratio_pages = max(int(meta.pages_per_block), 1)
-    native_ok = (
-        os.environ.get("K8V4_QSA_NATIVE_CACHE", "0") == "1" and hidden.device.type == "xpu"
-    )
-    write_t = time.perf_counter()
-    cursor = 0
-    for req, _q0, q_len, _seq_len in requests:
-        req_cells = torch.tensor(cells[cursor:cursor + q_len], dtype=torch.int64, device=hidden.device)
-        slots = cache.logical_slots(meta.block_table[req], req_cells, ratio_pages)
-        keys = k_raw[cursor:cursor + q_len]
-        pos = pos4[cursor:cursor + q_len]
-        if native_ok and q_len <= 128:
-            _write_indexer_cache_native(cache, slots, keys, pos, weights.k_block_norm, hyper)
-        elif native_ok:
-            _write_indexer_cache_native(
-                cache, slots, keys, pos, weights.k_block_norm, hyper, prefill=True,
+    if (os.environ.get("K8V4_QSA_NATIVE_CACHE", "0") == "1" and hidden.device.type == "xpu"
+            and n <= 128 and lengths and max(lengths) <= 16):
+        if cache.lazy and int(cache.raw.shape[0]) < cache.num_slots:
+            cache.ensure_capacity(int(logical.max()))
+        _write_indexer_cache_native(cache, logical, k_raw, pos4, weights.k_block_norm, hyper)
+    else:
+        write_t = time.perf_counter()
+        handled = False
+        if os.environ.get("K8V4_QSA_NEW_PREFILL_WRITER", "0") == "1":
+            from k8v4_v030.qsa_prefill_sidecar_writer import try_runtime_write
+            handled = try_runtime_write(cache, logical, k_raw, pos4,
+                                        weights.k_block_norm, hyper, lengths)
+        if not handled:
+            if getattr(cache, 'storage_contract', '') == 'xpu-fp32-physical-tail-v1':
+                # The checkpoint bank is CPU-resident. Reuse the existing
+                # per-device norm preparation rather than sending CPU weights
+                # directly to the compact native ABI or copying every step.
+                _write_indexer_cache_native(cache, logical, k_raw, pos4,
+                                            weights.k_block_norm, hyper, count_hit=False)
+            else:
+                cache.write_tokens(logical, k_raw, pos4, weights.k_block_norm)
+        # Off by default. The .item() calls sync the prefill stream, and the
+        # print flooded the 131K prefill logs. Set K8V4_QSA_CACHE_DEBUG=1 to
+        # restore the layer-3 cache line.
+        if (
+            os.environ.get("K8V4_QSA_CACHE_DEBUG", "0") == "1"
+            and layer_idx == 3
+            and n > 16
+            and cells
+        ):
+            _end = int(cells[-1])
+            _need = (_end + 1) // 4
+            _valid = int(cache.pool_valid[:_need].sum().item()) if _need else 0
+            _slot = int(logical.max().item())
+            print(
+                "QSA_CACHE seq_end=%d need_blocks=%d valid=%d max_slot=%d n=%d"
+                % (_end, _need, _valid, _slot, n),
+                flush=True,
             )
-        else:
-            cache.write_tokens(slots, keys, pos, weights.k_block_norm)
-        cursor += q_len
-    _stage("write", write_t, "n=%d" % int(n))
-    if os.environ.get("K8V4_QSA_DENSE_PREFILL", "0") == "1" and lengths and max(lengths) > 16:
-        # The indexer cache is filled above; the dense K8/V4 prefill kernel is
-        # exact and faster than per-query selection on this hardware.
-        _mark(query, meta, "fast_prefill")
-        return False
+        _stage("write", write_t, "n=%d" % int(n))
     # Every query with count <= n_sel keeps every causal block. Scoring cannot
     # change that, so the packed dense kernel still produces the output.
     # count == n_sel + 1 can collapse back to a full set once the own block is
@@ -473,32 +558,91 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
         os.environ.get("K8V4_QSA_EXACT_TILED", "0") == "1"
         and not qsa_force_all()
         and query3.device.type == "xpu"
-        and len(requests) == 1 and int(requests[0][2]) > 16
+        and any(int(item[2]) > 16 for item in requests)
     ):
         from k8v4_v030.qsa_ops import _visible_graph, attend_decode_direct, score_pooled_gemm
+        from k8v4_v030.qsa_memory_budget import prefill_tile_rows
         if os.environ.get("K8V4_QSA_SCORE_FP16", "0") == "1":
             raise RuntimeError("experimental exact-tiled prefill requires FP32 scoring")
-        req, q0, q_len, seq_len = requests[0]
-        block_row = meta.block_table[req]
-        cells = cells_for_queries(seq_len, q_len)
-        counts = [complete_blocks(cell, hyper.ratio) for cell in cells]
         views = bind_regions(kv_cache, layout)
-        tile = max(1, int(os.environ.get("K8V4_QSA_EXACT_TILE", "128")))
-        for start in range(0, q_len, tile):
-            end = min(start + tile, q_len)
-            tile_counts, tile_cells = counts[start:end], cells[start:end]
-            scores = score_pooled_paged(
-                q_idx[q0+start:q0+end], cache.pooled, cache.pool_valid, block_row,
-                tile_counts, int(meta.pages_per_block), n_blocks=max(tile_counts),
-            )
-            counts_t = torch.tensor(tile_counts, device=query3.device, dtype=torch.int32)
-            cells_t = torch.tensor(tile_cells, device=query3.device, dtype=torch.int32)
-            visible = _visible_graph(scores, counts_t, cells_t, hyper,
-                                     int(hyper.budget) + int(hyper.ratio), premasked=True,
-                                     stable_ties=True)
-            piece = attend_decode_direct(query3[q0+start:q0+end], views, block_row,
-                                         visible, int(meta.pages_per_block))
-            out3[q0+start:q0+end].copy_(piece)
+        requested_tile = max(1, int(os.environ.get("K8V4_QSA_EXACT_TILE", "128")))
+        gemm_prefill = os.environ.get("K8V4_QSA_GEMM_SCORE", "0") == "1"
+        # Output publication only: cache writes retain their existing contract.
+        # Stage actual rows, not caller padding or its potentially strided backing.
+        staged = torch.empty_like(out3[:n])
+        # Serial request-local tiles bound score/selection workspace independently
+        # of batch size. Retain original request rows and full-batch query offsets.
+        for req, q0, q_len, seq_len in requests:
+            block_row = meta.block_table[req]
+            req_cells = cells_for_queries(seq_len, q_len)
+            counts = [complete_blocks(cell, hyper.ratio) for cell in req_cells]
+            tile = prefill_tile_rows(requested_tile, max(counts))
+            # Keep short mixed decode spans on the paged scorer. Gather once
+            # per live prefill request, never across requests or in a shape cache.
+            use_gemm = gemm_prefill and q_len > 16 and max(counts) > 0
+            tile_mask = None
+            if use_gemm:
+                pooled, valid = cache.gather_blocks(block_row, max(counts), int(meta.pages_per_block))
+                if os.environ.get("K8V4_QSA_HOISTED_MASK", "0") == "1":
+                    from k8v4_v030.qsa_tile_mask import TileMask
+                    tile_mask = TileMask(counts, req_cells, valid, int(pooled.shape[0]), pooled.device)
+            for start in range(0, q_len, tile):
+                end = min(start + tile, q_len)
+                tile_counts, tile_cells = counts[start:end], req_cells[start:end]
+                if max(tile_counts) == 0:
+                    # No complete blocks exist. The native decode scorer does
+                    # not initialize columns beyond its maximum live count;
+                    # supply a masked sentinel so only the causal own tail wins.
+                    scores = torch.full((end-start, 1), -float("inf"),
+                                        dtype=torch.float32, device=q_idx.device)
+                elif use_gemm:
+                    # Early tiles can have fewer complete blocks than the chunk.
+                    # Bound both GEMM and masking to this tile's native width.
+                    width = max(tile_counts)
+                    scores = None
+                    if os.environ.get("K8V4_QSA_FUSED_MASK", "0") == "1":
+                        from k8v4_v030.qsa_fused_mask_candidate import score as masked_gemm
+                        mask_counts = (tile_mask.counts[start:end] if tile_mask is not None else
+                                       torch.tensor(tile_counts, device=query3.device, dtype=torch.int32))
+                        scores = masked_gemm(q_idx[q0+start:q0+end], pooled[:width],
+                                             mask_counts, valid[:width])
+                    if scores is None:
+                        raw = score_pooled_gemm(q_idx[q0+start:q0+end], pooled[:width])
+                        if tile_mask is None:
+                            scores = mask_query_scores(raw, tile_counts, valid[:width])
+                        else:
+                            mask = tile_mask.columns[:,:width] >= tile_mask.limits[start:end].unsqueeze(1)
+                            scores = raw.masked_fill(mask, -float("inf"))
+                            del mask
+                        del raw
+                else:
+                    scores = score_pooled_paged(
+                        q_idx[q0+start:q0+end], cache.pooled, cache.pool_valid, block_row,
+                        tile_counts, int(meta.pages_per_block), n_blocks=max(tile_counts),
+                        scales=_pooled_scales(cache),
+                    )
+                if tile_mask is None:
+                    counts_t = torch.tensor(tile_counts, device=query3.device, dtype=torch.int32)
+                    cells_t = torch.tensor(tile_cells, device=query3.device, dtype=torch.int32)
+                else:
+                    counts_t = tile_mask.counts[start:end]
+                    cells_t = tile_mask.cells[start:end]
+                visible = _visible_graph(scores, counts_t, cells_t, hyper,
+                                         int(hyper.budget) + int(hyper.ratio), premasked=True,
+                                         stable_ties=True)
+                if use_gemm and len(requests) == 1:
+                    _owned_capture(q_idx[q0+start:q0+end], pooled[:scores.shape[1]],
+                                   valid[:scores.shape[1]], scores, visible,
+                                   tile_counts, tile_cells, block_row, cache, weights, hyper,
+                                   layer_idx, start, seq_len, int(meta.pages_per_block))
+                piece = attend_decode_direct(query3[q0+start:q0+end], views, block_row,
+                                             visible, int(meta.pages_per_block))
+                staged[q0+start:q0+end].copy_(piece)
+                del scores, counts_t, cells_t, visible, piece
+            if use_gemm:
+                del pooled, valid
+            del tile_mask
+        out3[:n].copy_(staged)
         if qsa_stats_enabled():
             note_qsa_width(int(hyper.budget) + int(hyper.ratio))
         _mark(query, meta, "sparse_ok")
@@ -519,7 +663,7 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
         if os.environ.get("K8V4_QSA_SHARED_LAST_SCORE", "0") == "1":
             # Shared attention consumes only scores[-1]; avoid scoring the other queries.
             from k8v4_v030.qsa_ops import score_pooled_gemm
-            matrix, valid = _logical_blocks(cache, counts[-1])
+            matrix, valid = cache.gather_blocks(block_row, counts[-1], int(meta.pages_per_block))
             last_query = q_idx[q0 + q_len - 1:q0 + q_len]
             raw = (score_pooled_gemm(last_query, matrix)
                    if os.environ.get("K8V4_QSA_GEMM_SCORE", "0") == "1"
@@ -607,31 +751,50 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
 _DECODE_BLOCKS = 65536
 
 
-def _one_decode_span(starts, n: int) -> bool:
-    """True when every token is one request and later slots are empty."""
-    batch = _decode_batch(starts, n)
-    return batch is not None and len(batch) == 1
+def _short_decode_spans(meta, n: int):
+    """Per-request ``(req, q0, q_len)`` when every live query is decode-sized.
 
-
-def _decode_batch(starts, n: int) -> list[tuple[int, int, int]] | None:
-    """Request spans for a decode-sized step, or None if any span is prefill."""
-    n = int(n)
-    if n < 1:
-        return None
-    lengths = query_lengths(tuple(int(x) for x in starts))
-    out: list[tuple[int, int, int]] = []
+    QSA treats ``q_len <= 16`` as decode (MTP6 is 7). Prefill and a split
+    request return (). Query starts are already on the host. This does not
+    read ``seq_lens`` values, so it cannot sync the device.
+    """
+    starts = tuple(meta.query_starts)
+    try:
+        lengths = query_lengths(starts)
+    except ValueError:
+        return ()
+    spans = []
     covered = 0
-    for req, q_len in enumerate(lengths):
+    req = 0
+    for q_len in lengths:
+        if q_len == 0:
+            req += 1
+            continue
         if covered >= n:
             break
-        q_len = int(q_len)
-        if q_len < 1 or q_len > 16:
-            return None
-        if covered + q_len > n:
-            return None
-        out.append((req, covered, q_len))
+        if q_len > 16 or covered + q_len > n:
+            return ()
+        spans.append((req, covered, q_len))
         covered += q_len
-    return out if covered == n and out else None
+        req += 1
+    if covered != n or not spans:
+        return ()
+    seq = getattr(meta, "seq_lens", None)
+    table = getattr(meta, "block_table", None)
+    if not torch.is_tensor(seq) or not torch.is_tensor(table):
+        return ()
+    last = spans[-1][0]
+    if int(seq.shape[0]) < last + 1 or int(table.shape[0]) < last + 1:
+        return ()
+    return tuple(spans)
+
+
+def _one_decode_span(starts, n: int) -> bool:
+    """True when every token is one request and later slots are empty."""
+    if len(starts) < 2 or int(starts[1]) - int(starts[0]) != int(n):
+        return False
+    end = int(starts[1])
+    return all(int(item) == end for item in starts[2:])
 
 
 
@@ -651,89 +814,311 @@ def _identity_pages(device) -> torch.Tensor:
     return found
 
 
+def _pooled_scales(cache):
+    """FP32 per-row scales when pooled keys are INT8, else ``None``."""
+    return getattr(cache, "pooled_scale", None)
+
+
 def _logical_blocks(cache, count: int):
-    """Pooled logical blocks ``[0, count)``. Row ``b`` is tokens ``4b .. 4b+3``."""
+    """Pooled logical blocks ``[0, count)``. Row ``b`` is tokens ``4b .. 4b+3``.
+
+    INT8 storage is expanded to FP32 with ``cache.pooled_scale`` so callers
+    keep scoring floating rows.
+    """
+    from k8v4_v030.qsa_pooled_quant import dequantize_pooled_rows
     count = int(count)
+    scales = _pooled_scales(cache)
     if count < 1:
-        return cache.pooled[:0], cache.pool_valid[:0]
-    rows = int(cache.pooled.shape[0])
-    if count > rows:
+        rows = cache.pooled[:0]
+        if rows.dtype == torch.int8:
+            rows = dequantize_pooled_rows(rows, None if scales is None else scales[:0])
+        return rows, cache.pool_valid[:0]
+    n_rows = int(cache.pooled.shape[0])
+    if count > n_rows:
         raise RuntimeError(
-            "QSA logical blocks %d exceed the indexer allocation %d" % (count, rows)
+            "QSA logical blocks %d exceed the indexer allocation %d" % (count, n_rows)
         )
-    return cache.pooled[:count], cache.pool_valid[:count]
+    rows = cache.pooled[:count]
+    if rows.dtype == torch.int8:
+        rows = dequantize_pooled_rows(rows, None if scales is None else scales[:count])
+    return rows, cache.pool_valid[:count]
 
 
-_WIDTH_BUCKETS = (4096, 16384, 65536)
+def _c4_graph_spans(meta, n):
+    """Admit descriptor-stable, unpadded MTP6 verifier rosters.
 
+    Capture sizes are 7 tokens per request through 8 requests (56).
+    A 9-request batch is outside max-num-seqs 8 and stays on the eager path.
 
-def _graph_score_width(capturing: bool, max_seq: int, fit: int, pooled_blocks: int) -> int:
-    """Scratch columns for paged scoring.
-
-    Capture always uses the 200K cap so one graph replays at every length.
-    The native kernel is a fixed 1024-WG strided launch that stops at the
-    live device count. Eager Python (no captured graph) uses a bucket so
-    the scratch tensor matches the context.
+    FULL_DECODE_ONLY keys encode uniform=True and num_tokens/7 requests.
+    A general FULL key does not encode query spans and must never use this
+    Python-unrolled route. Request identities may reorder: tensor rows, not
+    host identities, own all stores and reads.
     """
-    cap = min(_DECODE_BLOCKS, max(1, int(fit)), max(1, int(pooled_blocks)))
-    if capturing:
-        return cap
-    live = max(1, (int(max_seq) + 3) // 4)
-    for bucket in _WIDTH_BUCKETS:
-        if live <= bucket:
-            return min(bucket, cap)
-    return cap
+    if n not in (7, 14, 21, 28, 35, 42, 49, 56):
+        return ()
+    reqs = n // 7
+    exact = _verified_v2_graph_descriptor()
+    if exact is not None:
+        # The exact key already names this roster. Do not read the forward
+        # context again here; the padding helper does that itself.
+        if exact.num_tokens != n or _verified_v2_graph_padding(n, meta.seq_lens.device) is None:
+            return ()
+    else:
+        from vllm.forward_context import get_forward_context
+        ctx = get_forward_context()
+        desc = getattr(ctx, "batch_descriptor", None)
+        if (n == 7 or desc is None or not desc.uniform or desc.num_tokens != n
+                or desc.num_reqs != reqs or getattr(ctx, "is_padding", None) is not None):
+            return ()
+    starts = tuple(meta.query_starts)
+    expected = tuple(range(0, n + 1, 7))
+    if starts[:reqs + 1] != expected or any(x != n for x in starts[reqs + 1:]):
+        return ()
+    if int(meta.seq_lens.shape[0]) < reqs or int(meta.block_table.shape[0]) < reqs:
+        return ()
+    slots = getattr(meta, "slot_mapping", None)
+    if slots is None or slots.ndim != 1 or int(slots.shape[0]) < n:
+        return ()
+    return tuple((r, r * 7, 7) for r in range(reqs))
 
 
-def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, hyper, weights, layer_idx, n) -> bool:
-    """Decode QSA with fixed tensor shapes so a full graph can replay it.
+def _prepare_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, hyper, weights, layer_idx, n):
+    """Project, write the indexer, and return the tensors the score needs.
 
-    One captured graph covers 1..4 decode requests (7/14/21/28 tokens with
-    MTP-6). Each request writes physical indexer slots through its block
-    table, scores its own pooled keys, and attends with its own pages.
+    No score launch. The c4 path scores every request in one call after this
+    returns. Shapes stay fixed so a captured graph can replay them.
     """
-    from k8v4_v030.cache_views import bind_regions
-    from k8v4_v030.qsa_ops import attend_decode_direct
+    from k8v4_v030.qsa_batch_score import static_score_width
 
-    batch = _decode_batch(tuple(meta.query_starts), n)
-    if batch is None:
-        return False
-    dummy_cells = [0] * int(n)
-    pos4 = _positions(positions, n, dummy_cells, hidden.device)
+    pos4 = _positions(positions, n, [0], hidden.device)
     q_idx, k_raw = project_indexer(
         hidden[:n], weights.q_proj, weights.k_proj, weights.q_norm, weights.k_norm, hyper,
     )
     q_idx = apply_q_rope(q_idx, pos4, hyper)
     num_blocks, block_size = _geometry(kv_cache, meta, layout)
     cache = bank_for(layout.hkv).layer(layer_idx, num_blocks, block_size, hidden.device)
-    views = bind_regions(kv_cache, layout)
+    seq = meta.seq_lens[0]
+    idx = torch.arange(n, device=hidden.device)
+    cells_t = (seq.to(device=hidden.device, dtype=torch.int64) - int(n)) + idx
+    counts_t = torch.div(cells_t + 1, int(hyper.ratio), rounding_mode="floor").to(torch.int32)
+    block_row = meta.block_table[0]
     ratio = max(int(meta.pages_per_block), 1)
+    padding = getattr(meta, "_qsa_padding", None)
+    valid = cells_t >= 0
+    if padding is not None:
+        valid = valid & ~padding
+    # Substitute masked cells BEFORE the mapper indexes its block-table row.
+    map_cells = torch.where(valid, cells_t, torch.zeros_like(cells_t)) if padding is not None else cells_t
+    slots = cache.logical_slots(block_row, map_cells, ratio)
+    slots = torch.where(valid, slots, torch.full_like(slots, -1))
+    read_cells = cells_t
+    if padding is not None:
+        counts_t = torch.where(valid, torch.clamp_min(counts_t, 0), torch.zeros_like(counts_t))
+        read_cells = torch.where(valid, cells_t, torch.full_like(cells_t, -1))
+    _write_indexer_cache_native(
+        cache, slots, k_raw, pos4, weights.k_block_norm, hyper, count_hit=True,
+    )
+    table_n = int(block_row.reshape(-1).shape[0])
+    static_width = static_score_width(table_n, ratio, int(cache.pooled.shape[0]), _DECODE_BLOCKS)
+    return {
+        "q_idx": q_idx,
+        "counts_t": counts_t,
+        "block_row": block_row,
+        "ratio": ratio,
+        "valid": valid,
+        "read_cells": read_cells,
+        "padding": padding,
+        "cells_t": cells_t,
+        "static_width": static_width,
+        "cache": cache,
+        "n": n,
+        "query3": query3,
+        "out3": out3,
+        "kv_cache": kv_cache,
+        "layout": layout,
+        "hyper": hyper,
+        "layer_idx": layer_idx,
+    }
+
+
+def _attend_graph_decode(state, scores) -> None:
+    """Top-k and sparse attention for one request. ``scores`` is ``[n, width]``."""
+    from k8v4_v030.cache_views import bind_regions
+    from k8v4_v030.qsa_ops import _visible_graph, attend_decode_direct
+
+    n = int(state["n"])
+    hyper = state["hyper"]
+    padding = state["padding"]
+    cells_t = state["cells_t"]
+    visible = _visible_graph(
+        scores, state["counts_t"], state["read_cells"].to(torch.int32), hyper,
+        int(hyper.budget) + int(hyper.ratio), premasked=True,
+    )
+    if padding is not None:
+        # A masked current-step token must not become an older query's KV read.
+        relative = (visible.to(torch.int64) - cells_t[0]).clamp(0, n - 1)
+        current = (visible >= cells_t[0]) & (visible <= cells_t[-1])
+        visible = visible.masked_fill(padding.unsqueeze(1) | (current & padding[relative]), -1)
+    views = bind_regions(state["kv_cache"], state["layout"])
+    attend_decode_direct(
+        state["query3"][:n], views, state["block_row"], visible, state["ratio"],
+        out=state["out3"][:n],
+    )
+    _remember_visible(state["layer_idx"], visible)
+
+
+
+def _bucketed_score_width(static_width, counts, *, capturing: bool) -> int:
+    """Score columns for this decode step.
+
+    A captured exact graph carries ``qsa_width_blocks``. Capture must launch
+    that width even when the dummy sequence is short, because replay will not
+    run this function again. Outside capture, the execute hook publishes the
+    smallest bucket that covers the live sequences. Device counts stay unread.
+    """
+    from k8v4_v030.qsa_batch_score import scored_width
+
+    static_width = int(static_width)
+    desc = _verified_v2_graph_descriptor()
+    baked = int(getattr(desc, "qsa_width_blocks", 0) or 0) if desc is not None else 0
+    if baked > 0:
+        return min(static_width, baked)
+    try:
+        from k8v4_v030.qsa_width import active_width_blocks
+        live = int(active_width_blocks())
+    except Exception:
+        live = 0
+    if live > 0:
+        return min(static_width, live)
+    host_counts = torch.is_tensor(counts) and torch.device(counts.device).type == "cpu"
+    return scored_width(
+        static_width, counts, capturing=bool(capturing), host_counts=host_counts,
+    )
+
+
+def _run_c4_graph_decode(query3, out3, hidden, positions, meta, kv_cache,
+                         layout, hyper, weights, layer_idx, n, spans):
+    """Score every c4 request in one paged launch, then attend each request.
+
+    Projection, the indexer write, and attention stay per request. The four
+    indexer scans do not. Capture launches the descriptor bucket, not the
+    dummy sequence, so replay keeps that width. A live step uses the bucket
+    published before dispatch. The companion kernel skips the pooled-key load
+    past each count and on invalid pooled rows.
+    """
+    from copy import copy
+
+    from k8v4_v030.qsa_batch_score import score_paged_multi
+
+    pos4 = _positions(positions, n, [0], hidden.device)
+    padding = _verified_v2_graph_padding(n, hidden.device)
+    states = []
+    for req, q0, width in spans:
+        local = copy(meta)
+        # Views retain the original storage; replay rereads advanced lengths
+        # and remapped physical rows without any Python scalar synchronization.
+        local.seq_lens = meta.seq_lens[req:req + 1]
+        local.block_table = meta.block_table[req:req + 1]
+        local.slot_mapping = meta.slot_mapping[q0:q0 + width]
+        local._qsa_padding = None if padding is None else padding[q0:q0 + width]
+        states.append(_prepare_graph_decode(
+            query3[q0:q0 + width], out3[q0:q0 + width], hidden[q0:q0 + width],
+            pos4[q0:q0 + width], local, kv_cache, layout, hyper, weights,
+            layer_idx, width,
+        ))
+    if not states:
+        raise RuntimeError("QSA c4 graph body has no spans")
+    static = int(states[0]["static_width"])
+    for state in states[1:]:
+        if int(state["static_width"]) != static:
+            raise RuntimeError("QSA c4 score width is not uniform")
+    reps = []
+    creps = []
+    tables = []
+    for state in states:
+        rep = _first_live_index(state["n"], state["valid"], state["q_idx"].device)
+        reps.append(state["q_idx"].index_select(0, rep))
+        creps.append(state["counts_t"].reshape(-1).index_select(0, rep))
+        row = state["block_row"].reshape(-1)
+        if row.dtype != torch.int32:
+            row = row.to(dtype=torch.int32)
+        tables.append(row.contiguous())
+    query_b = torch.cat(reps, 0)
+    counts_b = torch.cat(creps, 0)
+    table_b = torch.stack(tables, 0)
     capturing = _capturing()
-    max_seq = 0 if capturing else max(_seq_len(meta, req) for req, _q0, _q_len in batch)
-    for req, q0, q_len in batch:
-        seq = meta.seq_lens[req]
-        idx = torch.arange(q_len, device=hidden.device)
-        cells_t = (seq.to(device=hidden.device, dtype=torch.int64) - int(q_len)) + idx
-        counts_t = torch.div(cells_t + 1, int(hyper.ratio), rounding_mode="floor").to(torch.int32)
-        block_row = meta.block_table[req]
-        slots = cache.logical_slots(block_row, cells_t, ratio)
-        _write_indexer_cache_native(
-            cache, slots, k_raw[q0:q0 + q_len], pos4[q0:q0 + q_len],
-            weights.k_block_norm, hyper, count_hit=True,
+    width_b = _bucketed_score_width(static, counts_b, capturing=capturing)
+    seen_batches = getattr(_run_c4_graph_decode, "_logged_batches", None)
+    if seen_batches is None:
+        seen_batches = set()
+        _run_c4_graph_decode._logged_batches = seen_batches
+    batch_key = (len(states), bool(capturing), int(width_b))
+    if batch_key not in seen_batches:
+        seen_batches.add(batch_key)
+        print(
+            "QSA_GRAPH width=%d static=%d bt=%s capturing=%s batch=%d"
+            % (width_b, static, tuple(table_b.shape), capturing, len(states)),
+            flush=True,
         )
-        table_n = int(block_row.reshape(-1).shape[0])
-        fit = max(1, (table_n * ratio * 64) // 4 - 1)
-        pooled_blocks = max(1, int(cache.pooled.shape[0]))
-        width = _graph_score_width(capturing, max_seq, fit, pooled_blocks)
-        visible = score_select_paged(
-            q_idx[q0:q0 + q_len], cache.pooled, cache.pool_valid, block_row,
-            counts_t, cells_t, ratio, hyper, n_blocks=width,
+    cache = states[0]["cache"]
+    rows = score_paged_multi(
+        query_b, cache.pooled, cache.pool_valid, table_b, counts_b,
+        states[0]["ratio"], width_b, scales=_pooled_scales(cache),
+    )
+    if int(rows.shape[0]) != len(states) or int(rows.shape[1]) != int(width_b):
+        raise RuntimeError(
+            "QSA batched scores %s do not match %d requests of width %d"
+            % (tuple(rows.shape), len(states), int(width_b))
         )
-        attend_decode_direct(
-            query3[q0:q0 + q_len], views, block_row, visible, ratio,
-            out=out3[q0:q0 + q_len],
-        )
-        _remember_visible(layer_idx, req, visible)
+    for index, state in enumerate(states):
+        one = rows[index:index + 1]
+        n_q = int(state["n"])
+        expanded = one if n_q == 1 else one.expand(n_q, int(one.shape[1])).contiguous()
+        _attend_graph_decode(state, expanded)
+    return True
+
+
+def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, hyper, weights, layer_idx, n) -> bool:
+    """Decode QSA with fixed tensor shapes so a full graph can replay it.
+
+    The scored width is the block-table fit, clamped to the pooled indexer
+    and to 65536 blocks (262144 tokens). Historical top-k is the first live
+    query's scores, broadcast to ``[n, width]``. Each position still unions
+    its own block. Python does not run again on replay; the cache-update
+    counter is flushed from the metadata builder. One request still uses
+    ``score_pooled_paged``. The c4 roster uses ``score_paged_multi``.
+    """
+    from k8v4_v030.qsa_ops import score_pooled_paged
+
+    state = _prepare_graph_decode(
+        query3, out3, hidden, positions, meta, kv_cache, layout, hyper, weights, layer_idx, n,
+    )
+    block_row = state["block_row"]
+    capturing = _capturing()
+    width = _bucketed_score_width(
+        int(state["static_width"]), state["counts_t"], capturing=capturing,
+    )
+    if capturing and not getattr(_run_graph_decode, "_logged_cap", False):
+        _run_graph_decode._logged_cap = True
+        print("QSA_GRAPH width=%d bt=%s capturing=True" % (width, tuple(block_row.shape)), flush=True)
+    elif not capturing and not getattr(_run_graph_decode, "_logged", False):
+        _run_graph_decode._logged = True
+        print("QSA_GRAPH width=%d bt=%s capturing=False" % (width, tuple(block_row.shape)), flush=True)
+    cache = state["cache"]
+    ratio = state["ratio"]
+    # One historical selection per step. ``_visible_graph`` still unions
+    # each position's own block. Expand keeps the captured top-k at [n, width].
+    scores = _score_once_and_expand(
+        state["q_idx"],
+        state["counts_t"],
+        lambda q_rep, counts_rep: score_pooled_paged(
+            q_rep, cache.pooled, cache.pool_valid, block_row,
+            counts_rep, ratio, n_blocks=width, scales=_pooled_scales(cache),
+        ),
+        valid=state["valid"],
+    )
+    _attend_graph_decode(state, scores)
     return True
 
 
@@ -827,14 +1212,8 @@ def flush_layer_hits(device) -> int:
     return delta
 
 
-def _write_indexer_cache_native(cache, slots, keys, positions, weight, hyper, count_hit: bool = False, prefill: bool = False):
-    """Device-only cache write and reference block pooling.
-
-    Decode stays on ``qsa_cache_update`` (n<=128). Prefill uses
-    ``qsa_cache_prefill_update`` for a whole 4224-token chunk.
-    """
-    from k8v4_v030.qsa_ops import ops
-
+def _write_indexer_cache_native(cache, slots, keys, positions, weight, hyper, count_hit: bool = False):
+    """Device-only decode write or explicit compact eager-prefill dispatch."""
     if (hyper.dim, hyper.ratio, hyper.n_rot, tuple(hyper.sections), hyper.theta) != (
             128, 4, 64, (11, 11, 10, 0), 10_000_000.0):
         raise RuntimeError("native QSA cache supports the Qwen3.8 indexer geometry")
@@ -844,9 +1223,6 @@ def _write_indexer_cache_native(cache, slots, keys, positions, weight, hyper, co
         step = float(hyper.theta) ** (-2.0 / float(hyper.n_rot))
         freq = torch.tensor([step ** p for p in range(32)], dtype=torch.float32, device=device)
         _CACHE_ROPE_FREQ[device] = freq
-    native = ops()
-    if native is None or not hasattr(native, "qsa_cache_update"):
-        raise RuntimeError("native QSA cache requires an updated libxe2_qsa.so")
     # Copies during XPU graph capture wait on the recording queue and abort it.
     # The kernel reads these with their own strides. The norm weight is prepared
     # on the first eager call and reused.
@@ -860,14 +1236,24 @@ def _write_indexer_cache_native(cache, slots, keys, positions, weight, hyper, co
     if w is None:
         w = weight.detach().to(device=device, dtype=torch.float32).contiguous()
         _CACHE_WEIGHT[wkey] = w
-    fn = native.qsa_cache_update
-    if prefill:
-        if not hasattr(native, "qsa_cache_prefill_update"):
-            raise RuntimeError("native QSA prefill cache requires an updated libxe2_qsa.so")
-        fn = native.qsa_cache_prefill_update
-    fn(slots, keys, positions, w, freq,
-       cache.raw, cache.pos, cache.filled, cache.pooled, cache.pool_valid,
-       float(hyper.eps), _hit_tensor(device, count_hit))
+    if getattr(cache, 'storage_contract', '') == 'xpu-fp32-physical-tail-v1':
+        cache.write_tokens(slots,keys,positions,w)
+        if count_hit:
+            _hit_tensor(device,True).add_(cache.status.eq(0).to(dtype=torch.int32))
+        return
+    if cache.pooled.dtype == torch.int8:
+        raise RuntimeError(
+            "int8 pooled keys cannot use libxe2_qsa qsa_cache_update, which stores FP32. "
+            "Use K8V4_QSA_COMPACT_TAIL=1 and the patched compact libraries from native-src/. "
+            "Do not overwrite /compact-libs."
+        )
+    from k8v4_v030.qsa_ops import ops
+    native = ops()
+    if native is None or not hasattr(native, "qsa_cache_update"):
+        raise RuntimeError("native QSA cache requires an updated libxe2_qsa.so")
+    native.qsa_cache_update(slots, keys, positions, w, freq,
+                            cache.raw, cache.pos, cache.filled, cache.pooled, cache.pool_valid,
+                            float(hyper.eps), _hit_tensor(device, count_hit))
 
 
 def _visible_tensor(visible, q_len: int, device: torch.device) -> torch.Tensor:
@@ -1021,6 +1407,60 @@ def _packed_is_full_causal(packed: torch.Tensor, cells: list[int]) -> bool:
     return bool(torch.equal(got, expect))
 
 
+def _first_live_index(n: int, valid: torch.Tensor | None, device) -> torch.Tensor:
+    """``[1]`` int64 index of the first live query. Device ops only."""
+    if valid is None:
+        return torch.zeros(1, dtype=torch.long, device=device)
+    live = valid.reshape(-1)
+    if int(live.shape[0]) != n:
+        raise RuntimeError("QSA live mask does not match queries")
+    if live.device != torch.device(device) or live.dtype != torch.bool:
+        live = live.to(device=device, dtype=torch.bool)
+    index = torch.arange(n, device=device, dtype=torch.long)
+    missing = torch.full((n,), n, dtype=torch.long, device=device)
+    first = torch.where(live, index, missing).min()
+    fallback = torch.zeros((), dtype=torch.long, device=device)
+    return torch.where(first < n, first, fallback).reshape(1)
+
+
+def _score_once_and_expand(query, counts, score_one, valid=None):
+    """Score the first live query and broadcast that historical row.
+
+    One selection per MTP step. The caller unions each position's own block.
+    Returned scores stay ``[queries, blocks]`` so a captured top-k keeps its shape.
+    """
+    n = int(query.shape[0])
+    if n < 1:
+        raise RuntimeError("QSA score reuse needs a query")
+    rep = _first_live_index(n, valid, query.device)
+    q_rep = query.index_select(0, rep)
+    counts_rep = counts
+    if torch.is_tensor(counts):
+        counts_rep = counts.reshape(-1).index_select(0, rep)
+    elif counts is not None:
+        if valid is not None:
+            raise RuntimeError("QSA host counts cannot track a device live mask")
+        counts_rep = [counts[0]]
+    one = score_one(q_rep, counts_rep)
+    if one.ndim != 2 or int(one.shape[0]) != 1:
+        raise RuntimeError("QSA reused score row has shape %s" % (tuple(one.shape),))
+    if n == 1:
+        return one
+    return one.expand(n, int(one.shape[1])).contiguous()
+
+
+def _reuse_short_decode(query, counts, hyper: QsaHyper) -> bool:
+    """Eager MTP verify: a short span whose target query is past the budget.
+
+    A prefill chunk that still starts inside the budget keeps per-query scores.
+    ``q_len > 16`` is that prefill path and is unchanged.
+    """
+    n = int(query.shape[0])
+    if n <= 1 or n > 16 or not counts:
+        return False
+    return int(counts[0]) > int(hyper.n_sel)
+
+
 def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper: QsaHyper, force: bool,
                     cached_blocks=None):
     """``(scores, device_ids)`` for one request.
@@ -1030,21 +1470,33 @@ def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper
     CPU scores stay fp64 and are ranked by ``choose_blocks``. No scores are
     built when every query in the request is inside the budget.
     ``device_ids`` is only set by a caller that already ranked on the host.
+    A short decode whose first query is past the budget reuses that query's
+    score row. Later positions still add their own block in ``choose_blocks``.
     """
     if force or not counts or max(counts) <= hyper.n_sel:
         return None, None
     max_count = max(counts)
+    reuse = _reuse_short_decode(query, counts, hyper)
     if (query.device.type == "xpu" and int(query.shape[0]) <= 16 and cached_blocks is None
             and os.environ.get("K8V4_QSA_PAGED_SCORE", "0") == "1"):
-        # Physical indexer rows, addressed through this request's block table.
+        if reuse:
+            counts_t = torch.tensor(list(counts), dtype=torch.int32, device=query.device)
+            return _score_once_and_expand(
+                query,
+                counts_t,
+                lambda q_rep, counts_rep: score_pooled_paged(
+                    q_rep, cache.pooled, cache.pool_valid, block_row,
+                    counts_rep, pages_per_block, n_blocks=max_count,
+                    scales=_pooled_scales(cache),
+                ),
+            ), None
         return score_pooled_paged(
             query, cache.pooled, cache.pool_valid, block_row,
             counts, pages_per_block, n_blocks=max_count,
+            scales=_pooled_scales(cache),
         ), None
-    if cached_blocks is None:
-        matrix, valid = cache.gather_blocks(block_row, max_count, pages_per_block)
-    else:
-        matrix, valid = cached_blocks
+    matrix, valid = (cache.gather_blocks(block_row, max_count, pages_per_block)
+                     if cached_blocks is None else cached_blocks)
     use_kernel = (
         query.device.type == "xpu"
         and matrix.device.type == "xpu"
@@ -1053,14 +1505,27 @@ def _request_scores(cache, query, block_row, counts, pages_per_block: int, hyper
         and int(query.shape[2]) == 128
     )
     if use_kernel:
+        if reuse:
+            raw = _score_once_and_expand(
+                query, None, lambda q_rep, _counts_rep: score_pooled(q_rep, matrix),
+            )
+            rep = int(counts[0])
+            return mask_query_scores(raw, [rep] * int(query.shape[0]), valid), None
         raw = score_pooled(query, matrix)
         scores = mask_query_scores(raw, counts, valid)
         return scores, None
     q_cpu = query.detach().to(dtype=torch.float64, device="cpu")
     matrix_cpu = matrix.detach().to(dtype=torch.float64, device="cpu")
+    valid_cpu = valid.detach().to(device="cpu")
+    if reuse:
+        raw = _score_once_and_expand(
+            q_cpu, None, lambda q_rep, _counts_rep: score_blocks(q_rep, matrix_cpu),
+        )
+        rep = int(counts[0])
+        return mask_query_scores(raw, [rep] * int(q_cpu.shape[0]), valid_cpu), None
     rows = [score_blocks(q_cpu[local], matrix_cpu) for local in range(int(q_cpu.shape[0]))]
     stacked = torch.stack(rows, dim=0) if rows else torch.zeros(0, max_count, dtype=torch.float64)
-    scores = mask_query_scores(stacked, counts, valid.detach().to(device="cpu"))
+    scores = mask_query_scores(stacked, counts, valid_cpu)
     return scores, None
 
 
@@ -1072,11 +1537,13 @@ def _requests(meta, n_tokens: int) -> list[tuple[int, int, int, int]]:
     out = []
     covered = 0
     for req, q_len in enumerate(lengths):
+        if q_len == 0:
+            continue
         if covered >= n_tokens:
             break
         if covered + q_len > n_tokens:
             raise RuntimeError("QSA step splits a request")
-        seq_len = _seq_len(meta, req)
+        seq_len = _request_seq_len(meta, req, q_len)
         out.append((req, covered, q_len, seq_len))
         covered += q_len
     if covered != n_tokens:
@@ -1085,18 +1552,47 @@ def _requests(meta, n_tokens: int) -> list[tuple[int, int, int, int]]:
 
 
 def _seq_len(meta, req: int) -> int:
-    """Use the device's corrected lengths, not the optimistic CPU bound.
+    """Live corrected length. Never copies a device tensor to the host.
 
-    Async MTP corrects rejected drafts on the device before constructing
-    seq_lens. The metadata object is created for each forward; cache one
-    device-to-host copy on it for the full-attention layers in that forward.
-    This synchronization is temporary until selection is fully on device.
+    CPU planners read ``meta.seq_lens`` in place, so a draft step that
+    advances the tensor is visible without a host snapshot. XPU decode
+    does not call this: ``_run_graph_decode`` indexes the same tensor.
     """
-    lengths = getattr(meta, "_qsa_actual_seq_lens", None)
-    if lengths is None:
-        lengths = meta.seq_lens.detach().to(device="cpu").tolist()
-        meta._qsa_actual_seq_lens = lengths
-    return int(lengths[req])
+    seq = meta.seq_lens
+    if torch.device(seq.device).type != "cpu":
+        raise RuntimeError(
+            "QSA keeps seq_lens on device; refusing a host sync for request %d" % int(req)
+        )
+    return int(seq[req].item())
+
+
+def _prefill_host_seq_len(meta, req: int) -> int:
+    """One host copy for the prefill planner.
+
+    Decode does not use this. The list is not cleared between draft tokens,
+    because those steps read ``meta.seq_lens`` on device. Sixteen full
+    attention layers in one prefill share the copy.
+    """
+    cached = getattr(meta, "_qsa_prefill_seq_lens_cpu", None)
+    if cached is None:
+        cached = [int(v) for v in meta.seq_lens.detach().to(device="cpu").tolist()]
+        meta._qsa_prefill_seq_lens_cpu = cached
+    return int(cached[req])
+
+
+def _request_seq_len(meta, req: int, q_len: int) -> int:
+    """Host length for the Python planner.
+
+    CPU reads stay live. Device prefill (``q_len > 16``) copies the batch
+    once per metadata object. A device decode that did not take the graph
+    body reads one live scalar and does not cache it, so a draft step that
+    advances ``seq_lens`` in place cannot observe a stale host list.
+    """
+    if torch.device(meta.seq_lens.device).type == "cpu":
+        return _seq_len(meta, req)
+    if int(q_len) <= 16:
+        return int(meta.seq_lens[req].item())
+    return _prefill_host_seq_len(meta, req)
 
 
 def _step_tokens(query: torch.Tensor, meta) -> int:
@@ -1287,3 +1783,50 @@ def _wrap_block_copy() -> None:
 
     wrapped._qsa_wrapped = True  # type: ignore[attr-defined]
     utils.copy_kv_cache_blocks_inplace = wrapped
+
+
+# Injected only into the isolated exact-tiled eager runtime after selection.
+def _owned_capture(q, matrix, valid, scores, visible, counts, cells, block_row, cache, weights, hyper, layer_idx, start, seq_len, pages_per_block):
+    import os, pathlib, json, hashlib, time, torch
+    root = pathlib.Path('/owned')
+    if matrix.shape[0] < 8600 or not (root/'request-started').exists():
+        return
+    capture = getattr(torch.xpu, 'is_current_stream_capturing', None)
+    if not callable(capture):
+        raise RuntimeError('capture-state API unavailable')
+    if capture():
+        raise RuntimeError('refusing capture during graph recording')
+    try:
+        (root/'capture-lock').mkdir()
+    except FileExistsError:
+        return
+    try:
+        nr = min(8, int(q.shape[0]))
+        rows = torch.linspace(0, int(q.shape[0])-1, nr, dtype=torch.int64, device=q.device)
+        logical_tokens = torch.arange(int(matrix.shape[0]), dtype=torch.int64) * int(hyper.ratio)
+        physical_ids = torch.div(cache.logical_slots(block_row, logical_tokens, int(pages_per_block)), int(hyper.ratio), rounding_mode='floor')
+        data = {'query': q.index_select(0, rows).detach().cpu(), 'pooled': matrix.detach().cpu(),
+                'valid': valid.detach().cpu(), 'masked_scores': scores.index_select(0,rows).detach().cpu(),
+                'visible_tokens': visible.index_select(0,rows).detach().cpu(), 'physical_micro_ids': physical_ids.detach().cpu(),
+                'block_row': block_row.detach().cpu(), 'rows': rows.cpu(),
+                'counts': torch.tensor(counts, dtype=torch.int32).index_select(0, rows.cpu()),
+                'cells': torch.tensor(cells, dtype=torch.int32).index_select(0, rows.cpu()),
+                'weights': {name: getattr(weights,name).detach().cpu() for name in ('q_proj','k_proj','q_norm','k_norm','k_block_norm')},
+                'metadata': {'layer_idx':int(layer_idx),'seq_len':int(seq_len),'tile_start':int(start),
+                  'ratio':int(hyper.ratio),'n_sel':int(hyper.n_sel),'budget_tokens':int(hyper.budget),
+                  'pages_per_block':int(pages_per_block),'rank':os.environ.get('LOCAL_RANK'),
+                  'pid':os.getpid(),'time_ns':time.time_ns(),'score':'original masked production scorer output',
+                  'heads_reduction':'unweighted sum of relu per-head dot products',
+                  'graph_recording':False,'rows_sampled':nr}}
+        tmp=root/'capture.pt.tmp'; dest=root/'capture.pt'
+        torch.save(data,tmp); os.replace(tmp,dest)
+        with dest.open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
+        def desc(v):
+            if isinstance(v,dict): return {k:desc(x) for k,x in v.items()}
+            if isinstance(v,torch.Tensor): return {'shape':list(v.shape),'dtype':str(v.dtype)}
+            return v
+        info={'sha256':digest,'bytes':dest.stat().st_size,'contents':desc(data)}
+        (root/'capture-manifest.json').write_text(json.dumps(info,indent=2))
+    except Exception as exc:
+        (root/'capture-error.txt').write_text(repr(exc))
+        raise

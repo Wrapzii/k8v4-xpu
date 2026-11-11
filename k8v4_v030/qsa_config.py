@@ -80,3 +80,24 @@ def full_attention_layers(
 def weights_path() -> str | None:
     raw = os.environ.get("K8V4_QSA_WEIGHTS", "").strip()
     return raw or None
+
+
+def pooled_key_dtype() -> str:
+    """Storage of indexer pooled keys. Default ``fp32`` matches today's bytes.
+
+    ``K8V4_QSA_POOLED_KEY_DTYPE`` unset, empty, ``fp32``, or ``float32``
+    keeps FP32 pooled keys. ``int8`` or ``i8`` selects per-row symmetric
+    INT8 plus one FP32 scale per row. Any other value is an error.
+    """
+    raw = os.environ.get("K8V4_QSA_POOLED_KEY_DTYPE")
+    if raw is None:
+        return "fp32"
+    key = raw.strip()
+    if key in ("", "fp32", "float32"):
+        return "fp32"
+    if key in ("int8", "i8"):
+        return "int8"
+    raise ValueError(
+        "K8V4_QSA_POOLED_KEY_DTYPE must be unset, empty, fp32, float32, int8, or i8 (got %r)"
+        % (raw,)
+    )

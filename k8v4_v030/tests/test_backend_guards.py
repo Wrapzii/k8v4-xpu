@@ -69,6 +69,16 @@ class BackendForwardGuardTest(unittest.TestCase):
                 None, query, query, query, cache, self._metadata(PageLayout(4)), output
             )
 
+    def test_draft_update_does_not_drop_seq_lens(self):
+        from k8v4_v030.backend import Xe2K8V4MetadataBuilder
+
+        meta = self._metadata(PageLayout(2))
+        meta._qsa_actual_seq_lens = meta.seq_lens
+        meta._qsa_max_slot = 3
+        Xe2K8V4MetadataBuilder.update_draft_decode_metadata(None, meta)
+        self.assertIs(meta._qsa_actual_seq_lens, meta.seq_lens)
+        self.assertEqual(meta._qsa_max_slot, 3)
+
 
 if __name__ == "__main__":
     unittest.main()

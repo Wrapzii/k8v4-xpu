@@ -37,6 +37,21 @@ def _cascade_prealloc(device, kv_cache_spec) -> None:
         _cascade.get(torch.device(device), int(getattr(kv_cache_spec, "num_kv_heads", 2)), 2)
     except Exception as exc:  # never block start-up; the op falls back to serial
         print("k8v4 cascade prealloc skipped:", exc, flush=True)
+
+
+def _draft_window_prealloc(device, vllm_config) -> None:
+    """Reserve packed block-table scratch before XPU graph capture."""
+    from k8v4_v030 import draft_window
+
+    if draft_window.window_config()[0] <= 0:
+        return
+    try:
+        max_len = int(vllm_config.model_config.max_model_len)
+        max_seqs = int(vllm_config.scheduler_config.max_num_seqs)
+        cols = max(1, (max_len + PAGE - 1) // PAGE)
+        draft_window.preallocate(device, max_seqs, cols)
+    except Exception as exc:
+        print("k8v4 draft-window prealloc skipped:", exc, flush=True)
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
@@ -158,6 +173,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
 
     def __init__(self, kv_cache_spec, layer_names, vllm_config, device):
         _cascade_prealloc(device, kv_cache_spec)
+        _draft_window_prealloc(device, vllm_config)
         super().__init__(kv_cache_spec, layer_names, vllm_config, device)
         # The spec carries this rank's KV head count (2 on a TP2 rank, 4 on
         # one GPU); scratch geometry follows it instead of a module constant.
@@ -211,14 +227,14 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
 
 
     def update_draft_decode_metadata(self, metadata) -> None:
-        """Drop host copies so the next eager read sees the advanced seq_lens.
+        """Leave corrected lengths on the device tensor.
 
-        The draft loop updates that tensor in place and passes the new token
-        slot through the forward context. A cached host length from the
-        previous draft token would attend the wrong block.
+        The draft loop advances ``metadata.seq_lens`` in place. QSA decode
+        reads that tensor directly, the same way ``_run_graph_decode`` does.
+        Clearing a host snapshot here forced a device-to-host sync on every
+        draft token. There is no host snapshot to drop.
         """
-        metadata._qsa_actual_seq_lens = None
-        metadata._qsa_max_slot = None
+        del metadata
 
     def build(
         self,
@@ -366,11 +382,11 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             if try_sparse_forward(self, layer, query, cache, attn_metadata, output):
                 return output
         if attn_metadata.packed_q_len:
-            self._packed(query, cache, attn_metadata, output)
+            self._packed(query, cache, attn_metadata, output, layer=layer)
             return output
         if _capturing():
             raise RuntimeError("K8/V4 prefill cannot run inside an XPU graph")
-        self._eager(query, cache, attn_metadata, output)
+        self._eager(query, cache, attn_metadata, output, layer=layer)
         return output
 
     def _packed(
@@ -379,6 +395,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         cache: torch.Tensor,
         meta: Xe2K8V4Metadata,
         output: torch.Tensor,
+        layer=None,
     ) -> None:
         q_len = int(meta.packed_q_len)
         if q_len < 1 or q_len > DECODE_MAX_T:
@@ -387,7 +404,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         if len(segments) != 1 or segments[0][2] != q_len:
             raise RuntimeError("packed metadata does not match query starts")
         first, count, _ = segments[0]
-        self._attn_batch(query, cache, meta, output, first, count, q_len)
+        self._attn_batch(query, cache, meta, output, first, count, q_len, layer=layer)
 
     def _attn_batch(
         self,
@@ -398,6 +415,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         first: int,
         count: int,
         q_len: int,
+        layer=None,
     ) -> None:
         _require_page_ratio(cache, meta.pages_per_block)
         tok0, width = token_span(meta.query_starts, first, count, q_len)
@@ -419,6 +437,15 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                 % (seq_lens.dtype, tuple(seq_lens.stride()))
             )
         seq_lens = seq_lens.reshape(-1).narrow(0, first, count)
+        from k8v4_v030 import draft_window
+
+        if draft_window.should_apply(layer):
+            # Pack sink + tail-window pages only. Shapes stay the same so a
+            # captured XPU graph can replay this. Target / QSA layers do not
+            # take this branch (should_apply requires an MTP module).
+            block_table, seq_lens = draft_window.apply_read_view(
+                block_table, seq_lens, meta.pages_per_block
+            )
         scratch = get_scratch(query.device, self.layout)
         q_buf, out_buf = scratch.attention_pair(width)
         q_buf.copy_(query.narrow(0, tok0, width))
@@ -475,6 +502,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         cache: torch.Tensor,
         meta: Xe2K8V4Metadata,
         output: torch.Tensor,
+        layer=None,
     ) -> None:
         views = bind_regions(cache, self.layout)
         _require_page_ratio(cache, meta.pages_per_block)
@@ -485,7 +513,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             if q_len == 0:
                 continue
             if 1 <= q_len <= DECODE_MAX_T:
-                self._attn_batch(query, cache, meta, output, first, count, q_len)
+                self._attn_batch(query, cache, meta, output, first, count, q_len, layer=layer)
                 continue
             for offset in range(count):
                 req = first + offset
@@ -511,6 +539,11 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
 
 
 def _store_kv(key, value, cache, slot_mapping, ntok: int, layout) -> None:
+    if os.environ.get("K8V4_QSA_V2_EXACT7", "0") == "1":
+        from k8v4_v030.qsa_runtime import _verified_v2_graph_padding
+        padding = _verified_v2_graph_padding(ntok, slot_mapping.device)
+        if padding is not None:
+            slot_mapping = slot_mapping.masked_fill(padding, -1)
     scratch = get_scratch(key.device, layout)
     k_buf, v_buf = scratch.store_pair(ntok)
     k_buf.copy_(key.narrow(0, 0, ntok))

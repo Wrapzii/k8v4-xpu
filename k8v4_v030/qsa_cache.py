@@ -19,7 +19,9 @@ import os
 import torch
 
 from k8v4_v030.layout import PAGE
-from k8v4_v030.qsa_ref import QsaHyper, pool_blocks
+from k8v4_v030.qsa_config import pooled_key_dtype
+from k8v4_v030.qsa_pooled_quant import dequantize_pooled_rows, quantize_pooled_rows
+from k8v4_v030.qsa_ref import QsaHyper, clear_prepared, pool_blocks
 
 
 class QsaBlockCache:
@@ -45,7 +47,9 @@ class QsaBlockCache:
             raise ValueError("block_size must be a multiple of the K8/V4 page")
         self.lazy = os.environ.get("K8V4_QSA_LAZY_CACHE", "0") == "1"
         floor_tokens = int(os.environ.get("K8V4_QSA_GRAPH_TOKENS", "0") or "0")
-        if self.lazy:
+        # Graph replay can change physical block IDs without Python re-entry.
+        # Reserve all physical slots before capture; never grow captured storage.
+        if self.lazy and os.environ.get("K8V4_QSA_GRAPH", "0") != "1":
             base_blocks = 2
             if floor_tokens > 0:
                 base_blocks = max(base_blocks, (floor_tokens + self.block_size - 1) // self.block_size)
@@ -57,8 +61,17 @@ class QsaBlockCache:
         self.raw = torch.zeros(slots, dim, dtype=dtype, device=dev)
         self.pos = torch.zeros(slots, 4, dtype=torch.int32, device=dev)
         self.filled = torch.zeros(slots, dtype=torch.bool, device=dev)
-        self.pooled = torch.zeros(slots // self.hyper.ratio, dim, dtype=dtype, device=dev)
-        self.pool_valid = torch.zeros(slots // self.hyper.ratio, dtype=torch.bool, device=dev)
+        rows = slots // self.hyper.ratio
+        # Unset / fp32 keeps the constructor dtype (fp32, or fp64 in tests).
+        # INT8 allocates the pooled matrix as int8 plus one fp32 scale per row.
+        self.pooled_key_dtype = pooled_key_dtype()
+        if self.pooled_key_dtype == "int8":
+            self.pooled = torch.zeros(rows, dim, dtype=torch.int8, device=dev)
+            self.pooled_scale = torch.zeros(rows, dtype=torch.float32, device=dev)
+        else:
+            self.pooled = torch.zeros(rows, dim, dtype=dtype, device=dev)
+            self.pooled_scale = None
+        self.pool_valid = torch.zeros(rows, dtype=torch.bool, device=dev)
 
     @property
     def num_slots(self) -> int:
@@ -89,8 +102,11 @@ class QsaBlockCache:
         self.raw = grow(self.raw, (target, self.hyper.dim))
         self.pos = grow(self.pos, (target, 4))
         self.filled = grow(self.filled, (target,))
-        self.pooled = grow(self.pooled, (target // self.hyper.ratio, self.hyper.dim))
-        self.pool_valid = grow(self.pool_valid, (target // self.hyper.ratio,))
+        grown_rows = target // self.hyper.ratio
+        self.pooled = grow(self.pooled, (grown_rows, self.hyper.dim))
+        if self.pooled_scale is not None:
+            self.pooled_scale = grow(self.pooled_scale, (grown_rows,))
+        self.pool_valid = grow(self.pool_valid, (grown_rows,))
 
     def block_slice(self, block_id: int) -> slice:
         block_id = int(block_id)
@@ -177,7 +193,12 @@ class QsaBlockCache:
         raw = self.raw[windows[complete]]
         first = self.pos[windows[complete][:, 0]]
         pooled = pool_blocks(raw, block_norm, first, self.hyper)
-        self.pooled[micros[complete]] = pooled.to(dtype=self.pooled.dtype)
+        if self.pooled_scale is None:
+            self.pooled[micros[complete]] = pooled.to(dtype=self.pooled.dtype)
+        else:
+            quantized, scales = quantize_pooled_rows(pooled)
+            self.pooled[micros[complete]] = quantized
+            self.pooled_scale[micros[complete]] = scales
 
     def copy_blocks(self, src_ids: list[int] | torch.Tensor, dst_ids: list[int] | torch.Tensor) -> None:
         """Copy whole physical blocks, including pooled micro-blocks inside them."""
@@ -199,6 +220,8 @@ class QsaBlockCache:
             sm = slice(src_id * micros, (src_id + 1) * micros)
             dm = slice(dst_id * micros, (dst_id + 1) * micros)
             self.pooled[dm] = self.pooled[sm]
+            if self.pooled_scale is not None:
+                self.pooled_scale[dm] = self.pooled_scale[sm]
             self.pool_valid[dm] = self.pool_valid[sm]
 
     def logical_slots(
@@ -258,11 +281,16 @@ class QsaBlockCache:
         count = int(count)
         if count < 1:
             empty = self.pooled[:0]
+            if empty.dtype == torch.int8:
+                empty = dequantize_pooled_rows(empty, self.pooled_scale[:0])
             return empty, self.pool_valid[:0]
         tokens = torch.arange(count, dtype=torch.int64) * self.hyper.ratio
         slots = self.logical_slots(block_row, tokens, pages_per_block)
         micros = torch.div(slots, self.hyper.ratio, rounding_mode="floor")
-        return self.pooled.index_select(0, micros), self.pool_valid.index_select(0, micros)
+        selected = self.pooled.index_select(0, micros)
+        if selected.dtype == torch.int8:
+            selected = dequantize_pooled_rows(selected, self.pooled_scale.index_select(0, micros))
+        return selected, self.pool_valid.index_select(0, micros)
 
     def pooled_row(self, block_row: torch.Tensor, cell: int, pages_per_block: int) -> torch.Tensor | None:
         """Pooled key of the micro-block that contains ``cell``, or None if it is open."""
@@ -270,7 +298,10 @@ class QsaBlockCache:
         micro = slot // self.hyper.ratio
         if not bool(self.pool_valid[micro]):
             return None
-        return self.pooled[micro]
+        row = self.pooled[micro]
+        if row.dtype == torch.int8:
+            row = dequantize_pooled_rows(row.unsqueeze(0), self.pooled_scale[micro:micro + 1]).squeeze(0)
+        return row
 
 
 class QsaCacheBank:
@@ -278,6 +309,8 @@ class QsaCacheBank:
 
     def __init__(self, hyper: QsaHyper | None = None) -> None:
         self.hyper = hyper or QsaHyper()
+        self.compact = os.environ.get('K8V4_QSA_COMPACT_TAIL','0') == '1'
+        self.pooled_key_dtype = pooled_key_dtype()
         self.layers: dict[int, QsaBlockCache] = {}
 
     def layer(
@@ -288,9 +321,20 @@ class QsaCacheBank:
         device: torch.device | str | None = None,
     ) -> QsaBlockCache:
         layer_idx = int(layer_idx)
+        if self.compact != (os.environ.get('K8V4_QSA_COMPACT_TAIL','0') == '1'):
+            raise RuntimeError('QSA cache storage mode changed after bank creation')
+        if self.pooled_key_dtype != pooled_key_dtype():
+            raise RuntimeError('QSA pooled key dtype changed after bank creation')
         current = self.layers.get(layer_idx)
         if current is None:
-            current = QsaBlockCache(num_blocks, block_size, self.hyper, device=device)
+            if self.compact:
+                dev = torch.device('cpu' if device is None else device)
+                if dev.type != 'xpu' or dev.index is None:
+                    raise RuntimeError('compact serving cache requires an explicit XPU index')
+                from k8v4_v030.qsa_tail_cache import QsaXpuTailCache
+                current = QsaXpuTailCache(num_blocks,block_size,hyper=self.hyper,device=device)
+            else:
+                current = QsaBlockCache(num_blocks, block_size, self.hyper, device=device)
             self.layers[layer_idx] = current
             return current
         if current.num_blocks != int(num_blocks) or current.block_size != int(block_size):
@@ -331,3 +375,4 @@ def all_banks() -> list[QsaCacheBank]:
 
 def reset_caches() -> None:
     _BANKS.clear()
+    clear_prepared()

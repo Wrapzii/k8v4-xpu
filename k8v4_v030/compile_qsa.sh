@@ -5,8 +5,8 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-OUT=${QSA_OUT:-/mnt/hdd-500gb/model-validation/qsa-k8v4}
-TOOL=${QSA_ICPX_ROOT:-/mnt/hdd-500gb/model-validation/launch80-20261013/perf-attnprof-20261104/toolchain-oneapi-2026/opt-intel}
+OUT=${QSA_OUT:-$ROOT/build/qsa}
+TOOL=${QSA_ICPX_ROOT:-/opt/intel}
 IMAGE=${QSA_BUILD_IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-swift-bake-v2}
 mkdir -p "$OUT" "$OUT/tmp"
 test -x "$TOOL/oneapi/compiler/2026.0/bin/icpx"

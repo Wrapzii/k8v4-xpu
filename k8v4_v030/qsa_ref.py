@@ -69,11 +69,30 @@ def _compute_dtype(values: torch.Tensor) -> torch.dtype:
 
 
 _PROJ_READY: dict[tuple, torch.Tensor] = {}
+# Keep the source tensor alive so id(weight) cannot be recycled onto a new allocation.
+_PROJ_HELD: dict[int, torch.Tensor] = {}
+
+
+def clear_prepared() -> None:
+    """Drop cached projections. Tests call this between banks."""
+    _PROJ_READY.clear()
+    _PROJ_HELD.clear()
 
 
 def _prepared(weight: torch.Tensor, dtype: torch.dtype, device: torch.device, transpose: bool) -> torch.Tensor:
-    """Reuse one contiguous copy. Building it during XPU graph capture waits and aborts."""
-    key = (int(weight.data_ptr()), str(dtype), str(device), bool(transpose))
+    """Reuse one contiguous copy. Building it during XPU graph capture waits and aborts.
+
+    The key is the tensor object, not its data pointer. A freed weight can
+    have its address reused by a different shape, and a pointer-only cache
+    then feeds rmsnorm the previous vector.
+    """
+    key = (
+        id(weight),
+        tuple(int(n) for n in weight.shape),
+        str(dtype),
+        str(device),
+        bool(transpose),
+    )
     got = _PROJ_READY.get(key)
     if got is not None:
         return got
@@ -91,6 +110,7 @@ def _prepared(weight: torch.Tensor, dtype: torch.dtype, device: torch.device, tr
     if transpose:
         out = out.transpose(0, 1)
     out = out.contiguous()
+    _PROJ_HELD[id(weight)] = weight
     _PROJ_READY[key] = out
     return out
 

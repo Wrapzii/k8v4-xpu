@@ -70,7 +70,7 @@ class CpuContractTest(unittest.TestCase):
         block_row = torch.arange(1, dtype=torch.int32)
         previous = os.environ.get("XE2_QSA_LIB")
         os.environ["XE2_QSA_LIB"] = (
-            "/mnt/hdd-500gb/model-validation/qsa-k8v4/no-such-libxe2_qsa.so"
+            "/nonexistent/no-such-libxe2_qsa.so"
         )
         try:
             out = attend_selected(torch.tensor(query), views, block_row, 4, [[0, 1, 2, 3]], 1)
