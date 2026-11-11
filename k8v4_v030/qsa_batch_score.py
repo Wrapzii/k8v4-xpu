@@ -17,6 +17,10 @@ CPU numerics are the fp64 ``score_blocks`` contract. The XPU kernel is the
 same fp32 subgroup dot as ``qsa_score_paged`` (sum of relu over 4 heads, no
 1/sqrt(128)). Finite XPU values should match the fp64 rows within a few ulps
 of fp32; columns past the count or an invalid pooled row are ``-inf``.
+
+INT8 pooled keys are dequantized inside ``qsa_score_paged_multi_i8`` for the
+rows the kernel actually loads. A full-pool cast is the fallback when that
+entry point is not in the loaded library.
 """
 
 from __future__ import annotations
@@ -104,6 +108,17 @@ def _as_fp32_pooled(pooled: torch.Tensor, scales: torch.Tensor | None) -> torch.
     if pooled.dtype != torch.int8:
         return pooled
     return dequantize_pooled_rows(pooled, scales)
+
+
+def _batched_i8_kernel(native, pooled: torch.Tensor, scales) -> bool:
+    """The companion library can apply int8 row scales inside the score.
+
+    Decoding used to cast every pooled row to fp32 on each full-attention
+    layer. The int8 entry point loads a row only when that column is live.
+    """
+    if native is None or pooled.dtype != torch.int8 or not torch.is_tensor(scales):
+        return False
+    return hasattr(native, "qsa_score_paged_multi_i8")
 
 
 def _page_index(block_row: torch.Tensor, n_blocks: int, ratio: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -216,10 +231,10 @@ def score_paged_multi(query: torch.Tensor, pooled: torch.Tensor, valid: torch.Te
     ratio = int(pages_per_block)
     if ratio < 1:
         raise ValueError("pages_per_block")
-    pooled_f = _as_fp32_pooled(pooled, scales)
-    if query.device.type == "cpu" or pooled_f.device.type == "cpu":
+    if query.device.type == "cpu" or pooled.device.type == "cpu":
         # Keep the caller's precision. ``score_blocks`` promotes to fp64.
         # Rounding to fp32 here would disagree with the CPU reference.
+        pooled_f = _as_fp32_pooled(pooled, scales)
         q = query.detach().to(device="cpu")
         table = block_table.detach().to(device="cpu", dtype=torch.int32)
         count_cpu = counts.detach().to(device="cpu", dtype=torch.int32).reshape(-1)
@@ -231,8 +246,19 @@ def score_paged_multi(query: torch.Tensor, pooled: torch.Tensor, valid: torch.Te
     count_x = counts.reshape(-1)
     if count_x.dtype != torch.int32 or not count_x.is_contiguous():
         count_x = count_x.to(dtype=torch.int32).contiguous()
-    pool = pooled_f if pooled_f.dtype == torch.float32 and pooled_f.is_contiguous() else pooled_f.contiguous().float()
     mask = valid if valid.dtype == torch.bool and valid.is_contiguous() else valid.to(dtype=torch.bool).contiguous()
+    if _batched_i8_kernel(native, pooled, scales):
+        if int(scales.reshape(-1).numel()) != int(pooled.shape[0]):
+            raise ValueError("one fp32 scale per pooled row")
+        pool_i8 = pooled if pooled.is_contiguous() else pooled.contiguous()
+        scale = scales.reshape(-1)
+        if scale.dtype != torch.float32 or not scale.is_contiguous():
+            scale = scale.to(dtype=torch.float32).contiguous()
+        scores = torch.full((int(q.shape[0]), width), float("-inf"), dtype=torch.float32, device=q.device)
+        native.qsa_score_paged_multi_i8(q, pool_i8, scale, mask, table, count_x, scores, ratio)
+        return scores
+    pooled_f = _as_fp32_pooled(pooled, scales)
+    pool = pooled_f if pooled_f.dtype == torch.float32 and pooled_f.is_contiguous() else pooled_f.contiguous().float()
     if native is not None and hasattr(native, "qsa_score_paged_multi"):
         scores = torch.full((int(q.shape[0]), width), float("-inf"), dtype=torch.float32, device=q.device)
         native.qsa_score_paged_multi(q, pool, mask, table, count_x, scores, ratio)

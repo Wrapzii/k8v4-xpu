@@ -33,40 +33,14 @@ void check_xpu(const at::Tensor &t, const char *name) {
   TORCH_CHECK(t.is_xpu(), name, " must be XPU");
 }
 
-void qsa_score_paged_multi(const at::Tensor &query, const at::Tensor &pooled,
-                           const at::Tensor &valid, const at::Tensor &block_table,
-                           const at::Tensor &counts, at::Tensor scores, int64_t ratio) {
-  for (const auto &t : {query, pooled, valid, block_table, counts, scores}) {
-    check_xpu(t, "qsa_score_paged_multi tensor");
-    TORCH_CHECK(t.is_contiguous() && t.device() == query.device(),
-                "QSA batched score device/layout");
-  }
-  TORCH_CHECK(query.scalar_type() == at::kFloat && pooled.scalar_type() == at::kFloat &&
-                  valid.scalar_type() == at::kBool && block_table.scalar_type() == at::kInt &&
-                  counts.scalar_type() == at::kInt && scores.scalar_type() == at::kFloat,
-              "QSA batched score dtypes");
-  TORCH_CHECK(query.dim() == 3 && query.size(1) == IDX_HEADS && query.size(2) == D_IDX &&
-                  pooled.dim() == 2 && pooled.size(1) == D_IDX &&
-                  valid.numel() == pooled.size(0) && block_table.dim() == 2 &&
-                  counts.dim() == 1 && scores.dim() == 2 &&
-                  block_table.size(0) == query.size(0) && counts.size(0) == query.size(0) &&
-                  scores.size(0) == query.size(0) && ratio >= 1,
-              "QSA batched score shapes");
-  const int requests = static_cast<int>(query.size(0));
-  const int nb = static_cast<int>(scores.size(1));
-  const int np = static_cast<int>(pooled.size(0));
-  const int bt_n = static_cast<int>(block_table.size(1));
-  TORCH_CHECK(requests > 0 && nb > 0 && bt_n > 0, "QSA batched score is empty");
-  TORCH_CHECK(((int64_t)nb * 4 + PAGE - 1) / PAGE <= (int64_t)bt_n * ratio,
-              "QSA batched score block table capacity");
-  const auto *qp = query.data_ptr<float>();
-  const auto *kp = pooled.data_ptr<float>();
-  const auto *ok = valid.data_ptr<bool>();
-  const auto *table = block_table.data_ptr<int32_t>();
-  const auto *ct = counts.data_ptr<int32_t>();
-  auto *dst = scores.data_ptr<float>();
-  auto &queue = current_xpu_queue();
-  const int ratio_i = static_cast<int>(ratio);
+// kInt8 loads the pooled row as int8 and applies the per-row scale in
+// registers. That is the same value as dequantize_pooled_rows (int8 cast to
+// fp32, then multiply by the row scale) and it does not materialize the
+// full pool. The fp32 entry point is unchanged.
+template <bool kInt8>
+void submit_score(sycl::queue &queue, const float *qp, const float *kp, const int8_t *ip,
+                  const float *sp, const bool *ok, const int32_t *table, const int32_t *ct,
+                  float *dst, int requests, int nb, int np, int bt_n, int ratio_i) {
   const size_t pairs = static_cast<size_t>(requests) * static_cast<size_t>(nb);
   queue.submit([&](sycl::handler &h) {
     h.parallel_for(
@@ -95,15 +69,25 @@ void qsa_score_paged_multi(const at::Tensor &query, const at::Tensor &pooled,
             return;
           }
           auto sg = it.get_sub_group();
-          const float *kv = kp + micro * D_IDX + static_cast<int64_t>(lane) * 8;
           float total = 0.f;
 #pragma unroll
           for (int head = 0; head < IDX_HEADS; ++head) {
             const float *qv = qp + (static_cast<int64_t>(req) * IDX_HEADS + head) * D_IDX +
                               static_cast<int64_t>(lane) * 8;
             float partial = 0.f;
+            if constexpr (kInt8) {
+              const int8_t *src = ip + micro * D_IDX + static_cast<int64_t>(lane) * 8;
+              const float scale = sp[micro];
 #pragma unroll
-            for (int d = 0; d < 8; ++d) partial += qv[d] * kv[d];
+              for (int d = 0; d < 8; ++d) {
+                const float kv = static_cast<float>(src[d]) * scale;
+                partial += qv[d] * kv;
+              }
+            } else {
+              const float *kv = kp + micro * D_IDX + static_cast<int64_t>(lane) * 8;
+#pragma unroll
+              for (int d = 0; d < 8; ++d) partial += qv[d] * kv[d];
+            }
             partial = sycl::reduce_over_group(sg, partial, sycl::plus<float>());
             total += sycl::fmax(partial, 0.f);
           }
@@ -112,14 +96,79 @@ void qsa_score_paged_multi(const at::Tensor &query, const at::Tensor &pooled,
   });
 }
 
+void check_score_args(const at::Tensor &query, const at::Tensor &pooled, const at::Tensor &valid,
+                      const at::Tensor &block_table, const at::Tensor &counts, const at::Tensor &scores,
+                      int64_t ratio, const char *what) {
+  for (const auto &t : {query, pooled, valid, block_table, counts, scores}) {
+    check_xpu(t, what);
+    TORCH_CHECK(t.is_contiguous() && t.device() == query.device(),
+                "QSA batched score device/layout");
+  }
+  TORCH_CHECK(valid.scalar_type() == at::kBool && block_table.scalar_type() == at::kInt &&
+                  counts.scalar_type() == at::kInt && scores.scalar_type() == at::kFloat &&
+                  query.scalar_type() == at::kFloat,
+              "QSA batched score dtypes");
+  TORCH_CHECK(query.dim() == 3 && query.size(1) == IDX_HEADS && query.size(2) == D_IDX &&
+                  pooled.dim() == 2 && pooled.size(1) == D_IDX &&
+                  valid.numel() == pooled.size(0) && block_table.dim() == 2 &&
+                  counts.dim() == 1 && scores.dim() == 2 &&
+                  block_table.size(0) == query.size(0) && counts.size(0) == query.size(0) &&
+                  scores.size(0) == query.size(0) && ratio >= 1,
+              "QSA batched score shapes");
+  const int requests = static_cast<int>(query.size(0));
+  const int nb = static_cast<int>(scores.size(1));
+  const int bt_n = static_cast<int>(block_table.size(1));
+  TORCH_CHECK(requests > 0 && nb > 0 && bt_n > 0, "QSA batched score is empty");
+  TORCH_CHECK(((int64_t)nb * 4 + PAGE - 1) / PAGE <= (int64_t)bt_n * ratio,
+              "QSA batched score block table capacity");
+}
+
+void qsa_score_paged_multi(const at::Tensor &query, const at::Tensor &pooled,
+                           const at::Tensor &valid, const at::Tensor &block_table,
+                           const at::Tensor &counts, at::Tensor scores, int64_t ratio) {
+  check_score_args(query, pooled, valid, block_table, counts, scores, ratio,
+                   "qsa_score_paged_multi tensor");
+  TORCH_CHECK(pooled.scalar_type() == at::kFloat, "QSA batched score pooled dtype");
+  submit_score<false>(current_xpu_queue(), query.data_ptr<float>(), pooled.data_ptr<float>(),
+                      nullptr, nullptr, valid.data_ptr<bool>(), block_table.data_ptr<int32_t>(),
+                      counts.data_ptr<int32_t>(), scores.data_ptr<float>(),
+                      static_cast<int>(query.size(0)), static_cast<int>(scores.size(1)),
+                      static_cast<int>(pooled.size(0)), static_cast<int>(block_table.size(1)),
+                      static_cast<int>(ratio));
+}
+
+void qsa_score_paged_multi_i8(const at::Tensor &query, const at::Tensor &pooled,
+                              const at::Tensor &scales, const at::Tensor &valid,
+                              const at::Tensor &block_table, const at::Tensor &counts,
+                              at::Tensor scores, int64_t ratio) {
+  check_score_args(query, pooled, valid, block_table, counts, scores, ratio,
+                   "qsa_score_paged_multi_i8 tensor");
+  check_xpu(scales, "qsa_score_paged_multi_i8 scales");
+  TORCH_CHECK(pooled.scalar_type() == at::kChar, "QSA int8 score pooled dtype");
+  TORCH_CHECK(scales.is_contiguous() && scales.device() == query.device() &&
+                  scales.scalar_type() == at::kFloat && scales.dim() == 1 &&
+                  scales.numel() == pooled.size(0),
+              "QSA int8 score scales");
+  submit_score<true>(current_xpu_queue(), query.data_ptr<float>(), nullptr,
+                     pooled.data_ptr<int8_t>(), scales.data_ptr<float>(), valid.data_ptr<bool>(),
+                     block_table.data_ptr<int32_t>(), counts.data_ptr<int32_t>(),
+                     scores.data_ptr<float>(), static_cast<int>(query.size(0)),
+                     static_cast<int>(scores.size(1)), static_cast<int>(pooled.size(0)),
+                     static_cast<int>(block_table.size(1)), static_cast<int>(ratio));
+}
+
 }  // namespace
 
 TORCH_LIBRARY(xe2_qsa_batch, m) {
   m.def(
       "qsa_score_paged_multi(Tensor query, Tensor pooled, Tensor valid, Tensor block_table, "
       "Tensor counts, Tensor(a!) scores, int ratio) -> ()");
+  m.def(
+      "qsa_score_paged_multi_i8(Tensor query, Tensor pooled, Tensor scales, Tensor valid, "
+      "Tensor block_table, Tensor counts, Tensor(a!) scores, int ratio) -> ()");
 }
 
 TORCH_LIBRARY_IMPL(xe2_qsa_batch, XPU, m) {
   m.impl("qsa_score_paged_multi", &qsa_score_paged_multi);
+  m.impl("qsa_score_paged_multi_i8", &qsa_score_paged_multi_i8);
 }

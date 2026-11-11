@@ -13,7 +13,12 @@ import unittest
 
 import torch
 
-from k8v4_v030.qsa_batch_score import score_paged_multi, scored_width, static_score_width
+from k8v4_v030.qsa_batch_score import (
+    _batched_i8_kernel,
+    score_paged_multi,
+    scored_width,
+    static_score_width,
+)
 from k8v4_v030.qsa_pooled_quant import dequantize_pooled_rows
 from k8v4_v030.qsa_ref import score_blocks
 
@@ -178,6 +183,19 @@ class ScoreTest(unittest.TestCase):
         for block in range(4):
             expect = score_blocks(query[0].double(), pooled[block:block + 1])
             self.assertTrue(torch.allclose(got[0, block].double(), expect.reshape(())))
+
+    def test_int8_entry_point_is_selected_only_when_present(self):
+        class Ready:
+            def qsa_score_paged_multi_i8(self):
+                return None
+
+        pooled = torch.zeros(4, 128, dtype=torch.int8)
+        scales = torch.ones(4)
+        self.assertTrue(_batched_i8_kernel(Ready(), pooled, scales))
+        self.assertFalse(_batched_i8_kernel(Ready(), torch.zeros(4, 128), scales))
+        self.assertFalse(_batched_i8_kernel(object(), pooled, scales))
+        self.assertFalse(_batched_i8_kernel(Ready(), pooled, None))
+        self.assertFalse(_batched_i8_kernel(None, pooled, scales))
 
 
 if __name__ == "__main__":
