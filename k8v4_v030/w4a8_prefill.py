@@ -17,6 +17,12 @@ import os
 import torch
 
 SMALL_M_MAX = 128
+from k8v4_v030.small_m_band import enabled as _small_m_band_enabled
+from k8v4_v030.small_m_band import onednn_rows as _onednn_rows
+
+# Read once at import. The captured MLP op compares this cached flag.
+# Unset stays on the stock cutoff of 128.
+_SMALL_M_BAND = _small_m_band_enabled()
 _FINDER = None
 _ORIG_APPLY = None
 
@@ -159,7 +165,7 @@ def w4a8_gemm(quant_x, x_scale, x_zero, packed, weight_scale, weight_zp, group_s
 
 def _large_m(activation: torch.Tensor) -> bool:
     rows = activation.reshape(-1, activation.shape[-1]).shape[0]
-    return bool(rows > SMALL_M_MAX)
+    return bool(_onednn_rows(rows, band=_SMALL_M_BAND))
 
 
 def _mlp_linear(layer) -> bool:
@@ -236,13 +242,15 @@ def _w4a16_runtime(flat, packed, scales, zeros, group_size, bias):
 
 def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
     flat = x.reshape(-1, x.shape[-1])
-    branch = "w4a16" if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX else "w4a8"
+    rows = flat.shape[0]
+    use_onednn = _RUNTIME_ENABLED and _onednn_rows(rows, band=_SMALL_M_BAND)
+    branch = "w4a8" if use_onednn else "w4a16"
     if _DIAGNOSTICS and branch not in _BRANCH_LOGGED:
         import sys
         sys.stderr.write("k8v4_mlp_gemm: branch=%s rows=%s input=%s\n" %
                          (branch, flat.shape[0], x.dtype))
         _BRANCH_LOGGED.add(branch)
-    if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX:
+    if not use_onednn:
         return _w4a16_runtime(flat, packed, scales, zeros, group_size, bias)
     global _QUANT_COMPILED
     if _QUANT_COMPILED is None:
