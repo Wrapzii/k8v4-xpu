@@ -19,13 +19,15 @@ from k8v4_v030.qsa_config import RATIO
 
 logger = logging.getLogger("k8v4_v030.qsa_width")
 
-# Score blocks, not tokens. 8192 blocks is 32768 tokens at RATIO 4.
+# Score blocks, not tokens. 4096 blocks is 16384 tokens at RATIO 4.
+# An 8K ladder stays near 2500 blocks, so it selects 4096.
 # 2048 blocks is one step of an 8192-token prompt, then the next token
-# needs 2049. That bucket is not captured; dispatch uses 8192.
+# needs 2049. That bucket is not captured.
+# 8192 blocks is 32768 tokens. Contexts past 16384 tokens use it.
 # 32768 blocks is exactly 131072 tokens. The next token needs 32769
 # blocks and would select 65536, so a 131K window would not sit there.
 # 40960 blocks covers through 163840 tokens.
-BUCKETS = (8192, 40960, 65536)
+BUCKETS = (4096, 8192, 40960, 65536)
 
 _RUNNER = contextvars.ContextVar("k8v4_qsa_width_runner", default=None)
 _SCHED = contextvars.ContextVar("k8v4_qsa_width_sched", default=None)

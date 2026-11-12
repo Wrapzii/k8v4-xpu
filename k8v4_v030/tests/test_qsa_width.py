@@ -12,15 +12,18 @@ from k8v4_v030.qsa_width import (
 
 class WidthBucketTests(unittest.TestCase):
     def test_default_buckets_stay_inside_the_static_score(self):
-        self.assertEqual(buckets(), (8192, 40960, 65536))
+        self.assertEqual(buckets(), (4096, 8192, 40960, 65536))
 
     def test_blocks_cover_the_audit_rungs(self):
         self.assertEqual(blocks_needed(8192), 2048)
         self.assertEqual(blocks_needed(8193), 2049)
         self.assertEqual(blocks_needed(131072), 32768)
         self.assertEqual(blocks_needed(262144), 65536)
-        self.assertEqual(bucket_for_blocks(blocks_needed(8192)), 8192)
-        self.assertEqual(bucket_for_blocks(blocks_needed(8193)), 8192)
+        self.assertEqual(bucket_for_blocks(blocks_needed(8192)), 4096)
+        self.assertEqual(bucket_for_blocks(blocks_needed(8193)), 4096)
+        self.assertEqual(bucket_for_blocks(blocks_needed(10000)), 4096)
+        self.assertEqual(bucket_for_blocks(blocks_needed(16384)), 4096)
+        self.assertEqual(bucket_for_blocks(blocks_needed(16385)), 8192)
         self.assertEqual(bucket_for_blocks(blocks_needed(20000)), 8192)
         self.assertEqual(bucket_for_blocks(blocks_needed(32768)), 8192)
         self.assertEqual(bucket_for_blocks(blocks_needed(32769)), 40960)
