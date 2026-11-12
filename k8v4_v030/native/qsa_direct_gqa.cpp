@@ -259,7 +259,7 @@ void qsa_gqa6_split(const at::Tensor &query, const at::Tensor &k, const at::Tens
 
 }  // namespace
 
-TORCH_LIBRARY(xe2_qsa_batch, m) {
+TORCH_LIBRARY_FRAGMENT(xe2_qsa_batch, m) {
   m.def(
       "qsa_gqa6_split(Tensor query, Tensor k, Tensor ks, Tensor v, Tensor vs, Tensor vz, "
       "Tensor block_row, Tensor visible, Tensor(a!) partial, Tensor(b!) ml, Tensor(c!) out, "
