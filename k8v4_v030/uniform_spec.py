@@ -109,8 +109,11 @@ def install() -> bool:
 
     def _reserve_prefill_lookahead(self, request, num_computed_tokens, num_new_tokens):
         adjusted = current(self, request, num_computed_tokens, num_new_tokens)
-        return drop_partial_spec_window(
-            num_spec_tokens=int(getattr(self, "num_spec_tokens", 0) or 0),
+        from k8v4_v030.mtp_depth_by_batch import align_scheduled_window
+
+        return align_scheduled_window(
+            configured_k=int(getattr(self, "num_spec_tokens", 0) or 0),
+            num_running=len(getattr(self, "running", ()) or ()),
             num_new_tokens=int(adjusted),
             num_computed_tokens=int(num_computed_tokens),
             num_tokens=int(request.num_tokens),

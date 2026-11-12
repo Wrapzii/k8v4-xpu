@@ -21,3 +21,5 @@ from k8v4_v030.qsa_width import install_if_vllm_present as install_qsa_width
 
 install_if_vllm_present()
 install_qsa_width()
+from k8v4_v030.mtp_depth_by_batch import install_if_vllm_present as install_depth_by_batch
+install_depth_by_batch()
