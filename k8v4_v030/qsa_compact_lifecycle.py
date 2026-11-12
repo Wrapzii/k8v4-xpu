@@ -5,7 +5,55 @@ All host metadata is checked before the first native mutation.
 """
 from __future__ import annotations
 
+import os
 import torch
+
+_ASYNC_SLOT = None
+_ASYNC_EVENT = None
+_ASYNC_LOGGED = False
+
+
+def _publication_sync_enabled() -> bool:
+    """Default on. ``K8V4_QSA_PUBLICATION_SYNC=0`` skips the host read.
+
+    The all-reduce still runs on every rank. With the read skipped, the
+    reduced failure flag is copied to pinned host memory without waiting and
+    printed on a later step; it is not raised. The default keeps the
+    raising check.
+    """
+    return os.environ.get("K8V4_QSA_PUBLICATION_SYNC", "1") != "0"
+
+
+def _note_async_failure(failure) -> None:
+    """Queue a host-visible copy of the reduced flag. Do not wait.
+
+    execute_model calls this after replay, and sample_tokens calls it
+    again after the draft propose. A .item() on either call holds the
+    worker until the stream drains. Dense never calls this. The second
+    call can arrive before the first copy finishes, so a busy event
+    keeps its slot. A one-rank raise can deadlock the next collective,
+    so a nonzero flag is printed and not raised.
+    """
+    global _ASYNC_SLOT, _ASYNC_EVENT, _ASYNC_LOGGED
+    try:
+        if _ASYNC_EVENT is not None and _ASYNC_SLOT is not None:
+            if not bool(_ASYNC_EVENT.query()):
+                return
+            if not _ASYNC_LOGGED and float(_ASYNC_SLOT[0]) != 0.0:
+                _ASYNC_LOGGED = True
+                print("QSA_PUBLICATION async failure flag", flush=True)
+    except Exception:
+        pass
+    try:
+        if _ASYNC_SLOT is None:
+            _ASYNC_SLOT = torch.empty(1, dtype=torch.float32, pin_memory=True)
+        _ASYNC_SLOT.copy_(failure.detach(), non_blocking=True)
+        event = torch.xpu.Event()
+        event.record()
+        _ASYNC_EVENT = event
+    except Exception:
+        _ASYNC_EVENT = None
+
 
 from k8v4_v030.qsa_cache import all_banks
 from k8v4_v030.qsa_tail_cache import native_block_ids
@@ -55,8 +103,11 @@ def check_statuses_before_publication(statuses, *, device, tp_group):
     else:
         failure=torch.stack(unique).ne(0).any().to(dtype=torch.float32).reshape(1)
     failure=tp_group.all_reduce(failure)
-    if float(failure.item())!=0:
-        raise RuntimeError('compact cache failure before publication on a tensor-parallel rank')
+    if _publication_sync_enabled():
+        if float(failure.item())!=0:
+            raise RuntimeError('compact cache failure before publication on a tensor-parallel rank')
+        return
+    _note_async_failure(failure)
 
 
 def check_before_publication(*, device=None, tp_group=None):
