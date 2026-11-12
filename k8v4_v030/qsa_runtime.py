@@ -955,8 +955,13 @@ def _prepare_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layou
     }
 
 
-def _attend_graph_decode(state, scores) -> None:
-    """Top-k and sparse attention for one request. ``scores`` is ``[n, width]``."""
+def _attend_graph_decode(state, scores, shared_row: bool = False) -> None:
+    """Top-k and sparse attention for one request.
+
+    ``scores`` is ``[n, width]``. A shared historical row is ``[1, width]``
+    with ``shared_row=True``: top-k runs once, then each query unions its
+    own block. ``shared_row`` is constant for a captured graph.
+    """
     from k8v4_v030.cache_views import bind_regions
     from k8v4_v030.qsa_ops import _visible_graph, attend_decode_direct
 
@@ -967,6 +972,7 @@ def _attend_graph_decode(state, scores) -> None:
     visible = _visible_graph(
         scores, state["counts_t"], state["read_cells"].to(torch.int32), hyper,
         int(hyper.budget) + int(hyper.ratio), premasked=True,
+        shared_row=shared_row,
     )
     if padding is not None:
         # A masked current-step token must not become an older query's KV read.
@@ -1086,10 +1092,9 @@ def _run_c4_graph_decode(query3, out3, hidden, positions, meta, kv_cache,
             % (tuple(rows.shape), len(states), int(width_b))
         )
     for index, state in enumerate(states):
-        one = rows[index:index + 1]
-        n_q = int(state["n"])
-        expanded = one if n_q == 1 else one.expand(n_q, int(one.shape[1])).contiguous()
-        _attend_graph_decode(state, expanded)
+        # One historical row. Top-k broadcasts the narrow selection; the
+        # wide score matrix is not replicated for the seven MTP queries.
+        _attend_graph_decode(state, rows[index:index + 1], shared_row=True)
     return True
 
 
@@ -1098,10 +1103,10 @@ def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, h
 
     The scored width is the block-table fit, clamped to the pooled indexer
     and to 65536 blocks (262144 tokens). Historical top-k is the first live
-    query's scores, broadcast to ``[n, width]``. Each position still unions
-    its own block. Python does not run again on replay; the cache-update
-    counter is flushed from the metadata builder. One request still uses
-    ``score_pooled_paged``. The c4 roster uses ``score_paged_multi``.
+    query's score row. The narrow selection is broadcast, and each position
+    still unions its own block. Python does not run again on replay; the
+    cache-update counter is flushed from the metadata builder. One request
+    still uses ``score_pooled_paged``. The c4 roster uses ``score_paged_multi``.
     """
     from k8v4_v030.qsa_ops import score_pooled_paged
 
@@ -1121,8 +1126,8 @@ def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, h
         print("QSA_GRAPH width=%d bt=%s capturing=False" % (width, tuple(block_row.shape)), flush=True)
     cache = state["cache"]
     ratio = state["ratio"]
-    # One historical selection per step. ``_visible_graph`` still unions
-    # each position's own block. Expand keeps the captured top-k at [n, width].
+    # One historical selection per step. Top-k sees the single score row.
+    # ``_visible_graph`` broadcasts that selection and unions each own block.
     scores = _score_once_and_expand(
         state["q_idx"],
         state["counts_t"],
@@ -1131,8 +1136,9 @@ def _run_graph_decode(query3, out3, hidden, positions, meta, kv_cache, layout, h
             counts_rep, ratio, n_blocks=width, scales=_scoring_pool(cache)[1],
         ),
         valid=state["valid"],
+        expand=False,
     )
-    _attend_graph_decode(state, scores)
+    _attend_graph_decode(state, scores, shared_row=True)
     return True
 
 
@@ -1437,11 +1443,13 @@ def _first_live_index(n: int, valid: torch.Tensor | None, device) -> torch.Tenso
     return torch.where(first < n, first, fallback).reshape(1)
 
 
-def _score_once_and_expand(query, counts, score_one, valid=None):
+def _score_once_and_expand(query, counts, score_one, valid=None, expand: bool = True):
     """Score the first live query and broadcast that historical row.
 
     One selection per MTP step. The caller unions each position's own block.
-    Returned scores stay ``[queries, blocks]`` so a captured top-k keeps its shape.
+    Returned scores stay ``[queries, blocks]`` when ``expand`` is true, so an
+    older captured top-k keeps its shape. ``expand=False`` leaves the
+    ``[1, blocks]`` row for a shared top-k.
     """
     n = int(query.shape[0])
     if n < 1:
@@ -1458,7 +1466,7 @@ def _score_once_and_expand(query, counts, score_one, valid=None):
     one = score_one(q_rep, counts_rep)
     if one.ndim != 2 or int(one.shape[0]) != 1:
         raise RuntimeError("QSA reused score row has shape %s" % (tuple(one.shape),))
-    if n == 1:
+    if n == 1 or not expand:
         return one
     return one.expand(n, int(one.shape[1])).contiguous()
 

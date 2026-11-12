@@ -659,34 +659,76 @@ def _shortlist_stable_topk(masked, take):
     return values, order
 
 
-def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False, stable_ties: bool = False) -> torch.Tensor:
+def _expand_shared_selection(values, order, queries: int):
+    """Broadcast one historical top-k across queries.
+
+    The score row is shared. Each query still unions its own block later.
+    """
+    rows = int(values.shape[0])
+    if rows == queries:
+        return values, order
+    if rows != 1:
+        raise RuntimeError(
+            "QSA shared top-k produced %d rows for %d queries" % (rows, queries)
+        )
+    take = int(values.shape[1])
+    return (
+        values.expand(queries, take).contiguous(),
+        order.expand(queries, take).contiguous(),
+    )
+
+
+def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False, stable_ties: bool = False, shared_row: bool = False) -> torch.Tensor:
     """Decode selection captured inside a full graph.
 
     ``torch.topk`` keeps the scored width cheap at 50k blocks. Ties are not
     stable here; ``_visible_stable`` remains the tie-breaking selector. The
     own block is still unioned in, and the row stays within budget*4+4.
+
+    ``shared_row`` is capture-constant. The historical scores are one row,
+    ``[1, blocks]`` or a stack of copies. Top-k runs on row 0 and the narrow
+    selection is broadcast. Per-query counts and cells still add each
+    position's own block.
     """
     if scores.ndim != 2:
         raise ValueError("scores are [queries, blocks]")
     device = scores.device
-    queries, n_blocks = int(scores.shape[0]), int(scores.shape[1])
+    n_rows, n_blocks = int(scores.shape[0]), int(scores.shape[1])
     ratio = int(hyper.ratio)
     budget = int(hyper.n_sel)
     width = int(width_override)
+    counts_t = counts_t.to(device=device, dtype=torch.int32).reshape(-1)
+    cells_t = cells_t.to(device=device, dtype=torch.int32).reshape(-1)
+    if shared_row:
+        queries = int(counts_t.shape[0])
+        if int(cells_t.shape[0]) != queries:
+            raise ValueError("one cell per query")
+        if n_rows != 1 and n_rows != queries:
+            raise ValueError("shared score row must be [1, blocks] or one row per query")
+    else:
+        queries = n_rows
+        if int(counts_t.shape[0]) != queries or int(cells_t.shape[0]) != queries:
+            raise ValueError("one score row per query")
     out = torch.full((queries, width), -1, dtype=torch.int32, device=device)
     if queries == 0 or n_blocks == 0:
         return out
-    counts_t = counts_t.to(device=device, dtype=torch.int32).reshape(-1)
-    cells_t = cells_t.to(device=device, dtype=torch.int32).reshape(-1)
-    if int(counts_t.shape[0]) != queries or int(cells_t.shape[0]) != queries:
-        raise ValueError("one score row per query")
+    if shared_row and not getattr(_visible_graph, "_shared_logged", False):
+        _visible_graph._shared_logged = True
+        print(
+            "QSA_TOPK shared_row=1 queries=%d width=%d" % (queries, n_blocks),
+            flush=True,
+        )
     within = counts_t <= budget
     masked = scores if scores.dtype == torch.float32 and scores.is_contiguous() else scores.contiguous().float()
+    if shared_row and int(masked.shape[0]) != 1:
+        masked = masked[:1].contiguous()
     # qsa_score_paged already writes -inf past each count. A second pass
-    # over 50k columns was most of this call.
+    # over 50k columns was most of this call. A shared row was scored with
+    # the representative query's count, so the mask stays on that one row.
     if not premasked:
         columns = torch.arange(n_blocks, device=device)
-        masked = masked.masked_fill(columns.unsqueeze(0) >= counts_t.unsqueeze(1), float("-inf"))
+        limit = counts_t[:1] if shared_row else counts_t
+        masked = masked.masked_fill(columns.unsqueeze(0) >= limit.unsqueeze(1), float("-inf"))
     take = min(budget, n_blocks)
     shortlist = os.environ.get("K8V4_QSA_SHORTLIST", "0") == "1" and stable_ties and queries > 16 and not (n_blocks >= 60000 and queries < 256) and n_blocks >= budget and ratio == 4 and width == (take + 1) * ratio and os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1" and os.environ.get("K8V4_QSA_PACK_TOPK", "0") == "1" and 0 < take <= 512 and n_blocks <= 2**24
     if shortlist and not (os.environ.get("K8V4_QSA_GRAPH_TOPK", "1") == "1"
@@ -735,6 +777,8 @@ def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: i
             values, order = fast_values, fast_order
         else:
             values, order = torch.topk(masked, k=take, dim=1, largest=True, sorted=True)
+        if shared_row:
+            values, order = _expand_shared_selection(values, order, queries)
         if (os.environ.get("K8V4_QSA_PACK_TOPK", "0") == "1" and ratio == 4
                 and width == (take + 1) * ratio and take <= 512 and n_blocks >= budget):
             qsa = ops()
@@ -745,6 +789,8 @@ def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: i
     else:
         order = torch.argsort(masked, dim=1, descending=True, stable=True)[:, :take]
         values = torch.gather(masked, 1, order)
+        if shared_row:
+            values, order = _expand_shared_selection(values, order, queries)
     ids = torch.where(values.isfinite(), order, torch.full_like(order, -1))
     own = torch.div(cells_t, ratio, rounding_mode="floor")
     blocks = torch.cat((ids, own.unsqueeze(1)), dim=1)
