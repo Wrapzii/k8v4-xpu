@@ -9,3 +9,13 @@ The experiments used model weights and a modified vLLM XPU environment that are 
 The current code snapshot comes from the local speed-fix repository at its 2026-11-11 `cd0097d` state. It is published for inspection and collaboration; do not deploy this branch without independently validating correctness, build provenance, concurrency, memory limits and end-to-end performance.
 
 The INT8 pooled-key row-mirror change from local commit 08547cb is also included. It has not been established as a measured end-to-end speedup.
+
+## Later additions (Nov 12 2026)
+
+Short-decode attention gained a tuned three-head grp3 split kernel in its own library
+(`k8v4_v030/native/qsa_grp3_split_fast.cpp`, built by `k8v4_v030/compile_qsa_grp3.sh`),
+a per-layout split-width pick (TP1 24Q/4KV: 32 for the shipped kernel, 48 for the tuned
+one; TP2 12Q/2KV: 64; override with `K8V4_QSA_DECODE_SPLIT`), and an opt-in
+`K8V4_QSA_PUBLICATION_SYNC=0` switch that skips the post-step host wait. The tuned
+kernel's gain is about 1.11x kernel-only in matched same-process timing; it has not been
+measured in serving. Details, numbers and their caveats: `docs/qsa-grp3-decode-kernel.md`.
