@@ -1302,19 +1302,22 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
     if out is None:
         out = torch.empty_like(query)
     qsa = ops()
-    if qsa is None or not hasattr(qsa, "qsa_direct_attn"):
-        raise RuntimeError("direct QSA decode requires an updated libxe2_qsa.so")
     vis = visible.to(device=query.device, dtype=torch.int32)
     from k8v4_v030.qsa_batch_score import batch_ops
     from k8v4_v030.qsa_direct_plan import decode_attn_kind, decode_split_width
 
-    batch = batch_ops()
+    # The tuned kernel is independently built. It does not require the base
+    # library to export either direct attention or the shipped grp3 kernel.
+    packed = int(views["k"].stride(-1)) == 1 and int(views["v"].stride(-1)) == 1
+    fast = grp3_ops() if q_len_i <= 16 and gqa > 0 and gqa % 3 == 0 and packed else None
+    has_grp3_split = fast is not None or hasattr(qsa, "qsa_grp3_split")
+    batch = batch_ops() if q_len_i <= 16 and gqa == 6 and not has_grp3_split else None
     has_gqa6 = batch is not None and hasattr(batch, "qsa_gqa6_split")
     kind = decode_attn_kind(
         q_len_i,
         gqa,
         has_gqa6=has_gqa6,
-        has_grp3_split=hasattr(qsa, "qsa_grp3_split"),
+        has_grp3_split=has_grp3_split,
         has_grp3=hasattr(qsa, "qsa_grp3_attn"),
         prefill_split=os.environ.get("K8V4_QSA_PREFILL_SPLIT", "0") == "1",
     )
@@ -1352,7 +1355,11 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
         return out
     # The tuned three-head body only replaces short decode. Prefill keeps the
     # shipped kernel until the tuned one is measured at prefill shapes.
-    fast = grp3_ops() if kind == "grp3_decode_split" else None
+    if kind == "direct" and not hasattr(qsa, "qsa_direct_attn"):
+        raise RuntimeError(
+            "no compatible QSA attention kernel loaded; build libxe2_qsa_grp3.so "
+            "for packed short decode or provide a base library with qsa_direct_attn"
+        )
     split_width = decode_split_width(
         kind, q_len_i, width, hq=heads_i, hkv=hkv, fast=fast is not None,
     )

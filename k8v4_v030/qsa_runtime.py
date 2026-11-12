@@ -820,12 +820,19 @@ def _pooled_scales(cache):
     return getattr(cache, "pooled_scale", None)
 
 
-def _scoring_pool(cache):
+def _scoring_pool(cache, *, batched: bool = False):
     """Pooled tensor for the score kernel, plus scales when it is still int8.
 
     The compact int8 cache keeps ``pooled_fp32`` aligned with the rows the
-    writer stored. Scoring that mirror skips the full-pool cast.
+    writer stored. Scoring that mirror skips the full-pool cast. Batched
+    decode prefers native INT8 loads when the companion kernel supports them.
     """
+    if batched and cache.pooled.dtype == torch.int8:
+        from k8v4_v030.qsa_batch_score import batch_ops, _batched_i8_kernel
+
+        scales = _pooled_scales(cache)
+        if _batched_i8_kernel(batch_ops(), cache.pooled, scales):
+            return cache.pooled, scales
     mirror = getattr(cache, "pooled_fp32", None)
     if torch.is_tensor(mirror):
         return mirror, None
@@ -1081,7 +1088,7 @@ def _run_c4_graph_decode(query3, out3, hidden, positions, meta, kv_cache,
             flush=True,
         )
     cache = states[0]["cache"]
-    pool, scales = _scoring_pool(cache)
+    pool, scales = _scoring_pool(cache, batched=True)
     rows = score_paged_multi(
         query_b, pool, cache.pool_valid, table_b, counts_b,
         states[0]["ratio"], width_b, scales=scales,

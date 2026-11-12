@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from pathlib import Path
 
 from k8v4_v030.qsa_direct_plan import (
@@ -73,6 +75,46 @@ class DirectPlanTest(unittest.TestCase):
         self.assertIn("grp3_ops()", src)
         self.assertIn("fast.qsa_grp3_split", src)
         self.assertIn("hq=heads_i, hkv=hkv", src)
+
+
+class IndependentGrp3DispatchTest(unittest.TestCase):
+    def _run(self, base, tuned):
+        import torch
+        from k8v4_v030.qsa_ops import attend_decode_direct
+
+        query = Mock(device=SimpleNamespace(type="xpu", index=0), dtype=torch.float16)
+        query.shape = (7, 24, 256)
+        visible = Mock(shape=(7, 2052))
+        visible.to.return_value = visible
+        key = Mock(shape=(128, 64, 4, 256))
+        key.stride.return_value = 1
+        value = Mock(shape=(128, 64, 4, 128))
+        value.stride.return_value = 1
+        views = dict(k=key, v=value, k_scale=Mock(), v_scale=Mock(), v_zero=Mock())
+        out = Mock()
+        with patch("k8v4_v030.qsa_ops.ops", return_value=base), \
+                patch("k8v4_v030.qsa_ops.grp3_ops", return_value=tuned), \
+                patch("k8v4_v030.qsa_ops.coerce_visible_matrix", return_value=visible), \
+                patch("k8v4_v030.qsa_ops._direct_state", return_value=(Mock(), Mock())), \
+                patch("k8v4_v030.qsa_batch_score.batch_ops") as batch_loader:
+            result = attend_decode_direct(query, views, Mock(), visible, 33, out=out)
+        self.assertIs(result, out)
+        batch_loader.assert_not_called()
+
+    def test_tuned_kernel_runs_without_base_attention_symbols(self):
+        tuned = SimpleNamespace(qsa_grp3_split=Mock())
+        self._run(SimpleNamespace(), tuned)
+        tuned.qsa_grp3_split.assert_called_once()
+
+    def test_tuned_kernel_runs_without_a_base_library(self):
+        tuned = SimpleNamespace(qsa_grp3_split=Mock())
+        self._run(None, tuned)
+        tuned.qsa_grp3_split.assert_called_once()
+
+    def test_shipped_grp3_does_not_require_direct_attention(self):
+        base = SimpleNamespace(qsa_grp3_split=Mock())
+        self._run(base, None)
+        base.qsa_grp3_split.assert_called_once()
 
 
 class Grp3SplitPickTest(unittest.TestCase):
