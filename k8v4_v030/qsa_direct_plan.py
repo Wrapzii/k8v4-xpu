@@ -8,6 +8,8 @@ that the graph already recorded.
 
 from __future__ import annotations
 
+import os
+
 
 def decode_attn_kind(
     q_len: int,
@@ -43,14 +45,70 @@ def decode_attn_kind(
     return "direct"
 
 
-def decode_split_width(kind: str, q_len: int, width: int) -> int | None:
-    """Token chunk per subgroup, or None when the kernel does not split."""
+DECODE_SPLIT_ENV = "K8V4_QSA_DECODE_SPLIT"
+
+# Measured short-decode split widths for grp3_decode_split, keyed by the
+# per-GPU (query heads, KV heads) layout. Kernel-only, 7 MTP rows, 2052
+# selected tokens, 16 layers, one Arc Pro B60:
+#   24Q/4KV (TP1): shipped grp3_split split 32 4.87 ms, 64 5.39, 128 5.20
+#                  at 96K. The tuned xe2_qsa_grp3 body is best at split 48
+#                  (1.11x over grp3_split split 32 in the same process);
+#                  32 is about 1.00x and 64 about 0.94x for that body.
+#   12Q/2KV (TP2 rank): split 64, the width the TP2 serving tree used. The
+#                  tuned body was not measured on this shape.
+# Any other layout keeps 64, the previous default. K8V4_QSA_DECODE_SPLIT
+# overrides the pick for every layout.
+_GRP3_DECODE_SPLIT = {
+    (24, 4): {"shipped": 32, "fast": 48},
+    (12, 2): {"shipped": 64, "fast": 64},
+}
+_DEFAULT_DECODE_SPLIT = 64
+
+
+def grp3_decode_split_width(hq: int = 0, hkv: int = 0, *, fast: bool = False) -> int:
+    """Split width for short-decode grp3_split on this per-GPU head layout.
+
+    ``fast`` is true when the tuned ``xe2_qsa_grp3`` kernel runs instead of
+    the shipped ``xe2_qsa.qsa_grp3_split``. The width is fixed for a
+    captured graph: it sizes the partial workspace.
+    """
+    raw = os.environ.get(DECODE_SPLIT_ENV, "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError("%s must be a positive integer, got %r" % (DECODE_SPLIT_ENV, raw)) from exc
+        if value < 1:
+            raise ValueError("%s must be a positive integer, got %r" % (DECODE_SPLIT_ENV, raw))
+        return value
+    picks = _GRP3_DECODE_SPLIT.get((int(hq), int(hkv)))
+    if picks is None:
+        return _DEFAULT_DECODE_SPLIT
+    return int(picks["fast" if fast else "shipped"])
+
+
+def decode_split_width(
+    kind: str,
+    q_len: int,
+    width: int,
+    *,
+    hq: int = 0,
+    hkv: int = 0,
+    fast: bool = False,
+) -> int | None:
+    """Token chunk per subgroup, or None when the kernel does not split.
+
+    ``hq`` and ``hkv`` are the per-GPU query and KV head counts. Callers that
+    do not pass them keep the old fixed 64 for short decode.
+    """
     if kind == "grp3":
         return None
     if kind == "grp3_prefill_split":
         return 128
     if int(q_len) <= 16:
-        return 64
+        if kind == "grp3_decode_split":
+            return grp3_decode_split_width(hq, hkv, fast=fast)
+        return _DEFAULT_DECODE_SPLIT
     return max(int(width), 1)
 
 

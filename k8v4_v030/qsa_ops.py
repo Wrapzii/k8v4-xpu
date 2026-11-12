@@ -57,6 +57,52 @@ def ops():
     return torch.ops.xe2_qsa
 
 
+_GRP3_LOADED: str | None = None
+_GRP3_LIB_NAME = "libxe2_qsa_grp3.so"
+
+
+def grp3_library_path() -> str | None:
+    """Tuned short-decode grp3 library, or None.
+
+    ``K8V4_QSA_GRP3_FAST=0`` turns it off. ``XE2_QSA_GRP3_LIB`` names the
+    file. Otherwise ``libxe2_qsa_grp3.so`` is used when it sits next to the
+    loaded ``libxe2_qsa.so`` or in the default QSA build directory.
+    """
+    if os.environ.get("K8V4_QSA_GRP3_FAST", "1").strip() == "0":
+        return None
+    raw = os.environ.get("XE2_QSA_GRP3_LIB", "").strip()
+    if raw:
+        return raw
+    candidates = []
+    base = library_path()
+    if base:
+        candidates.append(os.path.join(os.path.dirname(os.path.abspath(base)), _GRP3_LIB_NAME))
+    candidates.append(os.path.join(os.path.dirname(_DEFAULT_LIB), _GRP3_LIB_NAME))
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def grp3_ops():
+    """``torch.ops.xe2_qsa_grp3`` when the tuned library is configured, else None.
+
+    Same op schema as ``xe2_qsa.qsa_grp3_split``. Loading it is an XPU
+    operation, so CPU callers must not call this.
+    """
+    global _GRP3_LOADED
+    path = grp3_library_path()
+    if path is None:
+        return None
+    if not os.path.isfile(path):
+        raise FileNotFoundError("QSA grp3 library is not at %s" % path)
+    if _GRP3_LOADED != path:
+        torch.ops.load_library(path)
+        _GRP3_LOADED = path
+    namespace = torch.ops.xe2_qsa_grp3
+    return namespace if hasattr(namespace, "qsa_grp3_split") else None
+
+
 def causal_visible_rows(visible: list[list[int]], seq_len: int, q_len: int) -> list[list[int]]:
     """Sorted unique token cells that are still inside each query's causal end.
 
@@ -1304,11 +1350,40 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
             block_row, vis, out, int(pages_per_block),
         )
         return out
-    split_width = decode_split_width(kind, q_len_i, width)
+    # The tuned three-head body only replaces short decode. Prefill keeps the
+    # shipped kernel until the tuned one is measured at prefill shapes.
+    fast = grp3_ops() if kind == "grp3_decode_split" else None
+    split_width = decode_split_width(
+        kind, q_len_i, width, hq=heads_i, hkv=hkv, fast=fast is not None,
+    )
+    fast_key = (kind, fast is not None, int(split_width or 0), heads_i, hkv)
+    fast_seen = getattr(attend_decode_direct, "_split_logged", None)
+    if fast_seen is None:
+        fast_seen = set()
+        attend_decode_direct._split_logged = fast_seen
+    if kind != "grp3" and fast_key not in fast_seen:
+        fast_seen.add(fast_key)
+        print(
+            "QSA_ATTN_SPLIT kind=%s kernel=%s split=%d hq=%d hkv=%d"
+            % (
+                kind,
+                "xe2_qsa_grp3" if fast is not None else "shipped",
+                int(split_width),
+                heads_i,
+                hkv,
+            ),
+            flush=True,
+        )
     splits = (width + split_width - 1) // split_width
     partial, ml = _direct_state(kind, query, heads_i, splits)
     if kind == "gqa6_split":
         batch.qsa_gqa6_split(
+            query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
+            block_row, vis, partial, ml, out, int(pages_per_block), int(split_width),
+        )
+        return out
+    if fast is not None:
+        fast.qsa_grp3_split(
             query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],
             block_row, vis, partial, ml, out, int(pages_per_block), int(split_width),
         )
