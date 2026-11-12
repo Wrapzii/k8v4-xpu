@@ -1235,6 +1235,23 @@ def attend_decode_direct(query, views, block_row, visible, pages_per_block: int,
                 if hasattr(qsa, "qsa_grp3_split") and gqa % 3 == 0
                 else "direct"
             )
+    seen = getattr(attend_decode_direct, "_kinds_logged", None)
+    if seen is None:
+        seen = set()
+        attend_decode_direct._kinds_logged = seen
+    if kind not in seen:
+        seen.add(kind)
+        print(
+            "QSA_ATTN kind=%s q=%d gqa=%d k_stride=%d v_stride=%d"
+            % (
+                kind,
+                q_len_i,
+                gqa,
+                int(views["k"].stride(-1)),
+                int(views["v"].stride(-1)),
+            ),
+            flush=True,
+        )
     if kind == "grp3":
         qsa.qsa_grp3_attn(
             query, views["k"], views["k_scale"], views["v"], views["v_scale"], views["v_zero"],

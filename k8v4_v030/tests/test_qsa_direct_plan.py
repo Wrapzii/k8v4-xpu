@@ -10,8 +10,13 @@ from k8v4_v030.qsa_direct_plan import decode_attn_kind, decode_split_width, part
 
 
 class DirectPlanTest(unittest.TestCase):
-    def test_short_gqa6_prefers_the_shared_load(self):
+    def test_short_decode_prefers_grp3_split(self):
         kind = decode_attn_kind(7, 6, has_gqa6=True, has_grp3_split=True, has_grp3=True, prefill_split=False)
+        self.assertEqual(kind, "grp3_decode_split")
+        self.assertEqual(decode_split_width(kind, 7, 2048), 64)
+
+    def test_gqa6_only_when_grp3_split_is_absent(self):
+        kind = decode_attn_kind(7, 6, has_gqa6=True, has_grp3_split=False, has_grp3=True, prefill_split=False)
         self.assertEqual(kind, "gqa6_split")
         self.assertEqual(decode_split_width(kind, 7, 2048), 64)
 
@@ -25,9 +30,9 @@ class DirectPlanTest(unittest.TestCase):
         self.assertEqual(kind, "direct")
         self.assertEqual(decode_split_width(kind, 7, 100), 64)
 
-    def test_one_query_still_shares_the_kv_load(self):
+    def test_one_query_uses_grp3_split(self):
         kind = decode_attn_kind(1, 6, has_gqa6=True, has_grp3_split=True, has_grp3=True, prefill_split=False)
-        self.assertEqual(kind, "gqa6_split")
+        self.assertEqual(kind, "grp3_decode_split")
 
     def test_prefill_split_is_unchanged(self):
         kind = decode_attn_kind(32, 6, has_gqa6=True, has_grp3_split=True, has_grp3=True, prefill_split=True)

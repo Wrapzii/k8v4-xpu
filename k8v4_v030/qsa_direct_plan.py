@@ -20,11 +20,14 @@ def decode_attn_kind(
 ) -> str:
     """Return the kernel name attend_decode_direct launches.
 
-    Short decode (q_len <= 16) is the MTP graph. gqa6_split loads each
-    selected K/V once for all six query heads and keeps the 64-token splits
-    used by qsa_direct_attn. grp3_decode_split is the same idea with the
-    kernel already in libxe2_qsa.so, three heads at a time. Longer queries
-    stay on the prefill path this tree already shipped.
+    Short decode (q_len <= 16) is the MTP graph. grp3_decode_split loads
+    each selected K/V once per three query heads and keeps the 64-token
+    splits. On one Arc Pro B60 a 7-query, 2048-token row took 0.17 ms in
+    that kernel, 0.41 ms (scattered) to 0.90 ms (packed) in qsa_direct_attn,
+    and 0.73-0.76 ms in qsa_gqa6_split. One subgroup for all six heads does
+    not keep the device busy, so gqa6 is only the fallback when the
+    three-head split is absent. Longer queries stay on the prefill path
+    this tree already shipped.
     """
     queries = int(q_len)
     ratio = int(gqa)
@@ -33,10 +36,10 @@ def decode_attn_kind(
         return "grp3_prefill_split"
     if queries > 16 and grouped and has_grp3:
         return "grp3"
-    if queries <= 16 and ratio == 6 and has_gqa6:
-        return "gqa6_split"
     if queries <= 16 and grouped and has_grp3_split:
         return "grp3_decode_split"
+    if queries <= 16 and ratio == 6 and has_gqa6:
+        return "gqa6_split"
     return "direct"
 
 
