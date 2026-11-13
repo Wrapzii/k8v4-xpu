@@ -71,8 +71,42 @@ and library-registration gate in the cached serving image (`Torch 2.13.0+xpu`):
 records the evidence level and identities without private launch or container
 information. **This is not a GPU numerical, graph-replay, quantize-to-GEMM,
 full-model quality, serving-throughput, or retained-context capacity result.**
-The candidate runtime remains unpublished and default-off. Its next hardware
-step is a separately admitted, bounded four-request/28-row numerical check.
+The candidate runtime remains unpublished and default-off. The separately
+admitted hardware step has now completed as documented below; the earlier CPU
+receipt remains a historical no-device gate, not a GPU result.
+
+## Selected-attention native numerical result
+
+A single eager attention call passed on one physical XPU for **four independent
+requests and 28 aggregate query rows**. Its output shape was `28 × 12 × 256`.
+The maximum absolute error against the independent FP64 per-request reader was
+**1.5245509786099287e-05**, under the existing `atol=0.002`, `rtol=0.002`
+comparison policy. This was one 28-row kernel call, not four seven-row calls.
+
+The fixture uses restored trained layer-11 indexer weights and real strict
+per-row selections prepared on CPU, with nonidentity per-request block tables.
+The main query tensor and packed K8/V4 main K/V are **synthetic**. The reference
+computes its own integer logical-to-physical mappings and FP64 attention.
+This does not establish full-model numerical parity or answer quality.
+
+The prelaunch serving-image CPU gate passed **66 primary entry tests** (plus
+36 nested subtests, not counted as primary tests) and **9 payload tests**.
+All 114 frozen input files were unchanged after execution. The exact native
+container was independently read back as stopped with exit 0, no OOM and zero
+permitted/used cgroup swap; ownership release and empty render holders were
+also independently verified. The fault gate and postflight checks passed.
+
+[Sanitized native numerical evidence](benchmarks/qsa-selected-attention-native-numerical-2026-11-13.json)
+records only allowlisted numerical, source-identity and qualification fields.
+**No GPU scorer, graph capture/replay, timing, serving throughput or long-context
+capacity is qualified by this run.** In particular, the scorer and selector
+preparation was CPU-side. No serving flags were enabled; the experimental
+strict per-row policy remains default-off and separate from the incumbent
+shared-selection policy.
+
+The next bounded integration check must connect the actual GPU batched scorer
+to this reader before any performance claim. Matched full-model measurements
+remain necessary for the 2× target and near-flat context scaling.
 
 ## Next evidence required
 
