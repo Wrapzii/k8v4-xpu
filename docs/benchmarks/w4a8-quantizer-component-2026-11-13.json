@@ -1,0 +1,185 @@
+{
+  "schema_version": 1,
+  "date": "2026-11-13",
+  "scope": "isolated activation quantization; not model throughput",
+  "device_class": "Intel XPU",
+  "parallelism": "TP1",
+  "input_dtype": "float16",
+  "baseline": "previous native row-fused quantizer; NOT production-default compiled quantizer",
+  "candidate": "native lane-local row-reduction quantizer",
+  "method": "same-process device-event A/B; preserve measured block ordering",
+  "original_private_receipt_sha256": "d765dd1f34d001f107375b32216c01708f481759a030a76155cae2b9e1dedfa4",
+  "serving_qualified": false,
+  "prefill_tokens_per_second": null,
+  "generation_tokens_per_second": null,
+  "reports": [
+    {
+      "shape": [
+        512,
+        5120
+      ],
+      "samples_per_arm": 6,
+      "old_native_event_ms_median": 0.2924215,
+      "new_native_event_ms_median": 0.161953,
+      "old_over_new_component_speedup": 1.8055948330688532,
+      "samples": [
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.297396,
+          "wall_ms": 0.9836319950409234
+        },
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.293385,
+          "wall_ms": 0.4460810014279559
+        },
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.291458,
+          "wall_ms": 0.4078110068803653
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.16349,
+          "wall_ms": 0.8576420077588409
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.160156,
+          "wall_ms": 0.2891909971367568
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.15859399999999998,
+          "wall_ms": 0.28289099282119423
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.197812,
+          "wall_ms": 0.9113720007007942
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.16125,
+          "wall_ms": 0.29407099646050483
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.162656,
+          "wall_ms": 0.3023210010724142
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.296719,
+          "wall_ms": 0.9971120016416535
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.29015599999999997,
+          "wall_ms": 0.40756099042482674
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.29067699999999996,
+          "wall_ms": 0.41956100903917104
+        }
+      ]
+    },
+    {
+      "shape": [
+        512,
+        17408
+      ],
+      "samples_per_arm": 6,
+      "old_native_event_ms_median": 0.8666145,
+      "new_native_event_ms_median": 0.46375,
+      "old_over_new_component_speedup": 1.8687105121293799,
+      "samples": [
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.870729,
+          "wall_ms": 1.025052013574168
+        },
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.866771,
+          "wall_ms": 0.9857520053628832
+        },
+        {
+          "arm": "old",
+          "block": 0,
+          "event_ms": 0.865417,
+          "wall_ms": 1.0199929965892807
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.46208299999999997,
+          "wall_ms": 0.6122010090621188
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.47525999999999996,
+          "wall_ms": 0.5901510012336075
+        },
+        {
+          "arm": "new",
+          "block": 1,
+          "event_ms": 0.461667,
+          "wall_ms": 0.5799220089102164
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.46473899999999996,
+          "wall_ms": 0.6621809880016372
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.474114,
+          "wall_ms": 0.6142509955679998
+        },
+        {
+          "arm": "new",
+          "block": 2,
+          "event_ms": 0.462761,
+          "wall_ms": 0.5887019942747429
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.866458,
+          "wall_ms": 1.028861996019259
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.9029689999999999,
+          "wall_ms": 1.1008019937435165
+        },
+        {
+          "arm": "old",
+          "block": 3,
+          "event_ms": 0.864532,
+          "wall_ms": 0.9862419974524528
+        }
+      ]
+    }
+  ]
+}

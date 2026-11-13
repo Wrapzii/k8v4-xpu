@@ -10,6 +10,13 @@ The current code snapshot comes from the local speed-fix repository at its 2026-
 
 The INT8 pooled-key row-mirror change from local commit 08547cb is also included. It has not been established as a measured end-to-end speedup.
 
+## Progress and evidence
+
+See [QSA optimization progress](docs/qsa-optimization-progress.md) for current
+component results, limitations, and the distinction between kernel timing and
+end-to-end serving throughput. Only portable code and sanitized evidence belong
+in this branch; host-specific orchestration and private raw artifacts stay local.
+
 ## Later additions (Nov 12 2026)
 
 Short-decode attention gained a tuned three-head grp3 split kernel in its own library

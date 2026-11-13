@@ -1,4 +1,38 @@
 
-# Local Python artifacts
+# Local Python and build artifacts
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+*.so
+*.dll
+*.dylib
+*.o
+
+# Secrets and machine-specific configuration (templates may be public)
+.env
+.env.*
+!.env.example
+!.env.template
+*.local.*
+
+# Private orchestration, host inspection, and raw run artifacts
+/.local/
+/private/
+/local-scripts/
+/local-artifacts/
+/raw-results/
+/.cpu*-tmp/
+/read_serving_*.py
+/INTEGRATION-PINS.json
+/INTEGRATION-RESULT.md
+/*-READBACK.json
+/integration-*.xml
+/historical-model-benchmarks/
+/repair-evidence/
+/review-*/
+/serving-native-quant.patch
+*.log
