@@ -51,6 +51,29 @@ identifiers, and private launch scripts are deliberately omitted.
 - Strict per-row attention is a separate experimental policy, not a silently
   equivalent replacement for the incumbent shared-selection policy.
 
+## Selected-attention CPU integration gate
+
+A separate selected-attention candidate passed the bounded no-device regression
+and library-registration gate in the cached serving image (`Torch 2.13.0+xpu`):
+
+- **65 primary entry tests** and **9 payload tests** passed. Nested pytest
+  subtests are not added to the primary-test count.
+- The attention library loaded and its operator schema registered while XPU
+  remained uninitialized. No render devices or full model were exposed.
+- All 114 frozen source files were verified; the 95-file payload package was
+  unchanged. The container stopped with exit 0, no OOM, and zero permitted/used
+  cgroup swap.
+- The gate repairs address primary-test accounting and a private-directory
+  read-permission failure. The library is now bound as an individual read-only
+  file; private directory permissions and dropped capabilities stay unchanged.
+
+[Sanitized CPU gate result](benchmarks/qsa-selected-attention-cpu-gate-2026-11-13.json)
+records the evidence level and identities without private launch or container
+information. **This is not a GPU numerical, graph-replay, quantize-to-GEMM,
+full-model quality, serving-throughput, or retained-context capacity result.**
+The candidate runtime remains unpublished and default-off. Its next hardware
+step is a separately admitted, bounded four-request/28-row numerical check.
+
 ## Next evidence required
 
 1. Resolve runtime integration review findings and preserve default-off behavior.

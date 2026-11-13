@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "date_utc": "2026-11-13T14:36:58.211879+00:00",
+  "scope": "selected-attention candidate: cached serving-image CPU regression and native-library registration only",
+  "status": "PASS",
+  "image_id": "sha256:200458a4be862eb5f8da82d0b657f37912fe7150949053a213a3b9250527f742",
+  "torch": "2.13.0+xpu",
+  "entry_primary_tests_passed": 65,
+  "payload_tests_passed": 9,
+  "frozen_source_files_verified": 114,
+  "package_source_files_verified": 95,
+  "attention_library_registered": true,
+  "xpu_initialized": false,
+  "no_render_devices_exposed": true,
+  "full_model_loaded": false,
+  "container_exit_code": 0,
+  "container_stopped": true,
+  "oom_killed": false,
+  "cgroup_swap_max_bytes": 0,
+  "cgroup_swap_current_bytes": 0,
+  "frozen_inputs_unchanged": true,
+  "frozen_bundle_sha256": "54c65148e51225bf43f3e830e3914d58404882e603f0694d9eb5098b5a2d3dd3",
+  "package_manifest_sha256": "a7518aef114ef2edbe3fe031f90fd118148598f9b766a6a51cba8f532ece4f21",
+  "qualification": {
+    "cpu_import_and_regression": true,
+    "gpu_numerical": false,
+    "graph_replay": false,
+    "full_model_quality": false,
+    "serving_throughput": false,
+    "retained_context_capacity": false
+  },
+  "post_change_prefill_tokens_per_second": null,
+  "post_change_decode_tokens_per_second": null,
+  "dense_serving_speedup": null,
+  "notes": [
+    "Primary entry-test identities are counted once; nested pytest subtests are not added to the primary count.",
+    "The native DSO is bound as an individual read-only file; private directory permissions and dropped capabilities are preserved.",
+    "The native operator schema was registered without initializing XPU. No GPU numerical execution occurred.",
+    "This separate selected-attention gate does not qualify W4A8 quantize-to-GEMM integration or production serving.",
+    "Frozen candidate implementation and machine-specific orchestration remain unpublished pending further qualification."
+  ]
+}
