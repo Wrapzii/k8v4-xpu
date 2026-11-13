@@ -13,6 +13,7 @@ This is not an EXL3 Hadamard repack. The checkpoint stays GPTQ INT4.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 
 import torch
 
@@ -211,7 +212,14 @@ def _quantize_stored(activation: torch.Tensor):
 
 def _apply_w4a8(kernel, layer, activation, bias):
     packed, weight_scale, weight_zp = _compile_safe_views(kernel, layer)
-    quant_x, x_scale, x_zero = _quantize_stored(activation)
+    if _FUSED_QUANT_OP is not None:
+        flat = activation.reshape(-1, activation.shape[-1])
+        quant = _try_native_quant(flat) if _native_quant_supported(flat) else None
+        if quant is None:
+            quant = _quantize_stored(flat)
+        quant_x, x_scale, x_zero = quant
+    else:
+        quant_x, x_scale, x_zero = _quantize_stored(activation)
     out = w4a8_gemm(
         quant_x,
         x_scale,
@@ -229,6 +237,7 @@ def _apply_w4a8(kernel, layer, activation, bias):
 # dispatch prevents a symbolic row-count branch from being folded into one
 # precision path for that entire graph range.
 _QUANT_COMPILED = None
+_FUSED_QUANT_OP: Callable | None = None
 _RUNTIME_ENABLED = False
 _DIAGNOSTICS = os.environ.get("K8V4_GEMM_DIAGNOSTICS") == "1"
 _BRANCH_LOGGED = set()
@@ -238,6 +247,23 @@ def _w4a16_runtime(flat, packed, scales, zeros, group_size, bias):
     return torch.ops._xpu_C.int4_gemm_w4a16(
         flat, packed, bias, scales, zeros, group_size, None,
     )
+
+
+def _native_quant_supported(x):
+    # The qualified bridge accepts only contiguous FP16 matrices. Never cast
+    # BF16 or change precision merely to select an accelerated implementation.
+    return (x.device.type == "xpu" and x.dtype == torch.float16 and
+            x.ndim == 2 and x.is_contiguous() and
+            1 <= x.shape[0] <= 16384 and 1 <= x.shape[1] <= 32768)
+
+
+def _try_native_quant(flat):
+    try:
+        return _FUSED_QUANT_OP(flat)
+    except RuntimeError as exc:
+        if str(exc) != "B4 requires an in-order current XPU stream":
+            raise
+        return None
 
 
 def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
@@ -253,9 +279,14 @@ def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
     if not use_onednn:
         return _w4a16_runtime(flat, packed, scales, zeros, group_size, bias)
     global _QUANT_COMPILED
-    if _QUANT_COMPILED is None:
-        _QUANT_COMPILED = torch.compile(_quantize_stored, dynamic=True, fullgraph=True)
-    quant_x, x_scale, x_zero = _QUANT_COMPILED(flat)
+    quant = None
+    if _FUSED_QUANT_OP is not None and _native_quant_supported(flat):
+        quant = _try_native_quant(flat)
+    if quant is None:
+        if _QUANT_COMPILED is None:
+            _QUANT_COMPILED = torch.compile(_quantize_stored, dynamic=True, fullgraph=True)
+        quant = _QUANT_COMPILED(flat)
+    quant_x, x_scale, x_zero = quant
     return w4a8_gemm(quant_x, x_scale, x_zero, packed, scales, zeros,
                     group_size, bias).to(dtype=x.dtype)
 
@@ -387,12 +418,61 @@ def remove_import_hook(finder=None) -> None:
 
 
 
+_FUSED_QUANT_LOAD_ATTEMPTED = False
+
+
+def _load_fused_quantizer():
+    global _FUSED_QUANT_LOAD_ATTEMPTED
+    # Startup-only: never read files/environment from a captured forward.
+    import hashlib
+    from pathlib import Path
+    path = os.environ.get("K8V4_W4A8_FUSED_QUANT_LIB", "")
+    expected = os.environ.get("K8V4_W4A8_FUSED_QUANT_SHA256", "")
+    if not path or len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
+        raise RuntimeError("native W4A8 requires a library path and lowercase SHA256 pin")
+    import stat
+    import sys
+    if sys.platform != "linux":
+        raise RuntimeError("native W4A8 loader requires Linux")
+    library = Path(path).resolve(strict=True)
+    # The install and host administrator are trusted; malicious root is out of
+    # scope. Root-owned, non-writable components prevent unprivileged changes
+    # between the hash and dlopen, without requiring a root runtime.
+    for component in (library, *library.parents):
+        info = component.lstat()
+        expected_type = stat.S_ISREG if component == library else stat.S_ISDIR
+        if (not expected_type(info.st_mode) or info.st_uid != 0 or
+                info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)):
+            raise RuntimeError("native W4A8 requires a root-owned trusted path: " + str(component))
+    if hashlib.sha256(library.read_bytes()).hexdigest() != expected:
+        raise RuntimeError("native W4A8 library SHA256 mismatch")
+    if _FUSED_QUANT_LOAD_ATTEMPTED:
+        raise RuntimeError("native W4A8 load already attempted; process restart required")
+    if torch._C._dispatch_has_kernel("k8v4_w4a8::quant_rows"):
+        raise RuntimeError("native W4A8 quant_rows already registered; process restart required")
+    # A failed load or post-load validation may have registered process-global state.
+    _FUSED_QUANT_LOAD_ATTEMPTED = True
+    torch.ops.load_library(str(library))
+    op = torch.ops.k8v4_w4a8.quant_rows.default
+    if str(op._schema) != "k8v4_w4a8::quant_rows(Tensor x) -> (Tensor, Tensor, Tensor)":
+        raise RuntimeError("native W4A8 quant_rows schema mismatch")
+    for key in ("XPU", "Meta"):
+        if not torch._C._dispatch_has_kernel_for_dispatch_key("k8v4_w4a8::quant_rows", key):
+            raise RuntimeError("native W4A8 quant_rows missing " + key + " kernel")
+    return op
+
+
 def install_if_requested() -> None:
     """Install before model compilation; cached opaque calls honor opt-out too."""
-    global _RUNTIME_ENABLED
+    global _RUNTIME_ENABLED, _FUSED_QUANT_OP
     mode = os.environ.get("K8V4_PREFILL_GEMM", "w4a16")
     if mode not in ("w4a16", "w4a8"):
         raise RuntimeError("K8V4_PREFILL_GEMM must be w4a16 or w4a8")
+    # An explicit native request fails closed before changing dispatch state.
+    native = None
+    if mode == "w4a8" and os.environ.get("K8V4_W4A8_FUSED_QUANT", "0") == "1":
+        native = _load_fused_quantizer()
+    _FUSED_QUANT_OP = native
     _RUNTIME_ENABLED = mode == "w4a8"
     if _RUNTIME_ENABLED:
         install()
