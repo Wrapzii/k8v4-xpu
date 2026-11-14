@@ -32,7 +32,7 @@ class WidthBucketTests(unittest.TestCase):
         self.assertEqual(bucket_for_blocks(blocks_needed(163840)), 40960)
         self.assertEqual(bucket_for_blocks(blocks_needed(163841)), 65536)
         self.assertEqual(bucket_for_blocks(blocks_needed(262144)), 65536)
-        self.assertEqual(bucket_for_blocks(blocks_needed(300000)), 65536)
+        self.assertEqual(bucket_for_blocks(blocks_needed(300000)), 75000)
 
     def test_dispatch_matches_only_the_selected_bucket(self):
         widest = buckets()[-1]

@@ -66,14 +66,15 @@ def blocks_needed(tokens: int) -> int:
 
 
 def bucket_for_blocks(blocks: int) -> int:
-    """Smallest bucket that is at least ``blocks``. Wider than the last clamps."""
+    """Smallest adequate bucket, or the required width if none is adequate."""
     needed = int(blocks)
     if needed < 1:
         return buckets()[0]
     for width in buckets():
         if needed <= width:
             return width
-    return buckets()[-1]
+    # Preserve overflow as a positive requirement, not unknown or a clamp.
+    return needed
 
 
 def width_matches(have: int, want: int, widest: int) -> bool:

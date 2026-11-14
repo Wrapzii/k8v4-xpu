@@ -70,6 +70,31 @@ class GraphDispatchTests(unittest.TestCase):
         with patch.object(qsa_width, 'active_width_blocks', return_value=desired):
             return self.mgr.dispatch(reqs, reqs * 7, query, 0, max_query_len=7, num_ubatches=ubatches)
 
+    def test_override_overflow_dispatches_generic(self):
+        with patch.dict("os.environ", {"K8V4_QSA_WIDTH_BUCKETS": "4096,8192"}):
+            self.setUp()
+            self.ns["_publish_qsa_width"] = qsa_width.publish_active_width
+            states = SimpleNamespace(req_id_to_index={"r": 0}, num_computed_tokens_np=[0])
+            runner = qsa_width._RUNNER.set(SimpleNamespace(req_states=states))
+            sched = qsa_width._SCHED.set(SimpleNamespace(num_scheduled_tokens={"r": 7}))
+            dummy = qsa_width._DUMMY.set((False, 0))
+            try:
+                for tokens, exact, required in [(32768, True, 8192), (40000, False, 10000)]:
+                    states.num_computed_tokens_np[0] = tokens - 7
+                    result = self.mgr.dispatch(1, 7, 7, 0, max_query_len=7)
+                    self.assertEqual(qsa_width.active_width_blocks(), required)
+                    self.assertEqual(result.qsa_exact_verifier, exact, tokens)
+                    self.assertIn(result, self.mgr.graphs)
+                    if exact:
+                        self.assertEqual(result.qsa_width_blocks, 8192)
+                    else:
+                        self.assertEqual(result.qsa_width_blocks, 0)
+            finally:
+                qsa_width._DUMMY.reset(dummy)
+                qsa_width._RUNNER.reset(runner)
+                qsa_width._SCHED.reset(sched)
+                qsa_width._ACTIVE.set(0)
+
     def test_8k_uses_existing_smallest_adequate_graph(self):
         exact = [d.qsa_width_blocks for d in self.mgr._capture_descs[Mode.FULL] if d.qsa_exact_verifier and d.num_reqs == 1]
         self.assertEqual(set(exact), {8192, 40960})
