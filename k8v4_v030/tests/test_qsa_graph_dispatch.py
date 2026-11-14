@@ -46,6 +46,9 @@ def load_manager():
 
 class GraphDispatchTests(unittest.TestCase):
     def setUp(self):
+        gate = patch.dict("os.environ", {"K8V4_QSA_ADEQUATE_WIDTH_GRAPH": "1"})
+        gate.start()
+        self.addCleanup(gate.stop)
         self.ns = load_manager()
         self.mgr = self.ns['CudaGraphManager']()
         m = self.mgr
@@ -94,6 +97,20 @@ class GraphDispatchTests(unittest.TestCase):
                 qsa_width._RUNNER.reset(runner)
                 qsa_width._SCHED.reset(sched)
                 qsa_width._ACTIVE.set(0)
+
+    def test_adequate_width_is_opt_in(self):
+        key = "K8V4_QSA_ADEQUATE_WIDTH_GRAPH"
+        for value in (None, "0", "true", "1"):
+            with self.subTest(value=value), patch.dict("os.environ", {}, clear=False):
+                import os
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+                d = self.select(8192)
+                self.assertEqual(d.qsa_exact_verifier, value == "1")
+                if value == "1":
+                    self.assertEqual(d.qsa_width_blocks, 8192)
 
     def test_8k_uses_existing_smallest_adequate_graph(self):
         exact = [d.qsa_width_blocks for d in self.mgr._capture_descs[Mode.FULL] if d.qsa_exact_verifier and d.num_reqs == 1]

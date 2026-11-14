@@ -118,12 +118,13 @@ def _qsa_width_buckets() -> tuple[int, ...]:
 
 
 def _qsa_width_matches(desc: BatchExecutionDescriptor) -> bool:
-    """Accept adequate widths; candidates are ordered narrowest first."""
+    """Match the exact width, unless the adequate-width experiment is enabled."""
+    import os
     have = int(getattr(desc, "qsa_width_blocks", 0) or 0)
     try:
         from k8v4_v030.qsa_width import active_width_blocks, width_matches
         want = active_width_blocks()
-        if want > 0:
+        if want > 0 and os.environ.get("K8V4_QSA_ADEQUATE_WIDTH_GRAPH", "0") == "1":
             return have >= want
         return width_matches(have, want, _qsa_width_buckets()[-1])
     except Exception:
