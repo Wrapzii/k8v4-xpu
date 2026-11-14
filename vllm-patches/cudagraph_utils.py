@@ -118,11 +118,14 @@ def _qsa_width_buckets() -> tuple[int, ...]:
 
 
 def _qsa_width_matches(desc: BatchExecutionDescriptor) -> bool:
-    """Replay the bucket published for this step, or the widest if unknown."""
+    """Accept adequate widths; candidates are ordered narrowest first."""
     have = int(getattr(desc, "qsa_width_blocks", 0) or 0)
     try:
         from k8v4_v030.qsa_width import active_width_blocks, width_matches
-        return width_matches(have, active_width_blocks(), _qsa_width_buckets()[-1])
+        want = active_width_blocks()
+        if want > 0:
+            return have >= want
+        return width_matches(have, want, _qsa_width_buckets()[-1])
     except Exception:
         widest = _qsa_width_buckets()[-1]
         return have == 0 or have == widest
@@ -640,6 +643,9 @@ class CudaGraphManager:
         key = (num_tokens, effective_loras)
         if self._graphs_captured and num_tokens > 0 and key in self._candidates:
             for desc in self._candidates[key]:
+                # Profiling may capture only a subset of the planned FULL bank.
+                if desc.qsa_exact_verifier and desc not in self.graphs:
+                    continue
                 if _is_compatible(
                     desc,
                     num_reqs,
