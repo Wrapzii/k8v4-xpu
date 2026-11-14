@@ -45,6 +45,7 @@ from k8v4_v030.qsa_ops import (
     library_path,
     mask_query_scores,
     packed_visible_rows,
+    _prefill_prefix_visible,
     rows_from_packed,
     score_pooled,
     score_pooled_paged,
@@ -589,6 +590,16 @@ def try_sparse_forward(impl, layer, query, kv_cache, meta, output) -> bool:
             for start in range(0, q_len, tile):
                 end = min(start + tile, q_len)
                 tile_counts, tile_cells = counts[start:end], req_cells[start:end]
+                if (q_len > 16 and os.environ.get("K8V4_QSA_PREFILL_PREFIX_SKIP", "0") == "1"
+                        and max(tile_counts) <= int(hyper.n_sel)):
+                    cells_t = (tile_mask.cells[start:end] if tile_mask is not None else
+                               torch.tensor(tile_cells, device=query3.device, dtype=torch.int32))
+                    visible = _prefill_prefix_visible(tile_counts, cells_t, hyper,
+                                                      int(hyper.budget) + int(hyper.ratio))
+                    piece = attend_decode_direct(query3[q0+start:q0+end], views, block_row,
+                                                 visible, int(meta.pages_per_block))
+                    staged[q0+start:q0+end].copy_(piece)
+                    continue
                 if max(tile_counts) == 0:
                     # No complete blocks exist. The native decode scorer does
                     # not initialize columns beyond its maximum live count;

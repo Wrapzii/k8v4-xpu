@@ -724,6 +724,14 @@ def _expand_shared_selection(values, order, queries: int):
     )
 
 
+def _prefill_prefix_visible(counts, cells_t, hyper: QsaHyper, width: int):
+    """Exact packed causal IDs for an entirely within-budget tile, else None."""
+    if not counts or max(counts) > int(hyper.n_sel):
+        return None
+    columns = torch.arange(int(width), device=cells_t.device, dtype=torch.int32)
+    return torch.where(columns.unsqueeze(0) <= cells_t.reshape(-1, 1), columns, -1)
+
+
 def _visible_graph(scores, counts_t, cells_t, hyper: QsaHyper, width_override: int, premasked: bool = False, stable_ties: bool = False, shared_row: bool = False) -> torch.Tensor:
     """Decode selection captured inside a full graph.
 

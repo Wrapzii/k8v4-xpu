@@ -98,6 +98,17 @@ class GraphDispatchTests(unittest.TestCase):
                 qsa_width._SCHED.reset(sched)
                 qsa_width._ACTIVE.set(0)
 
+    def test_overflow_and_missing_capture_fail_closed_in_both_modes(self):
+        for gate in ("0", "1"):
+            with self.subTest(gate=gate), patch.dict("os.environ", {"K8V4_QSA_ADEQUATE_WIDTH_GRAPH": gate}):
+                self.assertFalse(self.select(300000).qsa_exact_verifier)
+                narrow = next(d for d in self.mgr.graphs if d.qsa_exact_verifier and d.num_reqs == 1 and d.qsa_width_blocks == 8192)
+                del self.mgr.graphs[narrow]
+                try:
+                    self.assertFalse(self.select(32768).qsa_exact_verifier if gate == "0" else self.select(8192).qsa_width_blocks == 8192)
+                finally:
+                    self.mgr.graphs[narrow] = object()
+
     def test_adequate_width_is_opt_in(self):
         key = "K8V4_QSA_ADEQUATE_WIDTH_GRAPH"
         for value in (None, "0", "true", "1"):

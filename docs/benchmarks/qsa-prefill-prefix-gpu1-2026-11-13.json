@@ -1,0 +1,50 @@
+{
+  "description": "Synthetic GPU1 TP1 tile score/mask/selection/native pack plus direct K8/V4 attention A/B; not serving. Warmups 2, 6 alternating synchronized wall-time samples. Indexer 4x128; attention 24 Q/4 KV, 128 rows, 512 pooled blocks, K=2048 tokens plus own block. No checkpoint weights.",
+  "base_commit": "bb620a877f00ea8e8c745fdaa5612fbdecd20d74",
+  "tested_sources_sha256": {
+    "k8v4_v030/qsa_runtime.py": "9a914e61f977ca651d7bc45cbc724cad753c0ec08493111863abe31b701d49ed",
+    "k8v4_v030/qsa_ops.py": "e1935709773c3f280cbb640b467830b81b31c03b4644cf2f3dc93b9128b8f11a"
+  },
+  "native_library_sha256": "72ab4f8c5069f6bb47ef5d99fc8766c83e2c7f01714c8264f6894419378cc5e2",
+  "device": "Intel Arc Pro B60, physical GPU1, TP1",
+  "visible_id_parity": {
+    "rows": 128,
+    "width": 2052,
+    "mismatches": 0,
+    "counts_min": 481,
+    "counts_max": 512,
+    "packer": "qsa_pack_topk",
+    "score_input_shape": [
+      128,
+      512
+    ],
+    "all_pool_valid": true
+  },
+  "attention_parity": {
+    "max_abs": 0.0,
+    "bit_equal": true
+  },
+  "measurements": {
+    "baseline_ms": [
+      5.249601003015414,
+      4.483239987166598,
+      4.415189003339037,
+      4.559649009024724,
+      4.405729996506125,
+      4.53954900149256
+    ],
+    "candidate_ms": [
+      4.157229006523266,
+      3.513507021125406,
+      3.537896991474554,
+      3.50317798438482,
+      3.5193270014133304,
+      3.5080169909633696
+    ],
+    "baseline_median_ms": 4.511394494329579,
+    "candidate_median_ms": 3.5164170112693682,
+    "boundary": "score+mask+native pack+direct quantized attention; synthetic TP1; excludes cache writes, gather, projection, serving"
+  },
+  "limitations": "Calls actual score, native selector/packer, prefix helper and direct attention, but not surrounding try_sparse_forward dispatch; excludes pool gather, projection, sidecar writes, and serving. GPU1 cleanup and no-swap checks passed. All pooled blocks valid and scores finite in this synthetic case; invalid or non-finite score behavior and whole-runtime parity were not qualified.",
+  "baseline_runtime_tests": "3 failures and 9 passes, identical to clean base in same CPU container; prefix test passes."
+}
