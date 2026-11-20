@@ -187,16 +187,21 @@ def write_one_hot_draft_logits(
     idx_mapping: torch.Tensor,
     has_match: torch.Tensor,
     drafts: torch.Tensor,
+    first_step: int = 0,
 ) -> None:
     """Overwrite the cached draft logits of matched requests with one-hot rows.
 
     Copied drafts are deterministic, so probabilistic verification must see
-    q = 1 on the copied token.
+    q = 1 on the copied token. ``first_step`` > 0 leaves the earlier steps
+    (model drafts) alone.
     """
     # vLLM 0.34 passes a DraftLogitsCache; a replicated cache (TP=1) keeps row = req_state_idx.
     if not isinstance(draft_logits, torch.Tensor):
         assert draft_logits.row_mapping is None, "n-gram one-hot drafts need a replicated draft-logit cache"
         draft_logits = draft_logits.values
+    if first_step:
+        draft_logits = draft_logits[:, first_step:]
+        drafts = drafts[:, first_step:]
     num_reqs, num_steps = drafts.shape
     block_size = 1024
     _one_hot_draft_logits_kernel[

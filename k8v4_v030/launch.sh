@@ -157,7 +157,16 @@ if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
   SPEC_CONFIG="{\"method\":\"mtp\",\"num_speculative_tokens\":$DEEP_DEPTH,\"num_speculative_tokens_per_batch_size\":[$SCHEDULE]}"
   sizes=(7 $((DEEP_DEPTH + 1)))
   for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * 4))); done
+  # K8V4_DEEP_ALL=1: two or more requests that are all copying draft the deep depth too; =any: while
+  # any of them copies (k8v4_v030/deep_draft.py). Every batch width at the deep depth joins the capture list.
+  DEEP_ALL=${K8V4_DEEP_ALL:-0}
+  [[ "$DEEP_ALL" =~ ^(0|1|any)$ ]] || { echo "K8V4_DEEP_ALL must be 0, 1 or any" >&2; exit 2; }
+  if [ "$DEEP_ALL" != 0 ]; then
+    for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * (DEEP_DEPTH + 1)))); done
+  fi
   CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
+elif [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then
+  echo "K8V4_DEEP_ALL needs K8V4_DEEP_DRAFT" >&2; exit 2
 fi
 
 if [ -z "$MODEL_DIR" ] || [ ! -d "$MODEL_DIR" ]; then
@@ -434,6 +443,7 @@ if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
   extra+=(-e "K8V4_DEEP_DRAFT=${K8V4_DEEP_DRAFT}")
   if [ -z "${K8V4_VERIFY_CHUNK:-}" ]; then extra+=(-e K8V4_VERIFY_CHUNK=8); fi
   if [ -n "${K8V4_DEEP_MTP_DEPTH:-}" ]; then extra+=(-e "K8V4_DEEP_MTP_DEPTH=${K8V4_DEEP_MTP_DEPTH}"); fi
+  if [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then extra+=(-e "K8V4_DEEP_ALL=${K8V4_DEEP_ALL}"); fi
 fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
