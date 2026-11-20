@@ -149,6 +149,14 @@ if [ "$JUNCTIONS" = 1 ]; then
   }
   prefix+=(--enable-mamba-shared-prefix-checkpoint)
 fi
+# Optional activation dtype (docs/2026-11-20-last-3ms.md). Unset keeps bfloat16. float16 is what our B70
+# stack serves: the K8/V4 decode kernels take and return fp16, so with bf16 activations every attention
+# layer converts q, k, v and the output (four small copy kernels per layer per step). Changes numerics.
+DTYPE=bfloat16
+if [ -n "${K8V4_DTYPE:-}" ]; then
+  [[ "$K8V4_DTYPE" =~ ^(bfloat16|float16)$ ]] || { echo "K8V4_DTYPE must be bfloat16 or float16" >&2; exit 2; }
+  DTYPE=$K8V4_DTYPE
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots
@@ -275,7 +283,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --port=8000 \
   --served-model-name="$SERVED_NAME" \
   --gpu-memory-utilization="$GPU_UTIL" \
-  --dtype=bfloat16 \
+  --dtype="$DTYPE" \
   --max-model-len="$MAX_MODEL_LEN" \
   --kv-cache-dtype=int8_k_int4_v \
   --tensor-parallel-size="$TP" \
