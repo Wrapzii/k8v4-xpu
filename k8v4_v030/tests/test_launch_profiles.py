@@ -91,6 +91,34 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn(b'K8V4_ONEDNN_DETERMINISTIC must be 0 or 1', result.stderr)
 
+    def test_prefix_match_unit_is_absent_unless_set(self):
+        for options in ({}, {'K8V4_TP': '1', 'K8V4_PREFIX_CACHING': '1'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(arg.startswith('--prefix-match-unit') for arg in args))
+                self.assertNotIn('--enable-mamba-shared-prefix-checkpoint', args)
+
+    def test_prefix_match_unit_and_junctions_pass_through(self):
+        result, args = self.command(K8V4_TP='1', K8V4_PREFIX_CACHING='1', K8V4_PREFIX_MATCH_UNIT='64')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--prefix-match-unit=64', args)
+        self.assertNotIn('--enable-mamba-shared-prefix-checkpoint', args)
+        result, args = self.command(K8V4_PREFIX_MATCH_UNIT='64', K8V4_PREFIX_JUNCTIONS='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--prefix-match-unit=64', args)
+        self.assertIn('--enable-mamba-shared-prefix-checkpoint', args)
+
+    def test_invalid_prefix_match_settings_are_rejected(self):
+        for options in ({'K8V4_PREFIX_MATCH_UNIT': '32'}, {'K8V4_PREFIX_MATCH_UNIT': '96'},
+                        {'K8V4_PREFIX_MATCH_UNIT': 'x'}, {'K8V4_PREFIX_MATCH_UNIT': '064'},
+                        {'K8V4_TP': '1', 'K8V4_PREFIX_MATCH_UNIT': '64'},
+                        {'K8V4_PREFIX_JUNCTIONS': '1'}, {'K8V4_PREFIX_JUNCTIONS': 'yes'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(args, [])
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

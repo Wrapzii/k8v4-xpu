@@ -111,6 +111,27 @@ if [ "$PREFIX_CACHING" = 1 ]; then
 else
   prefix+=(--no-enable-prefix-caching --mamba-cache-mode=none)
 fi
+# Optional prefix-hit granularity (see docs/2026-11-19-prefix-match-unit.md). The GDN state page forces
+# the 2112-token block, and without a match unit a hit lands on a 2112 boundary minus one block (MTP),
+# so a warm repeat recomputes 2-4K tokens. K8V4_PREFIX_MATCH_UNIT=64 hashes every 64-token page and
+# checkpoints the GDN state at the prompt's last 64-token boundary. Unset keeps vLLM's default.
+MATCH_UNIT=${K8V4_PREFIX_MATCH_UNIT:-}
+JUNCTIONS=${K8V4_PREFIX_JUNCTIONS:-0}
+[[ "$JUNCTIONS" =~ ^[01]$ ]] || { echo "K8V4_PREFIX_JUNCTIONS must be 0 or 1" >&2; exit 2; }
+if [ -n "$MATCH_UNIT" ]; then
+  # vLLM checks that it divides the block; the 64-token page is the floor.
+  [[ "$MATCH_UNIT" =~ ^[1-9][0-9]*$ ]] && [ $((MATCH_UNIT % 64)) = 0 ] || {
+    echo "K8V4_PREFIX_MATCH_UNIT must be a positive multiple of the 64-token page" >&2; exit 2;
+  }
+  [ "$PREFIX_CACHING" = 1 ] || { echo "K8V4_PREFIX_MATCH_UNIT needs K8V4_PREFIX_CACHING=1" >&2; exit 2; }
+  prefix+=(--prefix-match-unit="$MATCH_UNIT")
+fi
+if [ "$JUNCTIONS" = 1 ]; then
+  [ -n "$MATCH_UNIT" ] || {
+    echo "K8V4_PREFIX_JUNCTIONS=1 needs K8V4_PREFIX_MATCH_UNIT" >&2; exit 2;
+  }
+  prefix+=(--enable-mamba-shared-prefix-checkpoint)
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots
