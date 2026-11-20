@@ -67,6 +67,14 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertIn('--max-num-seqs=2', args)
         self.assertIn('--max-model-len=133056', args)
 
+    def test_ncontig_is_passed_only_when_set(self):
+        result, default = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('K8V4_NCONTIG_RE' in arg for arg in default))
+        result, args = self.command(K8V4_TP='1', K8V4_NCONTIG_RE='in_proj_ba')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_NCONTIG_RE=in_proj_ba', args)
+        self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-ncontig', args)
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},
