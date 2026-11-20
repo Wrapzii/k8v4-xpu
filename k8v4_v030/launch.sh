@@ -345,6 +345,13 @@ for v in XE2_KV_S1_SPLITS XE2_KV_S1_PAGES XE2_KV_S1_GRF; do
     extra+=(-e "$v=${!v}")
   fi
 done
+# Optional faster multi-row S1 for the multi-page kernel (docs/2026-11-19-decode-s1-rows.md). Off unless set.
+if [ -n "${XE2_KV_S1_FAST:-}" ]; then
+  case "$XE2_KV_S1_FAST" in
+    0|1) extra+=(-e "XE2_KV_S1_FAST=${XE2_KV_S1_FAST}") ;;
+    *) echo "XE2_KV_S1_FAST must be 0 or 1, got '$XE2_KV_S1_FAST'" >&2; exit 2 ;;
+  esac
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
