@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build vllm-openai-xpu:v0.30.0-k8v4 from the compiled libraries.
+# Build vllm-openai-xpu:v0.34.0-k8v4 from the compiled libraries.
 # Does not start a server and does not retag the stock image.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -19,5 +19,5 @@ cp "$SO" "$STAGE/libxe2_kv.so"
 cp "$SDPA" "$STAGE/libk8v4_sdpa.so"
 cp "$DNNL" "$STAGE/libdnnl.so.3"
 cp "$HERE/Dockerfile" "$STAGE/Dockerfile"
-docker build -t vllm-openai-xpu:v0.30.0-k8v4 "$STAGE"
-docker image inspect vllm-openai-xpu:v0.30.0-k8v4 --format '{{.Id}}'
+docker build -t vllm-openai-xpu:v0.34.0-k8v4 "$STAGE"
+docker image inspect vllm-openai-xpu:v0.34.0-k8v4 --format '{{.Id}}'

@@ -3,5 +3,6 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-docker build -f "$ROOT/Dockerfile.compile" -t k8v4-compile-2026 "$ROOT"
-docker image inspect k8v4-compile-2026 --format '{{.Id}}'
+TAG=${K8V4_COMPILE_IMAGE:-k8v4-compile-2026}
+docker build -f "$ROOT/Dockerfile.compile" -t "$TAG" "$ROOT"
+docker image inspect "$TAG" --format '{{.Id}}'
