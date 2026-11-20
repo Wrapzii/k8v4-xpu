@@ -388,6 +388,27 @@ class LaunchProfileTest(unittest.TestCase):
             self.assertIn('K8V4_RSSM_VERIFY=slm', args)
             self.assertIn('K8V4_RSSM_DEFER_COMMIT=1', args)
             self.assertEqual(len(args), len(base) + 4)
+    def test_k8v4_draft_lastrow_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if arg.startswith('K8V4_DRAFT_LASTROW=')])
+        result, args = self.command(K8V4_TP='1', K8V4_DRAFT_LASTROW='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_DRAFT_LASTROW=1', args)
+        self.assertEqual(len(args), len(default) + 2)
+
+    def test_draft_vocab_is_mounted_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if 'draft_vocab' in arg])
+        with tempfile.NamedTemporaryFile('w', suffix='.json') as ids:
+            ids.write('[0, 1, 2]')
+            ids.flush()
+            result, args = self.command(K8V4_TP='1', K8V4_DRAFT_VOCAB=ids.name)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('%s:/opt/k8v4/draft_vocab.json:ro' % os.path.realpath(ids.name), args)
+            self.assertIn('K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json', args)
+            self.assertEqual(len(args), len(default) + 4)
+        result, _ = self.command(K8V4_TP='1', K8V4_DRAFT_VOCAB='/nonexistent/ids.json')
+        self.assertEqual(result.returncode, 2)
 
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},

@@ -398,6 +398,18 @@ if [ -n "${XE2_KV_CASCADE:-}" ]; then
   esac
 fi
 
+# MTP draft-layer prefill attention on the last row only (k8v4_v030/draft_lastrow.py). Off unless set.
+if [ -n "${K8V4_DRAFT_LASTROW:-}" ]; then
+  extra+=(-e "K8V4_DRAFT_LASTROW=${K8V4_DRAFT_LASTROW}")
+fi
+
+# Frequency-ranked MTP draft vocabulary (k8v4_v030/draft_vocab.py): a host JSON list of token ids,
+# mounted read-only. Off unless set.
+if [ -n "${K8V4_DRAFT_VOCAB:-}" ]; then
+  [ -f "$K8V4_DRAFT_VOCAB" ] || { echo "K8V4_DRAFT_VOCAB must name a JSON file: $K8V4_DRAFT_VOCAB" >&2; exit 2; }
+  extra+=(-v "$(realpath "$K8V4_DRAFT_VOCAB"):/opt/k8v4/draft_vocab.json:ro" -e K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json)
+fi
+
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \
