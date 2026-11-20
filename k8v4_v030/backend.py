@@ -1,4 +1,4 @@
-"""Native vLLM 0.30 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
+"""Native vLLM 0.30/0.34 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
 
 vLLM owns the block table and the slot map. Decode is one C++ op per
 uniform batch. Prefill stays on the eager path unless K8V4_PREFILL=onednn,
@@ -12,9 +12,13 @@ from dataclasses import replace
 
 import torch
 
+from k8v4_v030.ncontig import install_if_requested as install_ncontig
+from k8v4_v030.onednn_det import install_if_requested as install_onednn_det
 from k8v4_v030.w4a8_prefill import install_if_requested
 
 install_if_requested()
+install_ncontig()
+install_onednn_det()
 
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030.cache_views import bind_regions
@@ -23,6 +27,7 @@ from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
 from k8v4_v030.stage_profile import profile_enabled, profile_range
 from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD, PageLayout
 from k8v4_v030.ops_api import ops
+from k8v4_v030 import kv_rotate
 from k8v4_v030.plan import (
     layout_for_heads,
     query_segments,
@@ -119,9 +124,19 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
         self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
+        if not hasattr(AttentionMetadataBuilder, "set_kernel_block_size"):
+            # vLLM 0.34 dropped set_kernel_block_size. The runner now hands
+            # the builder a spec whose block size is the kernel block, and
+            # MultipleOf(64) accepts the manager block, so nothing is split.
+            self._bind_kernel_block(int(kv_cache_spec.block_size))
 
     def set_kernel_block_size(self, kernel_block_size: int) -> None:
+        # vLLM 0.30 calls this after construction; 0.34 does not.
         super().set_kernel_block_size(kernel_block_size)
+        self._bind_kernel_block(self.kernel_block_size)
+
+    def _bind_kernel_block(self, kernel_block_size: int | None) -> None:
+        self.kernel_block_size = kernel_block_size
         manager = int(self.kv_cache_spec.block_size)
         ratio = attention_pages(manager, self.kernel_block_size)
         logger.info_once(
@@ -222,6 +237,10 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         self.scale = float(scale)
         self.kv_cache_dtype = kv_cache_dtype
         self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
+        # K8V4_KV_ROTATE: store K / V in a Hadamard basis (see k8v4_v030/kv_rotate.py).
+        self._rot_k, self._rot_v = kv_rotate.from_env()
+        if self._rot_k or self._rot_v:
+            kv_rotate.note_once(self._rot_k, self._rot_v)
 
     def do_kv_cache_update(
         self,
@@ -247,6 +266,10 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             )
         if key.shape[0] < ntok or value.shape[0] < ntok:
             raise RuntimeError("key/value shorter than slot_mapping")
+        if self._rot_k:
+            key = kv_rotate.rotate(key.narrow(0, 0, ntok), torch.float16)
+        if self._rot_v:
+            value = kv_rotate.rotate(value.narrow(0, 0, ntok), torch.float16)
         if profile_enabled():
             with profile_range("kv_store", "kv_store_paged"):
                 _store_kv(key, value, cache, slot_mapping, ntok, self.layout)
@@ -284,12 +307,17 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                     self.layout.hq,
                 )
             )
+        if self._rot_k:
+            query = kv_rotate.rotate(query)
         if attn_metadata.packed_q_len:
             self._packed(query, cache, attn_metadata, output)
-            return output
-        if _capturing():
-            raise RuntimeError("K8/V4 prefill cannot run inside an XPU graph")
-        self._eager(query, cache, attn_metadata, output)
+        else:
+            if _capturing():
+                raise RuntimeError("K8/V4 prefill cannot run inside an XPU graph")
+            self._eager(query, cache, attn_metadata, output)
+        if self._rot_v:
+            # V was stored as V H; P (V H) H = P V (H symmetric, H H = I).
+            output.copy_(kv_rotate.rotate(output))
         return output
 
     def _packed(
@@ -466,7 +494,9 @@ class Xe2K8V4AttentionBackend(AttentionBackend):
         return Xe2K8V4MetadataBuilder
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[MultipleOf]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[MultipleOf]:
+        # vLLM 0.34 passes the layer's KV cache spec; 0.30 passes nothing.
+        del kv_cache_spec
         return [MultipleOf(64)]
 
     @classmethod
