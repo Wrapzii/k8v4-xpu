@@ -8,6 +8,13 @@ the recurrent state the MTP draft reads are still the original GEMM.
 The int32 weight blob is the one WNA16 already passes as ``qweight.t()``.
 
 This is not an EXL3 Hadamard repack. The checkpoint stays GPTQ INT4.
+
+``K8V4_W4A8_LAYERS`` (opt-in, default ``mlp``) widens the gate to more
+projection families: a comma list of ``mlp``, ``attn`` (``self_attn``),
+``gdn`` (``linear_attn``) and ``other`` (any remaining GPTQ linear, e.g. the
+MTP ``fc``), or ``all``. Widening it changes the KV cache and the GDN state
+slightly (int8 activations), so it stays opt-in. Measured reason and
+numbers: docs/2026-11-19-prefill-w4a8-layers.md.
 """
 
 from __future__ import annotations
@@ -162,18 +169,52 @@ def _large_m(activation: torch.Tensor) -> bool:
     return bool(rows > SMALL_M_MAX)
 
 
+LAYER_FAMILIES = ("mlp", "attn", "gdn", "other")
+_LAYERS = frozenset(("mlp",))
+
+
+def parse_layer_families(raw: str | None) -> frozenset:
+    """``K8V4_W4A8_LAYERS`` -> the projection families that may take W4A8.
+
+    Unset or empty is ``mlp``, the measured default. ``all`` is every family.
+    """
+    if raw is None or raw.strip() == "":
+        return frozenset(("mlp",))
+    names = [name.strip().lower() for name in raw.split(",")]
+    if names == ["all"]:
+        return frozenset(LAYER_FAMILIES)
+    if any(name not in LAYER_FAMILIES for name in names):
+        raise RuntimeError(
+            "K8V4_W4A8_LAYERS must be all or a comma list of %s, got %s"
+            % (",".join(LAYER_FAMILIES), raw)
+        )
+    return frozenset(names)
+
+
+def layer_family(prefix: str) -> str:
+    """Family of a linear from its vLLM prefix (the MTP draft's included)."""
+    if ".mlp." in prefix:
+        return "mlp"
+    if ".self_attn." in prefix:
+        return "attn"
+    if ".linear_attn." in prefix:
+        return "gdn"
+    return "other"
+
+
 def _mlp_linear(layer) -> bool:
     """True when this linear may use int8 activations.
 
     A missing prefix keeps the length gate alone so the CPU contract tests
     still exercise the GEMM path. A real vLLM module carries ``prefix``.
-    Only ``*.mlp.*`` takes W4A8. ``self_attn`` and ``linear_attn`` stay on
-    the w4a16 kernel that wrote the measured oneDNN checkpoints.
+    By default only ``*.mlp.*`` takes W4A8. ``self_attn`` and ``linear_attn``
+    stay on the w4a16 kernel that wrote the measured oneDNN checkpoints
+    unless ``K8V4_W4A8_LAYERS`` names their family.
     """
     prefix = getattr(layer, "prefix", None)
     if not isinstance(prefix, str) or prefix == "":
         return True
-    return ".mlp." in prefix
+    return layer_family(prefix) in _LAYERS
 
 
 def _compile_safe_views(kernel, layer):
@@ -381,12 +422,17 @@ def remove_import_hook(finder=None) -> None:
 
 def install_if_requested() -> None:
     """Install before model compilation; cached opaque calls honor opt-out too."""
-    global _RUNTIME_ENABLED
+    global _RUNTIME_ENABLED, _LAYERS
     mode = os.environ.get("K8V4_PREFILL_GEMM", "w4a16")
     if mode not in ("w4a16", "w4a8"):
         raise RuntimeError("K8V4_PREFILL_GEMM must be w4a16 or w4a8")
+    _LAYERS = parse_layer_families(os.environ.get("K8V4_W4A8_LAYERS"))
     _RUNTIME_ENABLED = mode == "w4a8"
     if _RUNTIME_ENABLED:
         install()
         import sys
-        sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
+        if _LAYERS == frozenset(("mlp",)):
+            sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
+        else:
+            sys.stderr.write("k8v4_w4a8: installer active for %s; small-M runtime gate=128\n"
+                             % ",".join(f for f in LAYER_FAMILIES if f in _LAYERS))

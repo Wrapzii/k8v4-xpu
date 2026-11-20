@@ -162,6 +162,21 @@ class LaunchProfileTest(unittest.TestCase):
             with self.subTest(bad=bad):
                 result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH=bad)
                 self.assertEqual(result.returncode, 2)
+    def test_w4a8_layers_is_passed_only_when_set(self):
+        result, default = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('K8V4_W4A8_LAYERS' in arg for arg in default))
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_LAYERS='mlp,attn,gdn')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_W4A8_LAYERS=mlp,attn,gdn', args)
+        self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-layers-mlp-attn-gdn', args)
+        def stable(argv):
+            return [a for a in argv if a not in ('-e', 'K8V4_W4A8_LAYERS=mlp,attn,gdn')
+                    and not a.startswith(('VLLM_CACHE_ROOT=', '/tmp', '/var/folders')) and ':/model' not in a]
+        self.assertEqual(stable(args), stable(default))
+        for bad in ('qkv', 'mlp,', 'all,mlp'):
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_LAYERS=bad)
+            self.assertEqual(result.returncode, 2, bad)
 
     def test_dtype_is_bfloat16_unless_set(self):
         _, default = self.command(K8V4_TP='1')
