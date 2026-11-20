@@ -74,6 +74,14 @@ if [ -n "${K8V4_W4A8_AGROUP:-}" ]; then
   w4a8_env+=(-e "K8V4_W4A8_AGROUP=${K8V4_W4A8_AGROUP}")
   CACHE_NAMESPACE="${CACHE_NAMESPACE}-agroup-${K8V4_W4A8_AGROUP}"
 fi
+if [ -n "${K8V4_W4A8_FUSED:-}" ]; then
+  [[ "$K8V4_W4A8_FUSED" =~ ^(silu|gnorm)(,(silu|gnorm))?$ ]] || { echo "K8V4_W4A8_FUSED must be silu, gnorm or silu,gnorm" >&2; exit 2; }
+  [ "${K8V4_W4A8_KERNEL:-}" = onednn ] && [[ "${K8V4_W4A8_AGROUP:-0}" != 0 ]] || {
+    echo "K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn and K8V4_W4A8_AGROUP" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_FUSED=${K8V4_W4A8_FUSED}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-fused-${K8V4_W4A8_FUSED//,/-}"
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
