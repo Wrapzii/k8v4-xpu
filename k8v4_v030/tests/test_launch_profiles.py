@@ -410,6 +410,14 @@ class LaunchProfileTest(unittest.TestCase):
         result, _ = self.command(K8V4_TP='1', K8V4_DRAFT_VOCAB='/nonexistent/ids.json')
         self.assertEqual(result.returncode, 2)
 
+    def test_k8v4_verify_chunk_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if arg.startswith('K8V4_VERIFY_CHUNK=')])
+        result, args = self.command(K8V4_TP='1', K8V4_VERIFY_CHUNK='8')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_VERIFY_CHUNK=8', args)
+        self.assertEqual(len(args), len(default) + 2)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

@@ -25,6 +25,8 @@ from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
 from k8v4_v030.draft_lastrow import applies as draft_lastrow_applies
 from k8v4_v030.draft_lastrow import last_row
+from k8v4_v030.verify_chunk import chunk_rows, max_query_rows
+from k8v4_v030.verify_chunk import plan as verify_plan
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
 from k8v4_v030.stage_profile import profile_enabled, profile_range
 from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD, PageLayout
@@ -193,7 +195,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             max_query_len=int(cam.max_query_len),
             max_seq_len=int(cam.max_seq_len),
             pages_per_block=attention_pages(spec.block_size, self.kernel_block_size),
-            packed_q_len=uniform_packed_q_len(starts),
+            packed_q_len=uniform_packed_q_len(starts, max_query_rows()),
             layout=self.layout,
         )
 
@@ -337,7 +339,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         output: torch.Tensor,
     ) -> None:
         q_len = int(meta.packed_q_len)
-        if q_len < 1 or q_len > DECODE_MAX_T:
+        if q_len < 1 or q_len > max_query_rows():
             raise RuntimeError("packed q_len %d" % q_len)
         segments = query_segments(meta.query_starts)
         if len(segments) != 1 or segments[0][2] != q_len:
@@ -363,6 +365,9 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
             tok0, width = span
         if query.shape[0] < tok0 + width:
             raise RuntimeError("query shorter than the packed segment")
+        if q_len > DECODE_MAX_T:
+            self._attn_chunked(query, cache, meta, output, first, count, q_len, tok0, width)
+            return
         block_table = meta.block_table
         if block_table.ndim != 2 or block_table.shape[0] < first + count:
             raise RuntimeError("block_table shape %s" % (tuple(block_table.shape),))
@@ -411,6 +416,66 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         attention_span("decode", _decode_attn)
         output.narrow(0, tok0, width).copy_(out_buf)
 
+    def _attn_chunked(
+        self,
+        query: torch.Tensor,
+        cache: torch.Tensor,
+        meta: Xe2K8V4Metadata,
+        output: torch.Tensor,
+        first: int,
+        count: int,
+        q_len: int,
+        tok0: int,
+        width: int,
+    ) -> None:
+        """K8V4_VERIFY_CHUNK: a verify wider than the decode tile, in row chunks.
+
+        Rows [r0, r1) of every request are the last rows of a sequence that is
+        q_len - r1 tokens shorter, so each chunk is one decode-kernel call with
+        trimmed seq_lens (see k8v4_v030/verify_chunk.py).
+        """
+        chunk = chunk_rows()
+        if not chunk:
+            raise RuntimeError("q_len %d needs K8V4_VERIFY_CHUNK" % q_len)
+        block_table = meta.block_table.narrow(0, first, count)
+        seq_lens = meta.seq_lens.reshape(-1).narrow(0, first, count)
+        q_rows = query.narrow(0, tok0, width).reshape(count, q_len, -1)
+        o_rows = output.narrow(0, tok0, width).reshape(count, q_len, -1)
+        scratch = get_scratch(query.device, self.layout)
+        nprog = workspace_programs(int(block_table.shape[1]), meta.pages_per_block, self.layout)
+        partials, m_state, l_state, merged = scratch.workspace(nprog)
+        views = bind_regions(cache, self.layout)
+        for r0, r1, trim in verify_plan(q_len, chunk):
+            rows = r1 - r0
+            q_buf, out_buf = scratch.attention_pair(count * rows)
+            q_buf.view(count, rows, -1).copy_(q_rows[:, r0:r1])
+            lens = seq_lens - trim if trim else seq_lens
+
+            def _decode_attn() -> None:
+                ops().int8k_int4v_attn_batch(
+                    q_buf,
+                    scratch.q8,
+                    scratch.q_scale,
+                    views["k"],
+                    views["k_scale"],
+                    views["v"],
+                    views["v_scale"],
+                    views["v_zero"],
+                    block_table,
+                    lens,
+                    scratch.visible,
+                    partials,
+                    m_state,
+                    l_state,
+                    merged,
+                    out_buf,
+                    rows,
+                    meta.pages_per_block,
+                )
+
+            attention_span("decode", _decode_attn)
+            o_rows[:, r0:r1].copy_(out_buf.view(count, rows, -1))
+
     def _eager(
         self,
         query: torch.Tensor,
@@ -426,7 +491,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         for first, count, q_len in query_segments(meta.query_starts):
             if q_len == 0:
                 continue
-            if 1 <= q_len <= DECODE_MAX_T:
+            if 1 <= q_len <= DECODE_MAX_T or (q_len <= max_query_rows() and chunk_rows()):
                 self._attn_batch(query, cache, meta, output, first, count, q_len)
                 continue
             for offset in range(count):

@@ -410,6 +410,11 @@ if [ -n "${K8V4_DRAFT_VOCAB:-}" ]; then
   extra+=(-v "$(realpath "$K8V4_DRAFT_VOCAB"):/opt/k8v4/draft_vocab.json:ro" -e K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json)
 fi
 
+# Spec-decode verify wider than the 10-row decode tile, in row chunks (k8v4_v030/verify_chunk.py). Off unless set.
+if [ -n "${K8V4_VERIFY_CHUNK:-}" ]; then
+  extra+=(-e "K8V4_VERIFY_CHUNK=${K8V4_VERIFY_CHUNK}")
+fi
+
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \

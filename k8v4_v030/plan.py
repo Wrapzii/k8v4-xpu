@@ -32,17 +32,18 @@ def query_lengths(starts: Sequence[int]) -> list[int]:
     return lengths
 
 
-def uniform_packed_q_len(starts: Sequence[int]) -> int:
+def uniform_packed_q_len(starts: Sequence[int], max_q: int = DECODE_MAX_T) -> int:
     """Shared query length when every request fits the packed decode tile.
 
     Returns 0 when the batch is empty, mixed, or any query is longer than
     ``DECODE_MAX_T``. MTP width 7 is inside the tile; a chunked prefill is not.
+    ``max_q`` widens the limit for a chunked verify (k8v4_v030/verify_chunk.py).
     """
     lengths = query_lengths(starts)
     if not lengths:
         return 0
     q_len = lengths[0]
-    if q_len < 1 or q_len > DECODE_MAX_T:
+    if q_len < 1 or q_len > int(max_q):
         return 0
     for item in lengths:
         if item != q_len:
