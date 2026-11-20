@@ -23,6 +23,7 @@ install_onednn_det()
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
+from k8v4_v030.draft_fused import enabled as draft_fused_enabled
 from k8v4_v030.draft_lastrow import applies as draft_lastrow_applies
 from k8v4_v030.draft_lastrow import last_row
 from k8v4_v030.verify_chunk import chunk_rows, max_query_rows
@@ -128,11 +129,24 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
         self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
+        self._apply_draft_fused_decode()
         if not hasattr(AttentionMetadataBuilder, "set_kernel_block_size"):
             # vLLM 0.34 dropped set_kernel_block_size. The runner now hands
             # the builder a spec whose block size is the kernel block, and
             # MultipleOf(64) accepts the manager block, so nothing is split.
             self._bind_kernel_block(int(kv_cache_spec.block_size))
+
+    def _apply_draft_fused_decode(self) -> None:
+        # K8V4_DRAFT_FUSED_DECODE (k8v4_v030/draft_fused.py): let vLLM 0.34's speculator capture all
+        # draft decode steps in one graph. Unset leaves the base class value (False).
+        if draft_fused_enabled():
+            self.supports_draft_decode_metadata_update = True
+
+    def update_draft_decode_metadata(self, metadata: Xe2K8V4Metadata) -> None:
+        # Only called with K8V4_DRAFT_FUSED_DECODE=1. The decode kernel reads seq_lens, block_table and
+        # slot_mapping from the runner's persistent device buffers, which the speculator advances in place;
+        # the host fields are the same for every one-row-per-request draft step. Nothing to refresh.
+        del metadata
 
     def set_kernel_block_size(self, kernel_block_size: int) -> None:
         # vLLM 0.30 calls this after construction; 0.34 does not.

@@ -269,6 +269,12 @@ if [ -n "${K8V4_RSSM_DEFER_COMMIT:-}" ]; then
     extra+=(-e K8V4_RSSM_DEFER_COMMIT=1)
   fi
 fi
+# Optional: all draft decode steps of a batch in one XPU graph (k8v4_v030/draft_fused.py). Bit-identical
+# drafts; removes the per-step draft metadata builds and graph launches. Off unless set.
+if [ -n "${K8V4_DRAFT_FUSED_DECODE:-}" ]; then
+  [[ "$K8V4_DRAFT_FUSED_DECODE" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_FUSED_DECODE must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_FUSED_DECODE=${K8V4_DRAFT_FUSED_DECODE}")
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots

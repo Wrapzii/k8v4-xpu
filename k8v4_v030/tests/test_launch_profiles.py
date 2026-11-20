@@ -463,6 +463,21 @@ class LaunchProfileTest(unittest.TestCase):
                 result, _ = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', **bad)
                 self.assertEqual(result.returncode, 2)
 
+    def test_draft_fused_decode_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if 'K8V4_DRAFT_FUSED_DECODE' in arg])
+        for value in ('0', '1'):
+            with self.subTest(value=value):
+                result, args = self.command(K8V4_TP='1', K8V4_DRAFT_FUSED_DECODE=value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('K8V4_DRAFT_FUSED_DECODE=%s' % value, args)
+                self.assertEqual(len(args), len(default) + 2)
+        for bad in ('2', 'yes', '1 '):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_DRAFT_FUSED_DECODE=bad)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(b'K8V4_DRAFT_FUSED_DECODE', result.stderr)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},
