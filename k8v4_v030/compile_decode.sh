@@ -12,10 +12,10 @@ mkdir -p "$ROOT/build"
 docker run --rm --memory=1200m --memory-swap=4g --entrypoint bash \
   -v "$ROOT/k8v4_v030/native:/src:ro" \
   -v "$ROOT/build:/out" \
-  k8v4-compile-2026 -lc '
+  "${K8V4_COMPILE_IMAGE:-k8v4-compile-2026}" -lc '
 set -euo pipefail
 ICPX=""
-for c in /opt/intel-2026/oneapi/compiler/2026.0/bin/icpx /opt/intel-2026/oneapi/compiler/latest/bin/icpx; do
+for c in /opt/intel-2026/oneapi/compiler/2026.1/bin/icpx /opt/intel-2026/oneapi/compiler/2026.0/bin/icpx /opt/intel-2026/oneapi/compiler/latest/bin/icpx; do
   if [ -x "$c" ]; then ICPX=$c; break; fi
 done
 test -n "$ICPX"
@@ -24,7 +24,7 @@ export LD_LIBRARY_PATH="${LIBDIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 "$ICPX" --version
 TORCH=/opt/venv/lib/python3.12/site-packages/torch
 PY=/usr/include/python3.12
-nice -n 19 "$ICPX" -O2 -fsycl -fPIC -shared -std=c++17 -D_GLIBCXX_USE_CXX11_ABI=1 \
+nice -n 19 "$ICPX" -O2 -fsycl -fPIC -shared -std=c++20 -D_GLIBCXX_USE_CXX11_ABI=1 \
   -Wno-deprecated-declarations \
   -I"$TORCH/include" -I"$TORCH/include/torch/csrc/api/include" -I"$PY" \
   /src/xe2_kv_ops.cpp -o /out/libxe2_kv.so \

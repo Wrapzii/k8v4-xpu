@@ -72,6 +72,85 @@ def _splice_island_wrap(path: Path) -> str:
     return 'patched'
 
 
+_EMBED_COPY_OLD = '        param[: loaded_weight.shape[0]].data.copy_(loaded_weight)\n'
+_EMBED_COPY_NEW = (
+    '        try:  # k8v4: K8V4_UPLOAD_SLICE_MB (default 0 = this same single copy_)\n'
+    '            from k8v4_v030.upload import copy_rows as _k8v4_copy_rows\n'
+    '        except ImportError:\n'
+    '            _k8v4_copy_rows = None\n'
+    '        if _k8v4_copy_rows is None:\n'
+    '            param[: loaded_weight.shape[0]].data.copy_(loaded_weight)\n'
+    '        else:\n'
+    '            _k8v4_copy_rows(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+)
+
+
+# vLLM 0.34 routes the same copy through model_executor.utils.copy_weight_
+# (a plain copy_ off integrated GPUs).
+_EMBED_COPY_OLD_034 = '        copy_weight_(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+_EMBED_COPY_NEW_034 = (
+    '        try:  # k8v4: K8V4_UPLOAD_SLICE_MB (default 0 = this same copy_weight_)\n'
+    '            from k8v4_v030.upload import copy_rows as _k8v4_copy_rows\n'
+    '        except ImportError:\n'
+    '            _k8v4_copy_rows = None\n'
+    '        if _k8v4_copy_rows is None:\n'
+    '            copy_weight_(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+    '        else:\n'
+    '            _k8v4_copy_rows(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+)
+
+
+def _splice_embed_copy(path: Path) -> str:
+    """Route VocabParallelEmbedding.weight_loader's table copy through k8v4_v030.upload.copy_rows,
+    which is a plain copy_ unless K8V4_UPLOAD_SLICE_MB is set (see k8v4_v030/upload.py)."""
+    text = path.read_text(encoding='utf-8')
+    if '_k8v4_copy_rows' in text:
+        return 'unchanged'
+    for old, new in ((_EMBED_COPY_OLD, _EMBED_COPY_NEW), (_EMBED_COPY_OLD_034, _EMBED_COPY_NEW_034)):
+        if text.count(old) == 1:
+            path.write_text(text.replace(old, new, 1), encoding='utf-8')
+            return 'patched'
+    raise RuntimeError('%s embed copy anchor count %d (0.30) / %d (0.34)'
+                       % (path, text.count(_EMBED_COPY_OLD), text.count(_EMBED_COPY_OLD_034)))
+
+
+def _splice_all(path: Path, pairs: tuple[tuple[str, str], ...], mark: str) -> str:
+    """Apply every (old, new) pair to one file, or none: each anchor must occur exactly once."""
+    text = path.read_text(encoding="utf-8")
+    if mark in text:
+        return "unchanged"
+    for old, new in pairs:
+        if text.count(old) != 1:
+            raise RuntimeError("%s anchor count %d for %r" % (path, text.count(old), old.splitlines()[0]))
+        text = text.replace(old, new, 1)
+    path.write_text(text, encoding="utf-8")
+    return "patched"
+
+
+_WARM_PREFIX_FILE = "v1/worker/gpu_worker.py"
+_WARM_PREFIX_MARK = "K8V4_WARMUP_WARM_PREFIX"
+_WARM_PREFIX_OLD = (
+    '            warmup_kernels(self.model_runner, self.execute_model, self.sample_tokens)\n'
+)
+_WARM_PREFIX_NEW = _WARM_PREFIX_OLD + (
+    '            try:  # k8v4: K8V4_WARMUP_WARM_PREFIX (default 0 = no extra warmup)\n'
+    '                from k8v4_v030.warm_prefix_warmup import maybe_warmup as _k8v4_warm_prefix\n'
+    '            except ImportError:\n'
+    '                _k8v4_warm_prefix = None\n'
+    '            if _k8v4_warm_prefix is not None:\n'
+    '                _k8v4_warm_prefix(self)\n'
+)
+
+
+def patch_warm_prefix_warmup(root: Path) -> list[str]:
+    """K8V4_WARMUP_WARM_PREFIX hook after vLLM's JIT warmup (k8v4_v030/warm_prefix_warmup.py)."""
+    path = root / _WARM_PREFIX_FILE
+    if not path.is_file():
+        return []
+    return ["warm_prefix_warmup:%s" % _splice_all(path, ((_WARM_PREFIX_OLD, _WARM_PREFIX_NEW),),
+                                                  _WARM_PREFIX_MARK)]
+
+
 _DEFAULT_ROOTS = (
     Path("/opt/venv/lib/python3.12/site-packages/vllm"),
     Path("/workspace/vllm/vllm"),
@@ -120,6 +199,10 @@ def patch_vllm_tree(root: Path) -> list[str]:
     gptq_utils = root / "model_executor/layers/quantization/utils/gptq_utils.py"
     if gptq_utils.exists():
         notes.append("int8_island:%s" % _splice_island_wrap(gptq_utils))
+    vocab = root / "model_executor/layers/vocab_parallel_embedding.py"
+    if vocab.exists():
+        notes.append("embed_copy:%s" % _splice_embed_copy(vocab))
+    notes.extend(patch_warm_prefix_warmup(root))
     return notes
 
 

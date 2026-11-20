@@ -1,4 +1,4 @@
-# K8/V4 KV cache for vLLM 0.30 on Intel XPU
+# K8/V4 KV cache for vLLM 0.34 on Intel XPU
 
 Persistent int8-K / int4-V attention for Qwen3.8-27B GPTQ INT4 on two Arc Pro B60s. The serving path is stock vLLM 0.30.0 XPU plus a small dtype registration, a SYCL decode library, oneDNN prefill attention, and an MLP-only W4A8 GEMM. It is a patch on `vllm/vllm-openai-xpu:v0.30.0`, not a vLLM fork, and it is not vLLM's `turboquant_k8v4` selector.
 
@@ -87,7 +87,7 @@ The [historical benchmark archive](docs/historical-benchmarks.md) preserves the 
 
 ## Current deployment
 
-- Image: `vllm/vllm-openai-xpu:v0.30.0`, digest `sha256:fc0e112afb64e3a06fe8daff34652435822a629412f38efce8f0f67a46636b8d`, plus this package
+- Image: `vllm/vllm-openai-xpu:v0.34.0`, digest `sha256:cb55d8cffeb1851c552c4b002a5e8be21daa99a51a678d53c57f271e7c16b3f0`, plus this package (measurements below were taken on v0.30.0 unless marked; see docs/2026-11-19-vllm-034.md)
 - GPUs: 2× Arc Pro B60, `ZE_AFFINITY_MASK=0,1`, composite hierarchy
 - Collectives: `CCL_SYCL_ALLREDUCE_LL=twoshots`, simple threshold `4294967296`, copy engine on. The measured host has no Xe Link
 - Activations bf16, KV dtype `int8_k_int4_v`, TP 2, max length 262144
@@ -153,7 +153,7 @@ One `libxe2_kv.so` serves both head layouts: 2 KV / 12 Q heads on a TP2 rank and
 Build one image for both modes after compiling the libraries into `build/`:
 
 ```bash
-docker build -f Dockerfile.unified -t vllm-openai-xpu:v0.30.0-k8v4-unified .
+docker build -f Dockerfile.unified -t vllm-openai-xpu:v0.34.0-k8v4-unified .
 MODEL_DIR=/path/to/weights K8V4_TP=1 bash k8v4_v030/launch.sh
 MODEL_DIR=/path/to/weights K8V4_TP=2 bash k8v4_v030/launch.sh
 ```
@@ -169,7 +169,7 @@ Keep capture sizes as multiples of `1 + num_speculative_tokens` (7 when MTP is 6
 
 ## Run it
 
-The two GPUs are exclusive. Stop whatever else is using them before launch. `compile_decode.sh` caps its container at 1200 MB (the two-instantiation build measured ~610 MiB peak) plus a 4 GB swap bound, so a 12 GB host can compile next to a loaded model. The oneAPI image used for compile is large. Compile does not use the GPU. icpx 2025.3 segfaults against this image's `libsycl.so.9`; the compile image copies oneAPI 2026. `compile_sdpa.sh` builds `build/libk8v4_sdpa.so` and copies the compile image's bundled `libdnnl.so.3` beside it.
+The two GPUs are exclusive. Stop whatever else is using them before launch. `compile_decode.sh` caps its container at 1200 MB (the two-instantiation build measured ~610 MiB peak) plus a 4 GB swap bound, so a 12 GB host can compile next to a loaded model. The oneAPI image used for compile is large. Compile does not use the GPU. icpx 2025.3 segfaults against this image's `libsycl.so.9`; the compile image copies oneAPI 2026.1 (vLLM 0.34 ships the 2026.1 SYCL runtime). `compile_sdpa.sh` builds `build/libk8v4_sdpa.so` and copies the compile image's bundled `libdnnl.so.3` beside it.
 
 ```bash
 bash k8v4_v030/compile_image.sh
