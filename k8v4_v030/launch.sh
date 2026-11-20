@@ -257,6 +257,11 @@ if [ -n "${K8V4_EMBED_HOST:-}" ]; then
   [[ "$K8V4_EMBED_HOST" =~ ^[01]$ ]] || { echo "K8V4_EMBED_HOST must be 0 or 1" >&2; exit 2; }
   extra+=(-e "K8V4_EMBED_HOST=${K8V4_EMBED_HOST}")
 fi
+# MTP draft skips loading the tables it shares with the target (k8v4_v030/draft_shared.py). Off unless set.
+if [ -n "${K8V4_DRAFT_SKIP_SHARED:-}" ]; then
+  [[ "$K8V4_DRAFT_SKIP_SHARED" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_SKIP_SHARED must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_SKIP_SHARED=${K8V4_DRAFT_SKIP_SHARED}")
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \

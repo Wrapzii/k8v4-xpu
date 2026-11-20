@@ -192,6 +192,21 @@ class LaunchProfileTest(unittest.TestCase):
                 result, args = self.command(K8V4_TP='1', K8V4_EMBED_HOST=bad)
                 self.assertEqual(result.returncode, 2)
 
+    def test_draft_skip_shared_is_passed_only_when_set(self):
+        for options in ({}, {'K8V4_TP': '1'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(arg.startswith('K8V4_DRAFT_SKIP_SHARED') for arg in args))
+        for value in ('0', '1'):
+            result, args = self.command(K8V4_TP='1', K8V4_DRAFT_SKIP_SHARED=value)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_DRAFT_SKIP_SHARED=%s' % value, args)
+        for bad in ('2', 'yes'):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_DRAFT_SKIP_SHARED=bad)
+                self.assertEqual(result.returncode, 2)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},
