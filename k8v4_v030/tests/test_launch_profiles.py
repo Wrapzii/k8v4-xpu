@@ -331,3 +331,39 @@ class DefaultCommandTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 got = [a.replace(str(ROOT), '<ROOT>') for a in _no_temp(args)]
                 self.assertEqual(got, want)
+
+    def test_agent_api_knobs_are_absent_by_default(self):
+        result, args = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(arg.startswith('--default-chat-template-kwargs') for arg in args))
+        self.assertNotIn('--enable-prompt-tokens-details', args)
+        self.assertNotIn('--entrypoint', args)
+        self.assertFalse(any(arg.startswith('VLLM_HTTP_TIMEOUT_KEEP_ALIVE=') for arg in args))
+        image = args.index('vllm-openai-xpu:v0.34.0-k8v4-unified')
+        self.assertEqual(args[image + 1], '/model')
+
+    def test_agent_api_knobs_pass_through(self):
+        result, args = self.command(K8V4_TP='1', K8V4_CHAT_TEMPLATE_KWARGS='{"reasoning_effort":"medium"}',
+                                    K8V4_PROMPT_TOKENS_DETAILS='1', K8V4_HTTP_KEEP_ALIVE='300',
+                                    K8V4_CHAT_TEMPLATE_FIX='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--default-chat-template-kwargs={"reasoning_effort":"medium"}', args)
+        self.assertIn('--enable-prompt-tokens-details', args)
+        self.assertIn('VLLM_HTTP_TIMEOUT_KEEP_ALIVE=300', args)
+        image = args.index('vllm-openai-xpu:v0.34.0-k8v4-unified')
+        self.assertEqual(args[image - 2:image], ['--entrypoint', 'python3'])
+        self.assertEqual(args[image + 1:image + 5],
+                         ['-I', '/opt/k8v4/k8v4_v030/chat_template_fix.py', '--serve', '/model'])
+        result, args = self.command(K8V4_TP='1', K8V4_PROMPT_TOKENS_DETAILS='0', K8V4_CHAT_TEMPLATE_FIX='0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('--enable-prompt-tokens-details', args)
+        self.assertNotIn('--entrypoint', args)
+
+    def test_agent_api_knobs_reject_bad_values(self):
+        for options in ({'K8V4_CHAT_TEMPLATE_KWARGS': 'medium'}, {'K8V4_CHAT_TEMPLATE_KWARGS': '{"a":}'},
+                        {'K8V4_PROMPT_TOKENS_DETAILS': 'yes'}, {'K8V4_HTTP_KEEP_ALIVE': '0'},
+                        {'K8V4_HTTP_KEEP_ALIVE': '5s'}, {'K8V4_CHAT_TEMPLATE_FIX': 'on'}):
+            with self.subTest(options=options):
+                result, args = self.command(K8V4_TP='1', **options)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(args, [])

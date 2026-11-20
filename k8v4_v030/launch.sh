@@ -159,6 +159,44 @@ if [ -n "${K8V4_KV_ROTATE:-}" ]; then
   [[ "$K8V4_KV_ROTATE" =~ ^(k|v|kv)$ ]] || { echo "K8V4_KV_ROTATE must be k, v or kv" >&2; exit 2; }
   extra+=(-e "K8V4_KV_ROTATE=${K8V4_KV_ROTATE}")
 fi
+# Optional OpenAI-API behaviour for agent clients (docs/2026-11-19-agent-parity.md). Each is off unless
+# set; unset keeps the command unchanged.
+#   K8V4_CHAT_TEMPLATE_KWARGS  JSON object -> --default-chat-template-kwargs (e.g. a default reasoning effort)
+#   K8V4_PROMPT_TOKENS_DETAILS 1 -> --enable-prompt-tokens-details (usage.prompt_tokens_details.cached_tokens)
+#   K8V4_HTTP_KEEP_ALIVE       seconds -> VLLM_HTTP_TIMEOUT_KEEP_ALIVE (vLLM's 5 s drops idle pooled sockets)
+#   K8V4_CHAT_TEMPLATE_FIX     1 -> render non-leading system messages in place and accept the
+#                              reasoning_effort values high/minimal (k8v4_v030/chat_template_fix.py)
+api=()
+entry=()
+serve=()
+if [ -n "${K8V4_CHAT_TEMPLATE_KWARGS:-}" ]; then
+  [[ "$K8V4_CHAT_TEMPLATE_KWARGS" =~ ^\{.*\}$ ]] || { echo "K8V4_CHAT_TEMPLATE_KWARGS must be a JSON object" >&2; exit 2; }
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -I -c 'import json, sys; v = json.loads(sys.argv[1]); assert isinstance(v, dict)' \
+      "$K8V4_CHAT_TEMPLATE_KWARGS" 2>/dev/null || { echo "K8V4_CHAT_TEMPLATE_KWARGS must be a JSON object" >&2; exit 2; }
+  fi
+  api+=(--default-chat-template-kwargs="$K8V4_CHAT_TEMPLATE_KWARGS")
+fi
+if [ -n "${K8V4_PROMPT_TOKENS_DETAILS:-}" ]; then
+  [[ "$K8V4_PROMPT_TOKENS_DETAILS" =~ ^[01]$ ]] || { echo "K8V4_PROMPT_TOKENS_DETAILS must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_PROMPT_TOKENS_DETAILS" = 1 ]; then api+=(--enable-prompt-tokens-details); fi
+fi
+if [ -n "${K8V4_HTTP_KEEP_ALIVE:-}" ]; then
+  [[ "$K8V4_HTTP_KEEP_ALIVE" =~ ^[1-9][0-9]*$ ]] || { echo "K8V4_HTTP_KEEP_ALIVE must be a positive number of seconds" >&2; exit 2; }
+  extra+=(-e "VLLM_HTTP_TIMEOUT_KEEP_ALIVE=${K8V4_HTTP_KEEP_ALIVE}")
+fi
+if [ -n "${K8V4_CHAT_TEMPLATE_FIX:-}" ]; then
+  [[ "$K8V4_CHAT_TEMPLATE_FIX" =~ ^[01]$ ]] || { echo "K8V4_CHAT_TEMPLATE_FIX must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_CHAT_TEMPLATE_FIX" = 1 ]; then
+    # Refuse a template without the anchors before anything starts (the container checks again).
+    if command -v python3 >/dev/null 2>&1 && [ -f "$TEMPLATE" ]; then
+      python3 -I "$HERE/chat_template_fix.py" "$TEMPLATE" /dev/null || exit 2
+    fi
+    entry+=(--entrypoint python3)
+    serve+=(-I /opt/k8v4/k8v4_v030/chat_template_fix.py --serve)
+  fi
+fi
+
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \
@@ -191,7 +229,9 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -e VLLM_XPU_ENABLE_XPU_GRAPH=1 \
   -e ZE_AFFINITY_MASK="$DEVICES" \
   -e ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE \
+  "${entry[@]}" \
   "$IMAGE" \
+  "${serve[@]}" \
   /model \
   --host=0.0.0.0 \
   --port=8000 \
@@ -208,6 +248,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --reasoning-parser=qwen3 \
   "${prefix[@]}" \
   "${multimodal[@]}" \
+  "${api[@]}" \
   --trust-remote-code \
   --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
   --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}")
