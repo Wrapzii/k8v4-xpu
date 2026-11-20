@@ -8,6 +8,13 @@ the recurrent state the MTP draft reads are still the original GEMM.
 The int32 weight blob is the one WNA16 already passes as ``qweight.t()``.
 
 This is not an EXL3 Hadamard repack. The checkpoint stays GPTQ INT4.
+
+``K8V4_W4A8_LAYERS`` (opt-in, default ``mlp``) widens the gate to more
+projection families: a comma list of ``mlp``, ``attn`` (``self_attn``),
+``gdn`` (``linear_attn``) and ``other`` (any remaining GPTQ linear, e.g. the
+MTP ``fc``), or ``all``. Widening it changes the KV cache and the GDN state
+slightly (int8 activations), so it stays opt-in. Measured reason and
+numbers: docs/2026-11-19-prefill-w4a8-layers.md.
 """
 
 from __future__ import annotations
@@ -162,18 +169,52 @@ def _large_m(activation: torch.Tensor) -> bool:
     return bool(rows > SMALL_M_MAX)
 
 
+LAYER_FAMILIES = ("mlp", "attn", "gdn", "other")
+_LAYERS = frozenset(("mlp",))
+
+
+def parse_layer_families(raw: str | None) -> frozenset:
+    """``K8V4_W4A8_LAYERS`` -> the projection families that may take W4A8.
+
+    Unset or empty is ``mlp``, the measured default. ``all`` is every family.
+    """
+    if raw is None or raw.strip() == "":
+        return frozenset(("mlp",))
+    names = [name.strip().lower() for name in raw.split(",")]
+    if names == ["all"]:
+        return frozenset(LAYER_FAMILIES)
+    if any(name not in LAYER_FAMILIES for name in names):
+        raise RuntimeError(
+            "K8V4_W4A8_LAYERS must be all or a comma list of %s, got %s"
+            % (",".join(LAYER_FAMILIES), raw)
+        )
+    return frozenset(names)
+
+
+def layer_family(prefix: str) -> str:
+    """Family of a linear from its vLLM prefix (the MTP draft's included)."""
+    if ".mlp." in prefix:
+        return "mlp"
+    if ".self_attn." in prefix:
+        return "attn"
+    if ".linear_attn." in prefix:
+        return "gdn"
+    return "other"
+
+
 def _mlp_linear(layer) -> bool:
     """True when this linear may use int8 activations.
 
     A missing prefix keeps the length gate alone so the CPU contract tests
     still exercise the GEMM path. A real vLLM module carries ``prefix``.
-    Only ``*.mlp.*`` takes W4A8. ``self_attn`` and ``linear_attn`` stay on
-    the w4a16 kernel that wrote the measured oneDNN checkpoints.
+    By default only ``*.mlp.*`` takes W4A8. ``self_attn`` and ``linear_attn``
+    stay on the w4a16 kernel that wrote the measured oneDNN checkpoints
+    unless ``K8V4_W4A8_LAYERS`` names their family.
     """
     prefix = getattr(layer, "prefix", None)
     if not isinstance(prefix, str) or prefix == "":
         return True
-    return ".mlp." in prefix
+    return layer_family(prefix) in _LAYERS
 
 
 def _compile_safe_views(kernel, layer):
@@ -234,8 +275,105 @@ def _w4a16_runtime(flat, packed, scales, zeros, group_size, bias):
     )
 
 
+# K8V4_W4A8_KERNEL=onednn (opt-in): the selected layers keep their GPTQ
+# nibbles as s4 with NO zero point and run the k8v4_w4a8 library
+# (native/w4a8: vllm-xpu-kernels' oneDNN int4 GEMMs with the zero points
+# optional, bf16 output, grouped activation scales). The stock ops always
+# hand oneDNN a u4 weight zero point and, for W4A8, a source zero point,
+# and the compensation for them costs GEMM time even when both are
+# constants. u4 with zero point 8 equals s4 of the same nibbles XOR 0x8,
+# so the weights are flipped once at load. Such a layer's zero point is an
+# empty tensor, and its decode GEMM also runs the library (bf16 x s4).
+# K8V4_W4A8_AGROUP=G (with onednn): one activation scale per token AND per
+# G input channels instead of one per token.
+KERNELS = ("xpu", "onednn")
+_KERNEL = "xpu"
+_AGROUP = 0
+_S4_FLIP = -2004318072  # 0x88888888 as int32: XOR 0x8 in every nibble
+_LIB_DEFAULT = "/opt/k8v4/libk8v4_w4a8.so"
+
+
+def parse_kernel(raw: str | None) -> str:
+    value = "xpu" if raw is None or raw.strip() == "" else raw.strip().lower()
+    if value not in KERNELS:
+        raise RuntimeError("K8V4_W4A8_KERNEL must be xpu or onednn, got %s" % raw)
+    return value
+
+
+def parse_agroup(raw: str | None, kernel: str) -> int:
+    value = "0" if raw is None or raw.strip() == "" else raw.strip()
+    if value not in ("0", "32", "64", "128"):
+        raise RuntimeError("K8V4_W4A8_AGROUP must be 0, 32, 64 or 128, got %s" % raw)
+    if value != "0" and kernel != "onednn":
+        raise RuntimeError("K8V4_W4A8_AGROUP needs K8V4_W4A8_KERNEL=onednn")
+    return int(value)
+
+
+def flip_to_s4(qweight: torch.Tensor) -> torch.Tensor:
+    """u4 nibbles with zero point 8 -> s4 nibbles of the same values, in place."""
+    return qweight.bitwise_xor_(_S4_FLIP)
+
+
+def _quantize_grouped(flat: torch.Tensor, group: int):
+    """Symmetric int8 with one fp16 scale per token and per ``group`` channels.
+
+    Returns ``(q [M, K], scale [M, K/group])``. No env read: the prefill
+    forward compiles this.
+    """
+    rows, width = flat.shape
+    grouped = flat.reshape(rows, width // group, group).to(torch.float32)
+    scale = (grouped.abs().amax(dim=-1) / 127).clamp(min=1e-5).to(torch.float16)
+    quantized = torch.round(grouped / scale.to(torch.float32).unsqueeze(-1))
+    quantized = torch.clamp(quantized, -127, 127).to(torch.int8)
+    return quantized.reshape(rows, width), scale
+
+
+_GROUPED_COMPILED = None
+# k8v4_v030.w4a8_triton once K8V4_W4A8_KERNEL=onednn is installed on XPU; None
+# keeps the compiled-torch quantizers (the CPU tests use those).
+_TRITON = None
+
+
+def _lib():
+    return torch.ops.k8v4_w4a8
+
+
+def _s4_runtime(flat, packed, scales, group_size, bias, large):
+    """The library path for an s4 layer (empty zero point)."""
+    ops = _lib()
+    if not large:
+        out = ops.int4_gemm_w4a16(flat, packed, scales, None, group_size)
+    else:
+        bf16 = flat.dtype == torch.bfloat16
+        if _TRITON is not None:
+            if _AGROUP:
+                quant_x, x_scale = _TRITON.quantize_groups(flat, _AGROUP)
+            else:
+                quant_x, x_scale = _TRITON.quantize_rows(flat)
+        elif _AGROUP:
+            global _GROUPED_COMPILED
+            if _GROUPED_COMPILED is None:
+                _GROUPED_COMPILED = torch.compile(_quantize_grouped, dynamic=True, fullgraph=True)
+            quant_x, x_scale = _GROUPED_COMPILED(flat, _AGROUP)
+        else:
+            global _QUANT_COMPILED
+            if _QUANT_COMPILED is None:
+                _QUANT_COMPILED = torch.compile(_quantize_stored, dynamic=True, fullgraph=True)
+            quant_x, x_scale, _zero = _QUANT_COMPILED(flat)
+        out = ops.int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None,
+                                 group_size, None, bf16)
+        if out.dtype != flat.dtype:
+            out = out.to(dtype=flat.dtype)
+    if bias is not None:
+        out = out + bias
+    return out
+
+
 def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
     flat = x.reshape(-1, x.shape[-1])
+    if zeros.numel() == 0:
+        return _s4_runtime(flat, packed, scales, group_size, bias,
+                           _RUNTIME_ENABLED and flat.shape[0] > SMALL_M_MAX)
     branch = "w4a16" if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX else "w4a8"
     if _DIAGNOSTICS and branch not in _BRANCH_LOGGED:
         import sys
@@ -264,6 +402,294 @@ def _runtime_mlp_fake(x, packed, scales, zeros, group_size, bias):
     return x.new_empty((x.numel() // x.shape[-1], packed.shape[1]))
 
 
+# K8V4_W4A8_FUSED=silu (with K8V4_W4A8_KERNEL=onednn and K8V4_W4A8_AGROUP):
+# an MLP's down projection takes gate_up_proj's output and does
+# SiLU(gate) * up inside its grouped int8 quantizer, so the
+# [tokens, intermediate] product is never written out and read back. The
+# product is rounded to the activation dtype before quantizing, as the
+# unfused SiLU-and-mul output is. Rows at or below SMALL_M_MAX take vLLM's
+# silu_and_mul op and the library w4a16 GEMM.
+FUSIONS = ("silu", "gnorm", "addnorm")
+_FUSED = frozenset()
+_SILU_COMPILED = None
+
+
+def parse_fused(raw: str | None, kernel: str, agroup: int) -> frozenset:
+    """``silu`` and ``gnorm`` need grouped scales; ``addnorm`` also takes per-token scales."""
+    if raw is None or raw.strip() == "":
+        return frozenset()
+    names = [name.strip().lower() for name in raw.split(",")]
+    if any(name not in FUSIONS for name in names) or len(set(names)) != len(names):
+        raise RuntimeError("K8V4_W4A8_FUSED must be a comma list of %s, got %s"
+                           % (",".join(FUSIONS), raw))
+    if kernel != "onednn":
+        raise RuntimeError("K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn")
+    if not agroup and any(name in ("silu", "gnorm") for name in names):
+        raise RuntimeError("K8V4_W4A8_FUSED=silu/gnorm needs K8V4_W4A8_AGROUP")
+    return frozenset(names)
+
+
+def _silu_quantize_grouped(gate_up: torch.Tensor, group: int):
+    """``SiLU(gate) * up`` rounded to the input dtype, then ``_quantize_grouped``."""
+    width = gate_up.shape[-1] // 2
+    gate = gate_up[:, :width].to(torch.float32)
+    up = gate_up[:, width:].to(torch.float32)
+    product = (gate * torch.sigmoid(gate) * up).to(gate_up.dtype)
+    return _quantize_grouped(product, group)
+
+
+def _silu_and_mul(gate_up: torch.Tensor) -> torch.Tensor:
+    out = gate_up.new_empty((gate_up.shape[0], gate_up.shape[1] // 2))
+    torch.ops._C.silu_and_mul(out, gate_up)
+    return out
+
+
+def _silu_body(gate_up, packed, scales, zeros, group_size):
+    flat = gate_up.reshape(-1, gate_up.shape[-1])
+    if not (_RUNTIME_ENABLED and _AGROUP and flat.shape[0] > SMALL_M_MAX):
+        # Decode / verify rows: the compiled stock SiluAndMul rounds SiLU(gate) * up once; _C.silu_and_mul rounds
+        # SiLU(gate) first and differed from it in most elements (measured), so the Triton path rounds once too.
+        act = _TRITON.silu_mul(flat) if _TRITON is not None else _silu_and_mul(flat)
+        return _runtime_mlp_body(act, packed, scales, zeros, group_size, None)
+    global _SILU_COMPILED
+    if _TRITON is not None:
+        quant_x, x_scale = _TRITON.silu_quantize_groups(flat, _AGROUP)
+    else:
+        if _SILU_COMPILED is None:
+            _SILU_COMPILED = torch.compile(_silu_quantize_grouped, dynamic=True, fullgraph=True)
+        quant_x, x_scale = _SILU_COMPILED(flat, _AGROUP)
+    out = _lib().int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None, group_size, None,
+                                flat.dtype == torch.bfloat16)
+    return out if out.dtype == flat.dtype else out.to(dtype=flat.dtype)
+
+
+@torch.library.custom_op("k8v4_prefill::silu_gemm", mutates_args=())
+def runtime_silu_gemm(gate_up: torch.Tensor, packed: torch.Tensor, scales: torch.Tensor,
+                      zeros: torch.Tensor, group_size: int) -> torch.Tensor:
+    return _silu_body(gate_up, packed, scales, zeros, group_size)
+
+
+@runtime_silu_gemm.register_fake
+def _runtime_silu_fake(gate_up, packed, scales, zeros, group_size):
+    return gate_up.new_empty((gate_up.numel() // gate_up.shape[-1], packed.shape[1]))
+
+
+def _install_silu_mlp(cls) -> None:
+    """Route a marked MLP (down_proj._k8v4_silu_kernel) through the fused op."""
+    current = cls.forward
+    if getattr(current, "_k8v4_silu", False):
+        return
+
+    def forward(self, x, *args, **kwargs):
+        down = self.down_proj
+        kernel = getattr(down, "_k8v4_silu_kernel", None)
+        if kernel is None or args or kwargs or getattr(self, "expert_gate", None) is not None:
+            return current(self, x, *args, **kwargs)
+        gate_up, _ = self.gate_up_proj(x)
+        packed, scales, zeros = _compile_safe_views(kernel, down)
+        return runtime_silu_gemm(gate_up, packed, scales, zeros, int(kernel.config.group_size))
+
+    forward._k8v4_silu = True
+    forward._k8v4_orig = current
+    cls.forward = forward
+
+
+# K8V4_W4A8_FUSED=gnorm (also needs gdn in K8V4_W4A8_LAYERS): a GDN layer's
+# gated RMSNorm (vLLM's RMSNormGated.forward_static, per head, gate after the
+# norm) and the grouped int8 quantization of out_proj's input in one
+# compiled function inside out_proj's op, so the normed [tokens, value_dim]
+# output is not written out and read back.
+_GNORM_STATIC = None
+_GNORM_COMPILED = None
+
+
+def _gnorm(o, z, weight, eps: float, activation: str):
+    out = _GNORM_STATIC(o, z, weight, eps, o.dtype, None, True, activation)
+    return out.reshape(out.shape[0], -1)
+
+
+def _gnorm_quantize_grouped(o, z, weight, eps: float, activation: str, group: int):
+    return _quantize_grouped(_gnorm(o, z, weight, eps, activation), group)
+
+
+def _gnorm_body(o, z, weight, eps, activation, packed, scales, zeros, group_size):
+    if not (_RUNTIME_ENABLED and _AGROUP and o.shape[0] > SMALL_M_MAX):
+        # Decode / verify rows: the op is opaque to inductor, so the eager forward_static here was a chain of
+        # elementwise launches per GDN layer (+1.4 ms per decode step, measured) where the per-token config runs
+        # one compiled kernel. One Triton launch, same arithmetic order as forward_static.
+        if _TRITON is not None:
+            normed = _TRITON.gnorm(o, z, weight, eps, activation)
+        else:
+            normed = _gnorm(o, z, weight, eps, activation)
+        return _runtime_mlp_body(normed, packed, scales, zeros, group_size, None)
+    global _GNORM_COMPILED
+    if _TRITON is not None:
+        quant_x, x_scale = _TRITON.gnorm_quantize_groups(o, z, weight, eps, activation, _AGROUP)
+    else:
+        if _GNORM_COMPILED is None:
+            _GNORM_COMPILED = torch.compile(_gnorm_quantize_grouped, dynamic=True, fullgraph=True)
+        quant_x, x_scale = _GNORM_COMPILED(o, z, weight, eps, activation, _AGROUP)
+    out = _lib().int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None, group_size, None,
+                                o.dtype == torch.bfloat16)
+    return out if out.dtype == o.dtype else out.to(dtype=o.dtype)
+
+
+@torch.library.custom_op("k8v4_prefill::gnorm_gemm", mutates_args=())
+def runtime_gnorm_gemm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float,
+                       activation: str, packed: torch.Tensor, scales: torch.Tensor,
+                       zeros: torch.Tensor, group_size: int) -> torch.Tensor:
+    return _gnorm_body(o, z, weight, eps, activation, packed, scales, zeros, group_size)
+
+
+@runtime_gnorm_gemm.register_fake
+def _runtime_gnorm_fake(o, z, weight, eps, activation, packed, scales, zeros, group_size):
+    return o.new_empty((o.shape[0], packed.shape[1]))
+
+
+def _install_gnorm(cls) -> None:
+    """Route a marked GDN output projection (out_proj._k8v4_gnorm_kernel) through the fused op."""
+    current = cls._output_projection
+    if getattr(current, "_k8v4_gnorm", False):
+        return
+
+    def _output_projection(self, core_attn_out, z):
+        proj, norm = self.out_proj, self.norm
+        kernel = getattr(proj, "_k8v4_gnorm_kernel", None)
+        if (kernel is None or norm.group_size is not None or not norm.norm_before_gate
+                or getattr(norm, "bias", None) is not None or core_attn_out.dim() != 3):
+            return current(self, core_attn_out, z)
+        packed, scales, zeros = _compile_safe_views(kernel, proj)
+        return runtime_gnorm_gemm(core_attn_out, z, norm.weight, float(norm.eps), norm.activation,
+                                  packed, scales, zeros, int(kernel.config.group_size))
+
+    _output_projection._k8v4_gnorm = True
+    _output_projection._k8v4_orig = current
+    cls._output_projection = _output_projection
+
+
+# K8V4_W4A8_FUSED=addnorm (with K8V4_W4A8_KERNEL=onednn; mlp in K8V4_W4A8_LAYERS): a
+# decoder layer's post-attention residual add + Gemma RMSNorm and the int8
+# quantization of gate_up_proj's input run as one pass inside gate_up_proj's op,
+# so the normed [tokens, hidden] activation is never written out and read back.
+# Per-token or grouped scales, whichever K8V4_W4A8_AGROUP selects. Rows at or
+# below SMALL_M_MAX get the same add + norm unquantized and the w4a16 GEMM.
+# The layer forward is the stock Qwen3Next one with the post-attention norm and
+# the MLP's first GEMM merged; the installer checks that source and refuses
+# any other.
+_ADDNORM_COMPILED = None
+_ADDNORM_ANCHORS = (
+    "hidden_states, residual = self.input_layernorm(hidden_states, residual)",
+    "hidden_states = self.linear_attn(hidden_states=hidden_states)",
+    "hidden_states = self.self_attn(",
+    "if self.layer_scale:",
+    "hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)",
+    "hidden_states = self.mlp(hidden_states)",
+    "return hidden_states, residual",
+)
+
+
+def _addnorm_torch(x, residual, weight, eps: float):
+    """GemmaRMSNorm's fused-add path: (normed, new residual), both in x's dtype."""
+    v = x.to(torch.float32) + residual.to(torch.float32)
+    normed = v * torch.rsqrt(v.pow(2).mean(dim=-1, keepdim=True) + eps)
+    return (normed * (1.0 + weight.to(torch.float32))).to(x.dtype), v.to(x.dtype)
+
+
+def _addnorm_quantize(x, residual, weight, eps: float, group: int):
+    normed, new_residual = _addnorm_torch(x, residual, weight, eps)
+    if group:
+        return _quantize_grouped(normed, group), new_residual
+    quant_x, x_scale, _zero = _quantize_stored(normed)
+    return (quant_x, x_scale), new_residual
+
+
+def _addnorm_body(x, residual, weight, eps, packed, scales, zeros, group_size):
+    large = _RUNTIME_ENABLED and x.shape[0] > SMALL_M_MAX and zeros.numel() == 0
+    if not large:
+        if _TRITON is not None:
+            normed, new_residual = _TRITON.addnorm(x, residual, weight, eps)
+        else:
+            normed, new_residual = _addnorm_torch(x, residual, weight, eps)
+        return _runtime_mlp_body(normed, packed, scales, zeros, group_size, None), new_residual
+    global _ADDNORM_COMPILED
+    if _TRITON is not None:
+        (quant_x, x_scale), new_residual = _TRITON.addnorm_quantize(x, residual, weight, eps, _AGROUP)
+    else:
+        if _ADDNORM_COMPILED is None:
+            _ADDNORM_COMPILED = torch.compile(_addnorm_quantize, dynamic=True, fullgraph=True)
+        (quant_x, x_scale), new_residual = _ADDNORM_COMPILED(x, residual, weight, eps, _AGROUP)
+    out = _lib().int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None, group_size, None,
+                                x.dtype == torch.bfloat16)
+    return (out if out.dtype == x.dtype else out.to(dtype=x.dtype)), new_residual
+
+
+@torch.library.custom_op("k8v4_prefill::addnorm_gemm", mutates_args=())
+def runtime_addnorm_gemm(x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float,
+                         packed: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor,
+                         group_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    return _addnorm_body(x, residual, weight, eps, packed, scales, zeros, group_size)
+
+
+@runtime_addnorm_gemm.register_fake
+def _runtime_addnorm_fake(x, residual, weight, eps, packed, scales, zeros, group_size):
+    return x.new_empty((x.shape[0], packed.shape[1])), torch.empty_like(x)
+
+
+def _mlp_after_gate_up(mlp, gate_up):
+    """The rest of Qwen2MoeMLP.forward once gate_up_proj has run."""
+    down = mlp.down_proj
+    kernel = getattr(down, "_k8v4_silu_kernel", None)
+    if kernel is not None:
+        packed, scales, zeros = _compile_safe_views(kernel, down)
+        return runtime_silu_gemm(gate_up, packed, scales, zeros, int(kernel.config.group_size))
+    out, _ = down(mlp.act_fn(gate_up))
+    return out
+
+
+def check_addnorm_source(source: str) -> None:
+    missing = [anchor for anchor in _ADDNORM_ANCHORS if anchor not in source]
+    if missing:
+        raise RuntimeError("K8V4_W4A8_FUSED=addnorm: the installed vLLM decoder layer forward is not the one "
+                           "this fusion was written against (missing %s); refusing" % missing[0])
+
+
+def _install_addnorm(cls, base_forward) -> None:
+    """Route a decoder layer whose gate_up_proj is marked (_k8v4_addnorm_kernel) through the fused op."""
+    import inspect
+
+    if "forward" in vars(cls) and getattr(cls.forward, "_k8v4_addnorm", False):
+        return
+    if "forward" in vars(cls):
+        raise RuntimeError("K8V4_W4A8_FUSED=addnorm: %s defines its own forward; refusing" % cls.__name__)
+    check_addnorm_source(inspect.getsource(base_forward))
+    current = cls.forward
+
+    def forward(self, hidden_states, residual, positions, **kwargs):
+        mlp = self.mlp
+        gate_up_proj = getattr(mlp, "gate_up_proj", None)
+        kernel = getattr(gate_up_proj, "_k8v4_addnorm_kernel", None)
+        if (kernel is None or residual is None or kwargs or self.layer_scale
+                or self.use_attn_reduce_scatter_for_moe or getattr(mlp, "expert_gate", None) is not None):
+            return current(self, hidden_states, residual, positions, **kwargs)
+        hidden_states, residual = self.input_layernorm(hidden_states, residual)
+        if self.layer_type == "linear_attention":
+            hidden_states = self.linear_attn(hidden_states=hidden_states)
+        elif self.layer_type == "full_attention":
+            hidden_states = self.self_attn(hidden_states=hidden_states, positions=positions)
+        else:
+            raise ValueError("Invalid layer_type")
+        norm = self.post_attention_layernorm
+        packed, scales, zeros = _compile_safe_views(kernel, gate_up_proj)
+        gate_up, residual = runtime_addnorm_gemm(hidden_states, residual, norm.weight,
+                                                 float(norm.variance_epsilon), packed, scales, zeros,
+                                                 int(kernel.config.group_size))
+        return _mlp_after_gate_up(mlp, gate_up), residual
+
+    forward._k8v4_addnorm = True
+    forward._k8v4_orig = current
+    cls.forward = forward
+
+
 def _install_on_class(cls) -> None:
     global _ORIG_APPLY
     current = cls.apply_weights
@@ -278,6 +704,10 @@ def _install_on_class(cls) -> None:
             packed, scales, zeros = _compile_safe_views(self, layer)
             return runtime_mlp_gemm(x, packed, scales, zeros,
                                     int(self.config.group_size), bias)
+        if getattr(layer, "_k8v4_s4", False):
+            packed, scales, zeros = _compile_safe_views(self, layer)
+            return _runtime_mlp_body(x, packed, scales, zeros,
+                                     int(self.config.group_size), bias)
         if not _large_m(x):
             return _ORIG_APPLY(self, layer, x, bias)
         return _apply_w4a8(self, layer, x, bias)
@@ -285,6 +715,42 @@ def _install_on_class(cls) -> None:
     apply_weights._k8v4_w4a8 = True
     apply_weights._k8v4_orig = current
     cls.apply_weights = apply_weights
+    _install_s4_loader(cls)
+
+
+def _install_s4_loader(cls) -> None:
+    """With K8V4_W4A8_KERNEL=onednn, flip the selected layers to s4 after load."""
+    current = getattr(cls, "process_weights_after_loading", None)
+    if current is None or getattr(current, "_k8v4_s4", False):
+        return
+
+    def process_weights_after_loading(self, layer):
+        current(self, layer)
+        if _KERNEL != "onednn" or not _mlp_linear(layer):
+            return
+        if getattr(self.config, "zero_points", False):
+            return
+        zeros = getattr(layer, self.w_zp_name, None)
+        if zeros is None or zeros.numel() != 1 or int(zeros.reshape(-1)[0]) != 8:
+            return
+        qweight = getattr(layer, self.w_q_name)
+        flip_to_s4(qweight.data)
+        setattr(layer, self.w_zp_name, torch.nn.Parameter(
+            qweight.data.new_empty(0, dtype=torch.int8), requires_grad=False))
+        layer._k8v4_s4 = True
+        prefix = getattr(layer, "prefix", "") or ""
+        if ("silu" in _FUSED and _AGROUP and prefix.endswith(".mlp.down_proj")
+                and getattr(layer, "tp_size", 1) == 1):
+            layer._k8v4_silu_kernel = self
+        if ("gnorm" in _FUSED and _AGROUP and prefix.endswith(".linear_attn.out_proj")
+                and getattr(layer, "tp_size", 1) == 1):
+            layer._k8v4_gnorm_kernel = self
+        if ("addnorm" in _FUSED and prefix.endswith(".mlp.gate_up_proj")
+                and getattr(layer, "tp_size", 1) == 1 and getattr(layer, "bias", None) is None):
+            layer._k8v4_addnorm_kernel = self
+
+    process_weights_after_loading._k8v4_s4 = True
+    cls.process_weights_after_loading = process_weights_after_loading
 
 
 def wrap_kernel_module(module) -> None:
@@ -295,8 +761,9 @@ def wrap_kernel_module(module) -> None:
 
 
 class _KernelFinder:
-    def __init__(self, target: str):
+    def __init__(self, target: str, on_load=None):
         self.target = target
+        self.on_load = on_load
         self._busy = False
 
     def find_spec(self, fullname, path, target=None):
@@ -327,15 +794,16 @@ class _KernelFinder:
             return None
         if getattr(spec.loader, "_k8v4_w4a8_loader", False):
             return spec
-        spec.loader = _KernelLoader(spec.loader)
+        spec.loader = _KernelLoader(spec.loader, self.on_load)
         return spec
 
 
 class _KernelLoader:
     _k8v4_w4a8_loader = True
 
-    def __init__(self, inner):
+    def __init__(self, inner, on_load=None):
         self._inner = inner
+        self._on_load = on_load or wrap_kernel_module
 
     def create_module(self, spec):
         create = getattr(self._inner, "create_module", None)
@@ -345,7 +813,7 @@ class _KernelLoader:
 
     def exec_module(self, module):
         self._inner.exec_module(module)
-        wrap_kernel_module(module)
+        self._on_load(module)
 
 
 def install() -> None:
@@ -379,14 +847,77 @@ def remove_import_hook(finder=None) -> None:
 
 
 
+_ADDNORM_FINDER = None
+_ADDNORM_TARGET = "vllm.model_executor.models.qwen3_5"
+
+
+def _addnorm_on_load(module) -> None:
+    from vllm.model_executor.models import qwen3_next
+
+    _install_addnorm(module.Qwen3_5DecoderLayer, qwen3_next.Qwen3NextDecoderLayer.forward)
+
+
+def install_addnorm() -> None:
+    """Patch Qwen3_5DecoderLayer when vLLM imports it (now, if it already has)."""
+    global _ADDNORM_FINDER
+    import sys
+
+    existing = sys.modules.get(_ADDNORM_TARGET)
+    if existing is not None:
+        _addnorm_on_load(existing)
+        return
+    if _ADDNORM_FINDER is None:
+        _ADDNORM_FINDER = _KernelFinder(_ADDNORM_TARGET, _addnorm_on_load)
+        sys.meta_path.insert(0, _ADDNORM_FINDER)
+
+
 def install_if_requested() -> None:
     """Install before model compilation; cached opaque calls honor opt-out too."""
-    global _RUNTIME_ENABLED
+    global _RUNTIME_ENABLED, _LAYERS, _KERNEL, _AGROUP, _FUSED, _GNORM_STATIC, _TRITON
     mode = os.environ.get("K8V4_PREFILL_GEMM", "w4a16")
     if mode not in ("w4a16", "w4a8"):
         raise RuntimeError("K8V4_PREFILL_GEMM must be w4a16 or w4a8")
+    _LAYERS = parse_layer_families(os.environ.get("K8V4_W4A8_LAYERS"))
+    kernel = parse_kernel(os.environ.get("K8V4_W4A8_KERNEL"))
+    _AGROUP = parse_agroup(os.environ.get("K8V4_W4A8_AGROUP"), kernel)
+    _FUSED = parse_fused(os.environ.get("K8V4_W4A8_FUSED"), kernel, _AGROUP)
     _RUNTIME_ENABLED = mode == "w4a8"
+    _KERNEL = kernel if _RUNTIME_ENABLED else "xpu"
     if _RUNTIME_ENABLED:
-        install()
         import sys
-        sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
+        if _KERNEL == "onednn":
+            path = os.environ.get("K8V4_W4A8_LIB", _LIB_DEFAULT)
+            if not os.path.isfile(path):
+                raise RuntimeError("K8V4_W4A8_KERNEL=onednn needs the library at %s" % path)
+            torch.ops.load_library(path)
+            quant = os.environ.get("K8V4_W4A8_QUANT", "triton")
+            if quant not in ("triton", "torch"):
+                raise RuntimeError("K8V4_W4A8_QUANT must be triton or torch, got %s" % quant)
+            if quant == "triton":
+                from k8v4_v030 import w4a8_triton
+
+                _TRITON = w4a8_triton
+            sys.stderr.write("k8v4_w4a8: s4 weights via %s (oneDNN %s), activation group %s\n"
+                             % (path, torch.ops.k8v4_w4a8.onednn_version(),
+                                _AGROUP or "per token"))
+        install()
+        if "silu" in _FUSED:
+            from vllm.model_executor.models import qwen2_moe
+
+            _install_silu_mlp(qwen2_moe.Qwen2MoeMLP)
+            sys.stderr.write("k8v4_w4a8: SiLU-and-mul fused into the down projections' quantizer\n")
+        if "gnorm" in _FUSED:
+            from vllm.model_executor.layers.layernorm import RMSNormGated
+            from vllm.model_executor.layers.mamba.gdn import qwen_gdn_linear_attn
+
+            _GNORM_STATIC = RMSNormGated.forward_static
+            _install_gnorm(qwen_gdn_linear_attn.QwenGatedDeltaNetAttention)
+            sys.stderr.write("k8v4_w4a8: GDN gated norm fused into out_proj's quantizer\n")
+        if "addnorm" in _FUSED:
+            install_addnorm()
+            sys.stderr.write("k8v4_w4a8: post-attention add + RMSNorm fused into gate_up_proj's quantizer\n")
+        if _LAYERS == frozenset(("mlp",)):
+            sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
+        else:
+            sys.stderr.write("k8v4_w4a8: installer active for %s; small-M runtime gate=128\n"
+                             % ",".join(f for f in LAYER_FAMILIES if f in _LAYERS))

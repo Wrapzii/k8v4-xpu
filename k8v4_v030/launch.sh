@@ -1,11 +1,11 @@
 #!/bin/bash
-# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.30 XPU.
+# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.34 XPU.
 # TP2 defaults are the measured deployment. K8V4_TP=1 selects the Studio profile.
 # Does not stop containers other than the selected NAME.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-unified}
+IMAGE=${IMAGE:-vllm-openai-xpu:v0.34.0-k8v4-unified}
 TP=${K8V4_TP:-2}
 case "$TP" in
   1)
@@ -30,6 +30,65 @@ case "$TP" in
     ;;
   *) echo "K8V4_TP must be 1 or 2" >&2; exit 2 ;;
 esac
+# Optional [K, N]-contiguous dense weights for matching layers (k8v4_v030/ncontig.py). Unset changes
+# nothing; a set value is passed through and gets its own compile-cache namespace.
+ncontig_env=()
+if [ -n "${K8V4_NCONTIG_RE:-}" ]; then
+  ncontig_env+=(-e "K8V4_NCONTIG_RE=${K8V4_NCONTIG_RE}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-ncontig"
+fi
+# Optional bitwise-reproducible oneDNN matmuls for torch's dense linears (k8v4_v030/onednn_det.py).
+# Unset changes nothing; a runtime flag, so the compile-cache namespace stays.
+if [ -n "${K8V4_ONEDNN_DETERMINISTIC:-}" ]; then
+  [[ "$K8V4_ONEDNN_DETERMINISTIC" =~ ^[01]$ ]] || { echo "K8V4_ONEDNN_DETERMINISTIC must be 0 or 1" >&2; exit 2; }
+  ncontig_env+=(-e "K8V4_ONEDNN_DETERMINISTIC=${K8V4_ONEDNN_DETERMINISTIC}")
+fi
+# Optional wider W4A8 prefill gate (see k8v4_v030/w4a8_prefill.py). Unset keeps MLP-only and the
+# command unchanged; a set value is passed through and gets its own compile-cache namespace.
+w4a8_env=()
+if [ -n "${K8V4_W4A8_LAYERS:-}" ]; then
+  [[ "$K8V4_W4A8_LAYERS" =~ ^(all|(mlp|attn|gdn|other)(,(mlp|attn|gdn|other))*)$ ]] || {
+    echo "K8V4_W4A8_LAYERS must be all or a comma list of mlp,attn,gdn,other" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_LAYERS=${K8V4_W4A8_LAYERS}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-layers-${K8V4_W4A8_LAYERS//,/-}"
+fi
+# Optional s4 / grouped-scale W4A8 library (k8v4_v030/native/w4a8). K8V4_W4A8_KERNEL=onednn needs
+# K8V4_W4A8_LIB = the host path of libk8v4_w4a8.so, mounted read-only into the container.
+if [ -n "${K8V4_W4A8_KERNEL:-}" ]; then
+  [[ "$K8V4_W4A8_KERNEL" =~ ^(xpu|onednn)$ ]] || { echo "K8V4_W4A8_KERNEL must be xpu or onednn" >&2; exit 2; }
+  w4a8_env+=(-e "K8V4_W4A8_KERNEL=${K8V4_W4A8_KERNEL}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-kernel-${K8V4_W4A8_KERNEL}"
+  if [ "$K8V4_W4A8_KERNEL" = onednn ]; then
+    [ -n "${K8V4_W4A8_LIB:-}" ] && [ -f "${K8V4_W4A8_LIB}" ] || {
+      echo "K8V4_W4A8_KERNEL=onednn needs K8V4_W4A8_LIB=<host path of libk8v4_w4a8.so>" >&2; exit 2;
+    }
+    w4a8_env+=(-v "${K8V4_W4A8_LIB}:/opt/k8v4/libk8v4_w4a8.so:ro")
+  fi
+fi
+if [ -n "${K8V4_W4A8_AGROUP:-}" ]; then
+  [[ "$K8V4_W4A8_AGROUP" =~ ^(0|32|64|128)$ ]] || { echo "K8V4_W4A8_AGROUP must be 0, 32, 64 or 128" >&2; exit 2; }
+  [ "$K8V4_W4A8_AGROUP" = 0 ] || [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || {
+    echo "K8V4_W4A8_AGROUP needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_AGROUP=${K8V4_W4A8_AGROUP}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-agroup-${K8V4_W4A8_AGROUP}"
+fi
+if [ -n "${K8V4_W4A8_FUSED:-}" ]; then
+  # silu and gnorm need grouped scales (K8V4_W4A8_AGROUP); addnorm also runs with per-token scales.
+  fused_ok=1
+  [[ "$K8V4_W4A8_FUSED" =~ ^(silu|gnorm|addnorm)(,(silu|gnorm|addnorm)){0,2}$ ]] || fused_ok=0
+  for f in silu gnorm addnorm; do
+    if [[ ",$K8V4_W4A8_FUSED," =~ ,$f,(.*,)?$f, ]]; then fused_ok=0; fi
+  done
+  [ "$fused_ok" = 1 ] || { echo "K8V4_W4A8_FUSED must be a comma list of silu, gnorm, addnorm" >&2; exit 2; }
+  [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || { echo "K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2; }
+  if [[ ",$K8V4_W4A8_FUSED," =~ ,(silu|gnorm), ]] && [[ "${K8V4_W4A8_AGROUP:-0}" == 0 ]]; then
+    echo "K8V4_W4A8_FUSED=silu/gnorm needs K8V4_W4A8_AGROUP" >&2; exit 2
+  fi
+  w4a8_env+=(-e "K8V4_W4A8_FUSED=${K8V4_W4A8_FUSED}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-fused-${K8V4_W4A8_FUSED//,/-}"
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
@@ -68,6 +127,47 @@ for ((i=1; i<=MAX_SEQS; i++)); do
   CAPTURE_SIZES+=$((i * 7))
 done
 CAPTURE_SIZES+="]"
+# Optional draft depth by batch size: K8V4_MTP_SHARED_DEPTH=N keeps 6 draft tokens while one
+# request runs and drafts N while two or more run (vLLM num_speculative_tokens_per_batch_size).
+# Unset (the default) keeps 6 for every batch. The N-depth verify widths join the capture list.
+SPEC_CONFIG='{"method":"mtp","num_speculative_tokens":6}'
+SHARED_DEPTH=${K8V4_MTP_SHARED_DEPTH:-}
+if [ -n "$SHARED_DEPTH" ]; then
+  [[ "$SHARED_DEPTH" =~ ^[1-6]$ ]] || { echo "K8V4_MTP_SHARED_DEPTH must be 1..6" >&2; exit 2; }
+  if [ "$MAX_SEQS" -gt 1 ]; then
+    SPEC_CONFIG="{\"method\":\"mtp\",\"num_speculative_tokens\":6,\"num_speculative_tokens_per_batch_size\":[[1,1,6],[2,$MAX_SEQS,$SHARED_DEPTH]]}"
+    sizes=()
+    for ((i=1; i<=MAX_SEQS; i++)); do
+      sizes+=($((i * 7)))
+      if [ "$i" -gt 1 ]; then sizes+=($((i * (1 + SHARED_DEPTH)))); fi
+    done
+    CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
+  fi
+fi
+# Deep copy drafting (k8v4_v030/deep_draft.py, vLLM 0.34): K8V4_DEEP_DRAFT=lo,hi n-gram lengths.
+# A lone copying request drafts K8V4_DEEP_DEPTH (default 15) copied tokens, verified in decode-tile
+# chunks (K8V4_VERIFY_CHUNK, default 8); otherwise it keeps MTP depth 6, and 2+ requests draft 3.
+# Off unless set; the default speculative config and capture list are unchanged.
+if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
+  [[ "$K8V4_DEEP_DRAFT" =~ ^[0-9]+(,[0-9]+)?$ ]] || { echo "K8V4_DEEP_DRAFT must be lo,hi" >&2; exit 2; }
+  DEEP_DEPTH=${K8V4_DEEP_DEPTH:-15}
+  [[ "$DEEP_DEPTH" =~ ^[0-9]+$ ]] && [ "$DEEP_DEPTH" -ge 7 ] && [ "$DEEP_DEPTH" -le 31 ] || { echo "K8V4_DEEP_DEPTH must be 7..31" >&2; exit 2; }
+  SCHEDULE="[1,1,$DEEP_DEPTH]"
+  if [ "$MAX_SEQS" -gt 1 ]; then SCHEDULE+=",[2,$MAX_SEQS,3]"; fi
+  SPEC_CONFIG="{\"method\":\"mtp\",\"num_speculative_tokens\":$DEEP_DEPTH,\"num_speculative_tokens_per_batch_size\":[$SCHEDULE]}"
+  sizes=(7 $((DEEP_DEPTH + 1)))
+  for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * 4))); done
+  # K8V4_DEEP_ALL=1: two or more requests that are all copying draft the deep depth too; =any: while
+  # any of them copies (k8v4_v030/deep_draft.py). Every batch width at the deep depth joins the capture list.
+  DEEP_ALL=${K8V4_DEEP_ALL:-0}
+  [[ "$DEEP_ALL" =~ ^(0|1|any)$ ]] || { echo "K8V4_DEEP_ALL must be 0, 1 or any" >&2; exit 2; }
+  if [ "$DEEP_ALL" != 0 ]; then
+    for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * (DEEP_DEPTH + 1)))); done
+  fi
+  CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
+elif [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then
+  echo "K8V4_DEEP_ALL needs K8V4_DEEP_DRAFT" >&2; exit 2
+fi
 
 if [ -z "$MODEL_DIR" ] || [ ! -d "$MODEL_DIR" ]; then
   echo "Set MODEL_DIR to the local weights directory." >&2
@@ -97,6 +197,83 @@ if [ "$PREFIX_CACHING" = 1 ]; then
   prefix+=(--enable-prefix-caching)
 else
   prefix+=(--no-enable-prefix-caching --mamba-cache-mode=none)
+fi
+# Optional prefix-hit granularity (see docs/2026-11-19-prefix-match-unit.md). The GDN state page forces
+# the 2112-token block, and without a match unit a hit lands on a 2112 boundary minus one block (MTP),
+# so a warm repeat recomputes 2-4K tokens. K8V4_PREFIX_MATCH_UNIT=64 hashes every 64-token page and
+# checkpoints the GDN state at the prompt's last 64-token boundary. Unset keeps vLLM's default.
+MATCH_UNIT=${K8V4_PREFIX_MATCH_UNIT:-}
+JUNCTIONS=${K8V4_PREFIX_JUNCTIONS:-0}
+[[ "$JUNCTIONS" =~ ^[01]$ ]] || { echo "K8V4_PREFIX_JUNCTIONS must be 0 or 1" >&2; exit 2; }
+if [ -n "$MATCH_UNIT" ]; then
+  # vLLM checks that it divides the block; the 64-token page is the floor.
+  [[ "$MATCH_UNIT" =~ ^[1-9][0-9]*$ ]] && [ $((MATCH_UNIT % 64)) = 0 ] || {
+    echo "K8V4_PREFIX_MATCH_UNIT must be a positive multiple of the 64-token page" >&2; exit 2;
+  }
+  [ "$PREFIX_CACHING" = 1 ] || { echo "K8V4_PREFIX_MATCH_UNIT needs K8V4_PREFIX_CACHING=1" >&2; exit 2; }
+  prefix+=(--prefix-match-unit="$MATCH_UNIT")
+fi
+if [ "$JUNCTIONS" = 1 ]; then
+  [ -n "$MATCH_UNIT" ] || {
+    echo "K8V4_PREFIX_JUNCTIONS=1 needs K8V4_PREFIX_MATCH_UNIT" >&2; exit 2;
+  }
+  prefix+=(--enable-mamba-shared-prefix-checkpoint)
+fi
+# Optional activation dtype (docs/2026-11-20-last-3ms.md). Unset keeps bfloat16. float16 is what our B70
+# stack serves: the K8/V4 decode kernels take and return fp16, so with bf16 activations every attention
+# layer converts q, k, v and the output (four small copy kernels per layer per step). Changes numerics.
+DTYPE=bfloat16
+if [ -n "${K8V4_DTYPE:-}" ]; then
+  [[ "$K8V4_DTYPE" =~ ^(bfloat16|float16)$ ]] || { echo "K8V4_DTYPE must be bfloat16 or float16" >&2; exit 2; }
+  DTYPE=$K8V4_DTYPE
+fi
+# Optional GDN recurrent-state dtype (docs/2026-11-19-decode-push.md). Unset keeps vLLM's choice, which for
+# Qwen3.5-family checkpoints is the config's mamba_ssm_dtype (float32 in the Swift bake). float16 halves the
+# GDN state memory (KV 384K -> 445K tokens at util 0.96, 4 seqs, one B70) and changes numerics; the stock spec
+# kernel is not faster with it (16-bit state stores), K8V4_GDN_RECOVERSSM is. Off unless set.
+mamba=()
+if [ -n "${K8V4_MAMBA_SSM_DTYPE:-}" ]; then
+  [[ "$K8V4_MAMBA_SSM_DTYPE" =~ ^(float32|float16|bfloat16)$ ]] || {
+    echo "K8V4_MAMBA_SSM_DTYPE must be float32, float16 or bfloat16" >&2; exit 2;
+  }
+  mamba+=(--mamba-ssm-cache-dtype="$K8V4_MAMBA_SSM_DTYPE")
+fi
+# Optional RecoverSSM spec verify on the GDN layers (k8v4_v030/gdn_recoverssm.py): K8V4_GDN_RECOVERSSM=1 passes
+# --use-replayssm and mounts build/libk8v4_rssm.so (k8v4_v030/compile_rssm.sh; K8V4_RSSM_LIB overrides the path).
+# Off unless set.
+rssm=()
+if [ -n "${K8V4_GDN_RECOVERSSM:-}" ]; then
+  [[ "$K8V4_GDN_RECOVERSSM" =~ ^[01]$ ]] || { echo "K8V4_GDN_RECOVERSSM must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_GDN_RECOVERSSM" = 1 ]; then
+    RSSM_LIB=${K8V4_RSSM_LIB:-$ROOT/build/libk8v4_rssm.so}
+    [ -f "$RSSM_LIB" ] || { echo "K8V4_GDN_RECOVERSSM=1 needs $RSSM_LIB (run k8v4_v030/compile_rssm.sh)" >&2; exit 2; }
+    extra+=(-v "$(cd "$(dirname "$RSSM_LIB")" && pwd)/$(basename "$RSSM_LIB"):/opt/k8v4/libk8v4_rssm.so:ro"
+            -e K8V4_GDN_RECOVERSSM=1 -e K8V4_RSSM_LIB=/opt/k8v4/libk8v4_rssm.so)
+    rssm+=(--use-replayssm)
+  fi
+fi
+# Optional RecoverSSM verify kernel and deferred commit (k8v4_v030/rssm_defer.py, native/rssm/rssm_verify_slm.hpp):
+# K8V4_RSSM_VERIFY=slm stages each window's inputs in SLM (bit-identical, -6% verify); K8V4_RSSM_DEFER_COMMIT=1
+# folds a step's accepted records in the next step's verify instead of a separate commit pass over the states
+# (bit-identical; -0.5 ms per 4-user 63K step). Both need K8V4_GDN_RECOVERSSM=1 and a libk8v4_rssm.so built from
+# this tree; windows of at most 16 tokens (deep drafting at depth 15 fits). Off unless set.
+if [ -n "${K8V4_RSSM_VERIFY:-}" ]; then
+  [[ "$K8V4_RSSM_VERIFY" =~ ^(stock|slm)$ ]] || { echo "K8V4_RSSM_VERIFY must be stock or slm" >&2; exit 2; }
+  [ "${K8V4_GDN_RECOVERSSM:-}" = 1 ] || { echo "K8V4_RSSM_VERIFY needs K8V4_GDN_RECOVERSSM=1" >&2; exit 2; }
+  extra+=(-e "K8V4_RSSM_VERIFY=$K8V4_RSSM_VERIFY")
+fi
+if [ -n "${K8V4_RSSM_DEFER_COMMIT:-}" ]; then
+  [[ "$K8V4_RSSM_DEFER_COMMIT" =~ ^[01]$ ]] || { echo "K8V4_RSSM_DEFER_COMMIT must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_RSSM_DEFER_COMMIT" = 1 ]; then
+    [ "${K8V4_GDN_RECOVERSSM:-}" = 1 ] || { echo "K8V4_RSSM_DEFER_COMMIT=1 needs K8V4_GDN_RECOVERSSM=1" >&2; exit 2; }
+    extra+=(-e K8V4_RSSM_DEFER_COMMIT=1)
+  fi
+fi
+# Optional: all draft decode steps of a batch in one XPU graph (k8v4_v030/draft_fused.py). Bit-identical
+# drafts; removes the per-step draft metadata builds and graph launches. Off unless set.
+if [ -n "${K8V4_DRAFT_FUSED_DECODE:-}" ]; then
+  [[ "$K8V4_DRAFT_FUSED_DECODE" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_FUSED_DECODE must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_FUSED_DECODE=${K8V4_DRAFT_FUSED_DECODE}")
 fi
 if [ "$TP" = 2 ]; then
   extra+=(
@@ -140,6 +317,140 @@ fi
 if [ -n "${XE2_KV_S2_PARALLEL:-}" ]; then
   extra+=(-e "XE2_KV_S2_PARALLEL=${XE2_KV_S2_PARALLEL}")
 fi
+# Startup warmup of the warm-prefix multi-user path (k8v4_v030/warm_prefix_warmup.py). Off unless set.
+if [ -n "${K8V4_WARMUP_WARM_PREFIX:-}" ]; then
+  [[ "$K8V4_WARMUP_WARM_PREFIX" =~ ^[01]$ ]] || { echo "K8V4_WARMUP_WARM_PREFIX must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_WARMUP_WARM_PREFIX=${K8V4_WARMUP_WARM_PREFIX}")
+fi
+if [ -n "${K8V4_WARMUP_WARM_PREFIX_CTX:-}" ]; then
+  [[ "$K8V4_WARMUP_WARM_PREFIX_CTX" =~ ^[1-9][0-9]*$ ]] || {
+    echo "K8V4_WARMUP_WARM_PREFIX_CTX must be a positive integer" >&2; exit 2; }
+  extra+=(-e "K8V4_WARMUP_WARM_PREFIX_CTX=${K8V4_WARMUP_WARM_PREFIX_CTX}")
+fi
+
+# Optional Hadamard-rotated K / V cache contents (k8v4_v030/kv_rotate.py). Unset keeps the command unchanged.
+if [ -n "${K8V4_KV_ROTATE:-}" ]; then
+  [[ "$K8V4_KV_ROTATE" =~ ^(k|v|kv)$ ]] || { echo "K8V4_KV_ROTATE must be k, v or kv" >&2; exit 2; }
+  extra+=(-e "K8V4_KV_ROTATE=${K8V4_KV_ROTATE}")
+fi
+# Optional OpenAI-API behaviour for agent clients (docs/2026-11-19-agent-parity.md). Each is off unless
+# set; unset keeps the command unchanged.
+#   K8V4_CHAT_TEMPLATE_KWARGS  JSON object -> --default-chat-template-kwargs (e.g. a default reasoning effort)
+#   K8V4_PROMPT_TOKENS_DETAILS 1 -> --enable-prompt-tokens-details (usage.prompt_tokens_details.cached_tokens)
+#   K8V4_HTTP_KEEP_ALIVE       seconds -> VLLM_HTTP_TIMEOUT_KEEP_ALIVE (vLLM's 5 s drops idle pooled sockets)
+#   K8V4_CHAT_TEMPLATE_FIX     1 -> render non-leading system messages in place and accept the
+#                              reasoning_effort values high/minimal (k8v4_v030/chat_template_fix.py)
+api=()
+entry=()
+serve=()
+if [ -n "${K8V4_CHAT_TEMPLATE_KWARGS:-}" ]; then
+  [[ "$K8V4_CHAT_TEMPLATE_KWARGS" =~ ^\{.*\}$ ]] || { echo "K8V4_CHAT_TEMPLATE_KWARGS must be a JSON object" >&2; exit 2; }
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -I -c 'import json, sys; v = json.loads(sys.argv[1]); assert isinstance(v, dict)' \
+      "$K8V4_CHAT_TEMPLATE_KWARGS" 2>/dev/null || { echo "K8V4_CHAT_TEMPLATE_KWARGS must be a JSON object" >&2; exit 2; }
+  fi
+  api+=(--default-chat-template-kwargs="$K8V4_CHAT_TEMPLATE_KWARGS")
+fi
+if [ -n "${K8V4_PROMPT_TOKENS_DETAILS:-}" ]; then
+  [[ "$K8V4_PROMPT_TOKENS_DETAILS" =~ ^[01]$ ]] || { echo "K8V4_PROMPT_TOKENS_DETAILS must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_PROMPT_TOKENS_DETAILS" = 1 ]; then api+=(--enable-prompt-tokens-details); fi
+fi
+if [ -n "${K8V4_HTTP_KEEP_ALIVE:-}" ]; then
+  [[ "$K8V4_HTTP_KEEP_ALIVE" =~ ^[1-9][0-9]*$ ]] || { echo "K8V4_HTTP_KEEP_ALIVE must be a positive number of seconds" >&2; exit 2; }
+  extra+=(-e "VLLM_HTTP_TIMEOUT_KEEP_ALIVE=${K8V4_HTTP_KEEP_ALIVE}")
+fi
+if [ -n "${K8V4_CHAT_TEMPLATE_FIX:-}" ]; then
+  [[ "$K8V4_CHAT_TEMPLATE_FIX" =~ ^[01]$ ]] || { echo "K8V4_CHAT_TEMPLATE_FIX must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_CHAT_TEMPLATE_FIX" = 1 ]; then
+    # Refuse a template without the anchors before anything starts (the container checks again).
+    if command -v python3 >/dev/null 2>&1 && [ -f "$TEMPLATE" ]; then
+      python3 -I "$HERE/chat_template_fix.py" "$TEMPLATE" /dev/null || exit 2
+    fi
+    entry+=(--entrypoint python3)
+    serve+=(-I /opt/k8v4/k8v4_v030/chat_template_fix.py --serve)
+  fi
+fi
+# Optional host-resident INT8 embedding table (k8v4_v030/embed_int8_runtime.py). Off unless set.
+if [ -n "${K8V4_EMBED_HOST:-}" ]; then
+  [[ "$K8V4_EMBED_HOST" =~ ^[01]$ ]] || { echo "K8V4_EMBED_HOST must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_EMBED_HOST=${K8V4_EMBED_HOST}")
+fi
+# MTP draft skips loading the tables it shares with the target (k8v4_v030/draft_shared.py). Off unless set.
+if [ -n "${K8V4_DRAFT_SKIP_SHARED:-}" ]; then
+  [[ "$K8V4_DRAFT_SKIP_SHARED" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_SKIP_SHARED must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_SKIP_SHARED=${K8V4_DRAFT_SKIP_SHARED}")
+fi
+
+# Optional head-parallel GDN prefill kernels (see docs/2026-11-19-gdn-heads.md): K8V4_GDN_HEADS=1 mounts
+# build/libgdn_attn_kernels_xe_2.so (k8v4_v030/compile_gdn.sh; K8V4_GDN_HEADS_LIB overrides the path)
+# over the image's vllm-xpu-kernels copy (build it against the same vLLM image). Bit-identical outputs.
+# Off unless set.
+GDN_HEADS=${K8V4_GDN_HEADS:-0}
+[[ "$GDN_HEADS" =~ ^[01]$ ]] || { echo "K8V4_GDN_HEADS must be 0 or 1" >&2; exit 2; }
+if [ "$GDN_HEADS" = 1 ]; then
+  GDN_LIB=${K8V4_GDN_HEADS_LIB:-$ROOT/build/libgdn_attn_kernels_xe_2.so}
+  [ -f "$GDN_LIB" ] || { echo "K8V4_GDN_HEADS=1 needs $GDN_LIB (run k8v4_v030/compile_gdn.sh)" >&2; exit 2; }
+  extra+=(-v "$(cd "$(dirname "$GDN_LIB")" && pwd)/$(basename "$GDN_LIB"):/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so:ro")
+fi
+# Optional fp16 S1 partial outputs (about -18% on the q7 verify attention op at 128K). Off unless set.
+if [ -n "${XE2_KV_PARTIAL_FP16:-}" ]; then
+  extra+=(-e "XE2_KV_PARTIAL_FP16=${XE2_KV_PARTIAL_FP16}")
+fi
+# Sub-group-parallel S1 for the 1-token draft is on by default; set 0 to disable.
+if [ -n "${XE2_KV_SMALL_S1:-}" ]; then
+  extra+=(-e "XE2_KV_SMALL_S1=${XE2_KV_SMALL_S1}")
+fi
+# Optional multi-page decode S1 (see docs/2026-11-19-decode-s1-multipage.md). Off unless set.
+for v in XE2_KV_S1_SPLITS XE2_KV_S1_PAGES XE2_KV_S1_GRF; do
+  if [ -n "${!v:-}" ]; then
+    extra+=(-e "$v=${!v}")
+  fi
+done
+# Optional faster multi-row S1 for the multi-page kernel (docs/2026-11-19-decode-s1-rows.md). Off unless set.
+if [ -n "${XE2_KV_S1_FAST:-}" ]; then
+  case "$XE2_KV_S1_FAST" in
+    0|1) extra+=(-e "XE2_KV_S1_FAST=${XE2_KV_S1_FAST}") ;;
+    *) echo "XE2_KV_S1_FAST must be 0 or 1, got '$XE2_KV_S1_FAST'" >&2; exit 2 ;;
+  esac
+fi
+# Optional one launch for all requests of a decode batch (q-pack, S1, S2; multi-page S1 only). Off unless set.
+if [ -n "${XE2_KV_BATCH_REQS:-}" ]; then
+  case "$XE2_KV_BATCH_REQS" in
+    0|1) extra+=(-e "XE2_KV_BATCH_REQS=${XE2_KV_BATCH_REQS}") ;;
+    *) echo "XE2_KV_BATCH_REQS must be 0 or 1, got '$XE2_KV_BATCH_REQS'" >&2; exit 2 ;;
+  esac
+fi
+# Optional shared-prefix cascade for the one-row drafter batch (needs XE2_KV_BATCH_REQS=1). Off unless set.
+if [ -n "${XE2_KV_CASCADE:-}" ]; then
+  case "$XE2_KV_CASCADE" in
+    0|1) extra+=(-e "XE2_KV_CASCADE=${XE2_KV_CASCADE}") ;;
+    *) echo "XE2_KV_CASCADE must be 0 or 1, got '$XE2_KV_CASCADE'" >&2; exit 2 ;;
+  esac
+fi
+
+# MTP draft-layer prefill attention on the last row only (k8v4_v030/draft_lastrow.py). Off unless set.
+if [ -n "${K8V4_DRAFT_LASTROW:-}" ]; then
+  extra+=(-e "K8V4_DRAFT_LASTROW=${K8V4_DRAFT_LASTROW}")
+fi
+
+# Frequency-ranked MTP draft vocabulary (k8v4_v030/draft_vocab.py): a host JSON list of token ids,
+# mounted read-only. Off unless set.
+if [ -n "${K8V4_DRAFT_VOCAB:-}" ]; then
+  [ -f "$K8V4_DRAFT_VOCAB" ] || { echo "K8V4_DRAFT_VOCAB must name a JSON file: $K8V4_DRAFT_VOCAB" >&2; exit 2; }
+  extra+=(-v "$(realpath "$K8V4_DRAFT_VOCAB"):/opt/k8v4/draft_vocab.json:ro" -e K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json)
+fi
+
+# Spec-decode verify wider than the 10-row decode tile, in row chunks (k8v4_v030/verify_chunk.py). Off unless set.
+if [ -n "${K8V4_VERIFY_CHUNK:-}" ]; then
+  extra+=(-e "K8V4_VERIFY_CHUNK=${K8V4_VERIFY_CHUNK}")
+fi
+
+if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
+  extra+=(-e "K8V4_DEEP_DRAFT=${K8V4_DEEP_DRAFT}")
+  if [ -z "${K8V4_VERIFY_CHUNK:-}" ]; then extra+=(-e K8V4_VERIFY_CHUNK=8); fi
+  if [ -n "${K8V4_DEEP_MTP_DEPTH:-}" ]; then extra+=(-e "K8V4_DEEP_MTP_DEPTH=${K8V4_DEEP_MTP_DEPTH}"); fi
+  if [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then extra+=(-e "K8V4_DEEP_ALL=${K8V4_DEEP_ALL}"); fi
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
@@ -151,6 +462,8 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -v "${CACHE}:/root/.cache/vllm" \
   -v "${HERE}:/opt/k8v4/k8v4_v030:ro" \
   "${extra[@]}" \
+  "${ncontig_env[@]}" \
+  "${w4a8_env[@]}" \
   -e PYTHONPATH=/opt/k8v4 \
   -e XE2_KV_LIB=/opt/k8v4/libxe2_kv.so \
   -e K8V4_SDPA_LIB=/opt/k8v4/libk8v4_sdpa.so \
@@ -172,13 +485,15 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -e VLLM_XPU_ENABLE_XPU_GRAPH=1 \
   -e ZE_AFFINITY_MASK="$DEVICES" \
   -e ZE_FLAT_DEVICE_HIERARCHY=COMPOSITE \
+  "${entry[@]}" \
   "$IMAGE" \
+  "${serve[@]}" \
   /model \
   --host=0.0.0.0 \
   --port=8000 \
   --served-model-name="$SERVED_NAME" \
   --gpu-memory-utilization="$GPU_UTIL" \
-  --dtype=bfloat16 \
+  --dtype="$DTYPE" \
   --max-model-len="$MAX_MODEL_LEN" \
   --kv-cache-dtype=int8_k_int4_v \
   --tensor-parallel-size="$TP" \
@@ -188,9 +503,12 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --tool-call-parser=qwen3_xml \
   --reasoning-parser=qwen3 \
   "${prefix[@]}" \
+  "${mamba[@]}" \
+  "${rssm[@]}" \
   "${multimodal[@]}" \
+  "${api[@]}" \
   --trust-remote-code \
-  --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
+  --speculative-config="$SPEC_CONFIG" \
   --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}")
 
 if [ "$DRY_RUN" = 1 ]; then
