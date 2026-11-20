@@ -236,6 +236,22 @@ class LaunchProfileTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(b'K8V4_MAMBA_SSM_DTYPE', result.stderr)
 
+    def test_w4a8_kernel_and_group_need_the_library(self):
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn')
+        self.assertEqual(result.returncode, 2)
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_AGROUP='64')
+        self.assertEqual(result.returncode, 2)
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn', K8V4_W4A8_LIB=lib.name,
+                                        K8V4_W4A8_AGROUP='64')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('%s:/opt/k8v4/libk8v4_w4a8.so:ro' % lib.name, args)
+            self.assertIn('K8V4_W4A8_KERNEL=onednn', args)
+            self.assertIn('K8V4_W4A8_AGROUP=64', args)
+            self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-kernel-onednn-agroup-64', args)
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='b70', K8V4_W4A8_LIB=lib.name)
+            self.assertEqual(result.returncode, 2)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

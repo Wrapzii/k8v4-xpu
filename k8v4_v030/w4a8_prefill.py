@@ -275,8 +275,97 @@ def _w4a16_runtime(flat, packed, scales, zeros, group_size, bias):
     )
 
 
+# K8V4_W4A8_KERNEL=onednn (opt-in): the selected layers keep their GPTQ
+# nibbles as s4 with NO zero point and run the k8v4_w4a8 library
+# (native/w4a8: vllm-xpu-kernels' oneDNN int4 GEMMs with the zero points
+# optional, bf16 output, grouped activation scales). The stock ops always
+# hand oneDNN a u4 weight zero point and, for W4A8, a source zero point,
+# and the compensation for them costs GEMM time even when both are
+# constants. u4 with zero point 8 equals s4 of the same nibbles XOR 0x8,
+# so the weights are flipped once at load. Such a layer's zero point is an
+# empty tensor, and its decode GEMM also runs the library (bf16 x s4).
+# K8V4_W4A8_AGROUP=G (with onednn): one activation scale per token AND per
+# G input channels instead of one per token.
+KERNELS = ("xpu", "onednn")
+_KERNEL = "xpu"
+_AGROUP = 0
+_S4_FLIP = -2004318072  # 0x88888888 as int32: XOR 0x8 in every nibble
+_LIB_DEFAULT = "/opt/k8v4/libk8v4_w4a8.so"
+
+
+def parse_kernel(raw: str | None) -> str:
+    value = "xpu" if raw is None or raw.strip() == "" else raw.strip().lower()
+    if value not in KERNELS:
+        raise RuntimeError("K8V4_W4A8_KERNEL must be xpu or onednn, got %s" % raw)
+    return value
+
+
+def parse_agroup(raw: str | None, kernel: str) -> int:
+    value = "0" if raw is None or raw.strip() == "" else raw.strip()
+    if value not in ("0", "32", "64", "128"):
+        raise RuntimeError("K8V4_W4A8_AGROUP must be 0, 32, 64 or 128, got %s" % raw)
+    if value != "0" and kernel != "onednn":
+        raise RuntimeError("K8V4_W4A8_AGROUP needs K8V4_W4A8_KERNEL=onednn")
+    return int(value)
+
+
+def flip_to_s4(qweight: torch.Tensor) -> torch.Tensor:
+    """u4 nibbles with zero point 8 -> s4 nibbles of the same values, in place."""
+    return qweight.bitwise_xor_(_S4_FLIP)
+
+
+def _quantize_grouped(flat: torch.Tensor, group: int):
+    """Symmetric int8 with one fp16 scale per token and per ``group`` channels.
+
+    Returns ``(q [M, K], scale [M, K/group])``. No env read: the prefill
+    forward compiles this.
+    """
+    rows, width = flat.shape
+    grouped = flat.reshape(rows, width // group, group).to(torch.float32)
+    scale = (grouped.abs().amax(dim=-1) / 127).clamp(min=1e-5).to(torch.float16)
+    quantized = torch.round(grouped / scale.to(torch.float32).unsqueeze(-1))
+    quantized = torch.clamp(quantized, -127, 127).to(torch.int8)
+    return quantized.reshape(rows, width), scale
+
+
+_GROUPED_COMPILED = None
+
+
+def _lib():
+    return torch.ops.k8v4_w4a8
+
+
+def _s4_runtime(flat, packed, scales, group_size, bias, large):
+    """The library path for an s4 layer (empty zero point)."""
+    ops = _lib()
+    if not large:
+        out = ops.int4_gemm_w4a16(flat, packed, scales, None, group_size)
+    else:
+        bf16 = flat.dtype == torch.bfloat16
+        if _AGROUP:
+            global _GROUPED_COMPILED
+            if _GROUPED_COMPILED is None:
+                _GROUPED_COMPILED = torch.compile(_quantize_grouped, dynamic=True, fullgraph=True)
+            quant_x, x_scale = _GROUPED_COMPILED(flat, _AGROUP)
+        else:
+            global _QUANT_COMPILED
+            if _QUANT_COMPILED is None:
+                _QUANT_COMPILED = torch.compile(_quantize_stored, dynamic=True, fullgraph=True)
+            quant_x, x_scale, _zero = _QUANT_COMPILED(flat)
+        out = ops.int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None,
+                                 group_size, None, bf16)
+        if out.dtype != flat.dtype:
+            out = out.to(dtype=flat.dtype)
+    if bias is not None:
+        out = out + bias
+    return out
+
+
 def _runtime_mlp_body(x, packed, scales, zeros, group_size, bias):
     flat = x.reshape(-1, x.shape[-1])
+    if zeros.numel() == 0:
+        return _s4_runtime(flat, packed, scales, group_size, bias,
+                           _RUNTIME_ENABLED and flat.shape[0] > SMALL_M_MAX)
     branch = "w4a16" if not _RUNTIME_ENABLED or flat.shape[0] <= SMALL_M_MAX else "w4a8"
     if _DIAGNOSTICS and branch not in _BRANCH_LOGGED:
         import sys
@@ -319,6 +408,10 @@ def _install_on_class(cls) -> None:
             packed, scales, zeros = _compile_safe_views(self, layer)
             return runtime_mlp_gemm(x, packed, scales, zeros,
                                     int(self.config.group_size), bias)
+        if getattr(layer, "_k8v4_s4", False):
+            packed, scales, zeros = _compile_safe_views(self, layer)
+            return _runtime_mlp_body(x, packed, scales, zeros,
+                                     int(self.config.group_size), bias)
         if not _large_m(x):
             return _ORIG_APPLY(self, layer, x, bias)
         return _apply_w4a8(self, layer, x, bias)
@@ -326,6 +419,32 @@ def _install_on_class(cls) -> None:
     apply_weights._k8v4_w4a8 = True
     apply_weights._k8v4_orig = current
     cls.apply_weights = apply_weights
+    _install_s4_loader(cls)
+
+
+def _install_s4_loader(cls) -> None:
+    """With K8V4_W4A8_KERNEL=onednn, flip the selected layers to s4 after load."""
+    current = getattr(cls, "process_weights_after_loading", None)
+    if current is None or getattr(current, "_k8v4_s4", False):
+        return
+
+    def process_weights_after_loading(self, layer):
+        current(self, layer)
+        if _KERNEL != "onednn" or not _mlp_linear(layer):
+            return
+        if getattr(self.config, "zero_points", False):
+            return
+        zeros = getattr(layer, self.w_zp_name, None)
+        if zeros is None or zeros.numel() != 1 or int(zeros.reshape(-1)[0]) != 8:
+            return
+        qweight = getattr(layer, self.w_q_name)
+        flip_to_s4(qweight.data)
+        setattr(layer, self.w_zp_name, torch.nn.Parameter(
+            qweight.data.new_empty(0, dtype=torch.int8), requires_grad=False))
+        layer._k8v4_s4 = True
+
+    process_weights_after_loading._k8v4_s4 = True
+    cls.process_weights_after_loading = process_weights_after_loading
 
 
 def wrap_kernel_module(module) -> None:
@@ -422,15 +541,26 @@ def remove_import_hook(finder=None) -> None:
 
 def install_if_requested() -> None:
     """Install before model compilation; cached opaque calls honor opt-out too."""
-    global _RUNTIME_ENABLED, _LAYERS
+    global _RUNTIME_ENABLED, _LAYERS, _KERNEL, _AGROUP
     mode = os.environ.get("K8V4_PREFILL_GEMM", "w4a16")
     if mode not in ("w4a16", "w4a8"):
         raise RuntimeError("K8V4_PREFILL_GEMM must be w4a16 or w4a8")
     _LAYERS = parse_layer_families(os.environ.get("K8V4_W4A8_LAYERS"))
+    kernel = parse_kernel(os.environ.get("K8V4_W4A8_KERNEL"))
+    _AGROUP = parse_agroup(os.environ.get("K8V4_W4A8_AGROUP"), kernel)
     _RUNTIME_ENABLED = mode == "w4a8"
+    _KERNEL = kernel if _RUNTIME_ENABLED else "xpu"
     if _RUNTIME_ENABLED:
-        install()
         import sys
+        if _KERNEL == "onednn":
+            path = os.environ.get("K8V4_W4A8_LIB", _LIB_DEFAULT)
+            if not os.path.isfile(path):
+                raise RuntimeError("K8V4_W4A8_KERNEL=onednn needs the library at %s" % path)
+            torch.ops.load_library(path)
+            sys.stderr.write("k8v4_w4a8: s4 weights via %s (oneDNN %s), activation group %s\n"
+                             % (path, torch.ops.k8v4_w4a8.onednn_version(),
+                                _AGROUP or "per token"))
+        install()
         if _LAYERS == frozenset(("mlp",)):
             sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
         else:

@@ -53,6 +53,27 @@ if [ -n "${K8V4_W4A8_LAYERS:-}" ]; then
   w4a8_env+=(-e "K8V4_W4A8_LAYERS=${K8V4_W4A8_LAYERS}")
   CACHE_NAMESPACE="${CACHE_NAMESPACE}-layers-${K8V4_W4A8_LAYERS//,/-}"
 fi
+# Optional s4 / grouped-scale W4A8 library (k8v4_v030/native/w4a8). K8V4_W4A8_KERNEL=onednn needs
+# K8V4_W4A8_LIB = the host path of libk8v4_w4a8.so, mounted read-only into the container.
+if [ -n "${K8V4_W4A8_KERNEL:-}" ]; then
+  [[ "$K8V4_W4A8_KERNEL" =~ ^(xpu|onednn)$ ]] || { echo "K8V4_W4A8_KERNEL must be xpu or onednn" >&2; exit 2; }
+  w4a8_env+=(-e "K8V4_W4A8_KERNEL=${K8V4_W4A8_KERNEL}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-kernel-${K8V4_W4A8_KERNEL}"
+  if [ "$K8V4_W4A8_KERNEL" = onednn ]; then
+    [ -n "${K8V4_W4A8_LIB:-}" ] && [ -f "${K8V4_W4A8_LIB}" ] || {
+      echo "K8V4_W4A8_KERNEL=onednn needs K8V4_W4A8_LIB=<host path of libk8v4_w4a8.so>" >&2; exit 2;
+    }
+    w4a8_env+=(-v "${K8V4_W4A8_LIB}:/opt/k8v4/libk8v4_w4a8.so:ro")
+  fi
+fi
+if [ -n "${K8V4_W4A8_AGROUP:-}" ]; then
+  [[ "$K8V4_W4A8_AGROUP" =~ ^(0|32|64|128)$ ]] || { echo "K8V4_W4A8_AGROUP must be 0, 32, 64 or 128" >&2; exit 2; }
+  [ "$K8V4_W4A8_AGROUP" = 0 ] || [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || {
+    echo "K8V4_W4A8_AGROUP needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_AGROUP=${K8V4_W4A8_AGROUP}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-agroup-${K8V4_W4A8_AGROUP}"
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
