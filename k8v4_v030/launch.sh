@@ -339,6 +339,12 @@ fi
 if [ -n "${XE2_KV_SMALL_S1:-}" ]; then
   extra+=(-e "XE2_KV_SMALL_S1=${XE2_KV_SMALL_S1}")
 fi
+# Optional multi-page decode S1 (see docs/2026-11-19-decode-s1-multipage.md). Off unless set.
+for v in XE2_KV_S1_SPLITS XE2_KV_S1_PAGES XE2_KV_S1_GRF; do
+  if [ -n "${!v:-}" ]; then
+    extra+=(-e "$v=${!v}")
+  fi
+done
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \

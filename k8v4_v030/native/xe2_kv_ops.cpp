@@ -7,6 +7,7 @@
 // extra_slm=0 HARD. 24 KiB SLM. 1-tile. Native int8 DPAS.
 
 #include <sycl/sycl.hpp>
+#include <sycl/ext/intel/experimental/grf_size_properties.hpp>
 
 #include <c10/xpu/XPUStream.h>
 #include <ATen/ATen.h>
@@ -1071,6 +1072,324 @@ static void launch_int8k_int4v_s1_paged(sycl::queue &q, const std::int8_t *Q8, c
   });
 }
 
+// Multi-page S1 (opt-in). One work-group walks consecutive 64-token pages of one KV head with an
+// online softmax and keeps the PV accumulators in registers, so the partial round trip to S2
+// shrinks by the page count. Two modes, both only for q_len * GQA <= 48 with the parallel S2:
+//   XE2_KV_S1_PAGES=N   N pages per program, grid ceil(n_splits / N) per head.
+//   XE2_KV_S1_SPLITS=S  S programs per head, ceil(live pages / S) pages each (chosen on device, so
+//                       the graph-static grid has no padded programs). S=32 fills one wave of a
+//                       32-Xe-core B70 at 4 work-groups per core for 4 KV heads.
+// Large GRF (256) by default; XE2_KV_S1_GRF=128 selects the compiler default, which spills.
+// SLM holds one page at a time exactly like the single-page kernel (S/V alias, P), plus two
+// 64-float row vectors (alpha, 1/l).
+//   QK:      (row tile, 16-token tile) jobs spread over all 8 sub-groups.
+//   softmax: row r on sub-group r % 8, which keeps that row's running m, l in registers and
+//            writes P = exp(s - m_new) (unnormalized, <= 1) and alpha = exp(m_old - m_new).
+//   PV:      sub-group g owns columns [16g, 16g+16) of each 128-column V half for every live
+//            row tile; the accumulator is rescaled by alpha per row before each page's mad.
+// The end writes acc / l, M = m, L = l, so the S2 merge math is unchanged (split = N pages).
+// TMAX bounds the live 8-row tiles (q_len * GQA <= 8 * TMAX); GRF selects the register file.
+template <int HKV, bool PF16, int TMAX, int GRF> class Xe2KvTorchAbiS1MultiKernel;
+
+static int s1_pages_per_program() {
+  const char *v = std::getenv("XE2_KV_S1_PAGES");
+  if (v == nullptr) return 1;
+  const int n = std::atoi(v);
+  return n < 1 ? 1 : (n > 256 ? 256 : n);
+}
+
+static constexpr int kMultiMaxRows = 48;
+
+// Pages per S1 program, computed on device from the live length so S1 and S2 agree inside a
+// graph-static launch: fixed npg, or with splits > 0 the live pages divided evenly over that many
+// programs per KV head (no padded grid, every program gets ceil(live / splits) pages).
+static inline int s1_pages_for(std::int64_t seq_len, int npg, int splits) {
+  if (splits <= 0) return npg < 1 ? 1 : npg;
+  const std::int64_t live = (seq_len + BM - 1) / BM;
+  return static_cast<int>(sycl::max(static_cast<std::int64_t>(1), (live + splits - 1) / splits));
+}
+
+template <int HKV, bool PF16, int TMAX, int GRF>
+static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, const float *Qsc,
+                                        const std::int8_t *K8, const float *Ksc, const std::uint8_t *V4,
+                                        const float *VS, const float *VZ, const std::int32_t *bt,
+                                        const std::int32_t *seq_lens, float *Part, float *M, float *L,
+                                        int n_groups, int npg, int q_len, size_t k_page_stride,
+                                        size_t v_page_stride, size_t sc_page_stride,
+                                        const std::int32_t *visible_lens, int pages_per_block,
+                                        int splits) {
+  constexpr int GQA = Heads<HKV>::gqa;
+  const int nprog = n_groups * HKV;
+  const int k_tok_stride = HKV * BK;
+  const int v_tok_stride = HKV * V4_COLS;
+  const int sc_tok_stride = HKV;
+  sycl::range<1> g(static_cast<size_t>(nprog) * WG_SIZE);
+  sycl::range<1> l(WG_SIZE);
+  q.submit([&](sycl::handler &h) {
+    sycl::local_accessor<float, 1> slm(sycl::range<1>(kSlmFloats + 2 * BM), h);
+    auto body = [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
+      const int lid = static_cast<int>(item.get_local_id(0));
+      const int prog = static_cast<int>(item.get_group(0));
+      auto sg = item.get_sub_group();
+      const int sg_id = static_cast<int>(sg.get_group_id());
+      const int lane = static_cast<int>(sg.get_local_id());
+      const int kv_head = prog / n_groups;
+      const int grp = prog - kv_head * n_groups;
+      const std::int64_t seq_len =
+          static_cast<std::int64_t>(visible_lens ? visible_lens[0] : seq_lens[0]);
+      const int npg_eff = s1_pages_for(seq_len, npg, splits);
+      const int first = grp * npg_eff;
+      const std::int64_t left = seq_len - static_cast<std::int64_t>(first) * BM;
+      // Graph-static capacity pads the grid; S2 merges only the live groups.
+      if (left <= 0) return;  // work-group uniform
+      const int npages = static_cast<int>(
+          sycl::min(static_cast<std::int64_t>(npg_eff), (left + BM - 1) / BM));
+      auto phys_of = [&](int lg) {
+        return (pages_per_block <= 1)
+                   ? static_cast<int>(bt[lg])
+                   : static_cast<int>(bt[lg / pages_per_block]) * pages_per_block +
+                         (lg % pages_per_block);
+      };
+      const int R = q_len * GQA;
+      const int T = (R + TM - 1) / TM;  // live row tiles, <= TMAX
+
+      float *base_f = &slm[0];
+      auto *base = reinterpret_cast<std::uint8_t *>(base_f);
+      std::int32_t *s_i32 = reinterpret_cast<std::int32_t *>(base);
+      sycl::half *p_raw = reinterpret_cast<sycl::half *>(base + kSbytes);
+      sycl::half *kv_tile = reinterpret_cast<sycl::half *>(s_i32);
+      float *alpha_s = base_f + kSlmFloats;
+      float *linv_s = alpha_s + BM;
+      auto s_slm_i = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                              sycl::access::decorated::no>(s_i32);
+      auto p_slm = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                            sycl::access::decorated::no>(p_raw);
+      auto pKV = sycl::address_space_cast<sycl::access::address_space::local_space,
+                                          sycl::access::decorated::no>(kv_tile);
+
+      const size_t q_off = static_cast<size_t>(kv_head) * BM * BK;
+      const size_t qsc_off = static_cast<size_t>(kv_head) * BM;
+      const size_t o_off = static_cast<size_t>(prog) * BM * BV;
+      const size_t ml_off = static_cast<size_t>(prog) * BM;
+      auto pQ8 = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                          sycl::access::decorated::no>(
+          const_cast<std::int8_t *>(Q8 + q_off));
+
+      // Softmax rows of this sub-group: r = sg_id + 8 * i, i < T.
+      float m_run[TMAX], l_run[TMAX], qs_row[TMAX];
+      std::int64_t q_end[TMAX];
+#pragma unroll
+      for (int i = 0; i < TMAX; ++i) {
+        const int r = sg_id + SG_COUNT * i;
+        m_run[i] = -INFINITY;
+        l_run[i] = 0.f;
+        const bool live = r < R;
+        qs_row[i] = live ? Qsc[qsc_off + r] : 0.f;
+        const int q_tok = r / GQA;
+        q_end[i] = live ? (visible_lens ? static_cast<std::int64_t>(visible_lens[1 + q_tok])
+                                        : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1)
+                        : 0;
+      }
+
+      using AccT = jm::joint_matrix<sycl::sub_group, float, jm::use::accumulator, TM, TN>;
+      AccT acc[TMAX][2];
+#pragma unroll
+      for (int t = 0; t < TMAX; ++t) {
+        jm::joint_matrix_fill(sg, acc[t][0], 0.f);
+        jm::joint_matrix_fill(sg, acc[t][1], 0.f);
+      }
+
+      for (int j = 0; j < npages; ++j) {
+        const int logical = first + j;
+        const int n_valid = static_cast<int>(sycl::min(
+            static_cast<std::int64_t>(BM), seq_len - static_cast<std::int64_t>(logical) * BM));
+        const int phys = phys_of(logical);
+        const size_t k_head_off =
+            static_cast<size_t>(phys) * k_page_stride + static_cast<size_t>(kv_head) * BK;
+        const size_t v_head_off =
+            static_cast<size_t>(phys) * v_page_stride + static_cast<size_t>(kv_head) * V4_COLS;
+        const size_t sc_head_off =
+            static_cast<size_t>(phys) * sc_page_stride + static_cast<size_t>(kv_head);
+        auto pK8 = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                            sycl::access::decorated::no>(
+            const_cast<std::int8_t *>(K8 + k_head_off));
+
+        // QK: job = (row tile, 16-token tile).
+        for (int job = sg_id; job < T * NTN; job += SG_COUNT) {
+          const int t = job / NTN;
+          const int nt = job - t * NTN;
+          jm::joint_matrix<sycl::sub_group, std::int8_t, jm::use::a, TM, TK_I8, jm::layout::row_major> a;
+          jm::joint_matrix<sycl::sub_group, std::int8_t, jm::use::b, TK_I8, TN, jm::layout::col_major> b;
+          jm::joint_matrix<sycl::sub_group, std::int32_t, jm::use::accumulator, TM, TN> c;
+          jm::joint_matrix_fill(sg, c, 0);
+          for (int k = 0; k < BK; k += TK_I8) {
+            jm::joint_matrix_load(sg, a, pQ8 + (t * TM) * BK + k, BK);
+            jm::joint_matrix_load(sg, b, pK8 + (nt * TN) * k_tok_stride + k, k_tok_stride);
+            jm::joint_matrix_mad(sg, c, a, b, c);
+          }
+          jm::joint_matrix_store(sg, c, s_slm_i + (t * TM) * BN + nt * TN, BN, jm::layout::row_major);
+        }
+        item.barrier(sycl::access::fence_space::local_space);
+
+        {
+          float ksc[NTN];
+#pragma unroll
+          for (int t = 0; t < NTN; ++t)
+            ksc[t] = Ksc[sc_head_off + static_cast<size_t>(t * SG_SIZE + lane) * sc_tok_stride];
+#pragma unroll
+          for (int i = 0; i < TMAX; ++i) {
+            const int r = sg_id + SG_COUNT * i;
+            if (i < T) {
+              float vals[NTN];
+              float pm = -INFINITY;
+#pragma unroll
+              for (int t = 0; t < NTN; ++t) {
+                const int tok = t * SG_SIZE + lane;
+                float s = static_cast<float>(s_i32[r * BN + tok]) * qs_row[i] * ksc[t] * INV_SQRT_D;
+                const std::int64_t k_abs = static_cast<std::int64_t>(logical) * BM + tok;
+                if (tok >= n_valid || r >= R || k_abs >= q_end[i]) s = -INFINITY;
+                vals[t] = s;
+                pm = sycl::max(pm, s);
+              }
+              pm = sycl::reduce_over_group(sg, pm, sycl::maximum<float>());
+              const float m_new = sycl::max(m_run[i], pm);
+              float alpha = 1.f;
+              float sum = 0.f;
+              float e[NTN];
+              if (m_new == -INFINITY) {
+#pragma unroll
+                for (int t = 0; t < NTN; ++t) e[t] = 0.f;
+              } else {
+                alpha = sycl::exp(m_run[i] - m_new);  // 0 when m_run is -inf
+#pragma unroll
+                for (int t = 0; t < NTN; ++t) {
+                  e[t] = sycl::exp(vals[t] - m_new);
+                  sum += e[t];
+                }
+                sum = sycl::reduce_over_group(sg, sum, sycl::plus<float>());
+              }
+              l_run[i] = l_run[i] * alpha + sum;
+              m_run[i] = m_new;
+#pragma unroll
+              for (int t = 0; t < NTN; ++t) p_slm[r * BN + t * SG_SIZE + lane] = sycl::half(e[t]);
+              if (lane == 0) alpha_s[r] = alpha;
+            }
+          }
+        }
+        // P and alpha visible; every S read done before the V tile overwrites S.
+        item.barrier(sycl::access::fence_space::local_space);
+
+        jm::joint_matrix<sycl::sub_group, sycl::half, jm::use::a, TM, TK, jm::layout::row_major> a;
+        jm::joint_matrix<sycl::sub_group, sycl::half, jm::use::b, TK, TN, jm::layout::row_major> b;
+#pragma unroll
+        for (int hv = 0; hv < 2; ++hv) {
+          decode_v_int4_vec_strided(lid, V4 + v_head_off, v_tok_stride, VS + sc_head_off,
+                                    VZ + sc_head_off, sc_tok_stride, hv * KV_HALF, n_valid, kv_tile);
+          item.barrier(sycl::access::fence_space::local_space);
+#pragma unroll
+          for (int t = 0; t < TMAX; ++t) {
+            if (t < T) {
+              const float *al = alpha_s + t * TM;
+              sycl::ext::intel::experimental::matrix::joint_matrix_apply(
+                  sg, acc[t][hv], [=](float &x, size_t row, size_t) { x *= al[row]; });
+            }
+          }
+          // One V slab load per k step, reused by every live row tile.
+#pragma unroll
+          for (int k0 = 0; k0 < BN; k0 += TK) {
+            jm::joint_matrix_load(sg, b, pKV + k0 * KV_HALF + sg_id * TN, KV_HALF);
+#pragma unroll
+            for (int t = 0; t < TMAX; ++t) {
+              if (t < T) {
+                jm::joint_matrix_load(sg, a, p_slm + (t * TM) * BN + k0, BN);
+                jm::joint_matrix_mad(sg, acc[t][hv], a, b, acc[t][hv]);
+              }
+            }
+          }
+          // Next half's decode / next page's QK overwrite the S/V region.
+          item.barrier(sycl::access::fence_space::local_space);
+        }
+      }
+
+#pragma unroll
+      for (int i = 0; i < TMAX; ++i) {
+        const int r = sg_id + SG_COUNT * i;
+        if (i < T && lane == 0) {
+          linv_s[r] = l_run[i] > 0.f ? 1.f / l_run[i] : 0.f;
+          M[ml_off + r] = r < R ? m_run[i] : -INFINITY;
+          L[ml_off + r] = r < R ? l_run[i] : 0.f;
+        }
+      }
+      if (lid < BM && lid >= T * TM) {
+        M[ml_off + lid] = -INFINITY;
+        L[ml_off + lid] = 0.f;
+      }
+      item.barrier(sycl::access::fence_space::local_space);
+      auto pO = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                         sycl::access::decorated::no>(Part + o_off);
+      auto pOh = sycl::address_space_cast<sycl::access::address_space::global_space,
+                                          sycl::access::decorated::no>(
+          reinterpret_cast<sycl::half *>(Part) + o_off);
+#pragma unroll
+      for (int t = 0; t < TMAX; ++t) {
+        if (t < T) {
+          const float *li = linv_s + t * TM;
+#pragma unroll
+          for (int hv = 0; hv < 2; ++hv) {
+            sycl::ext::intel::experimental::matrix::joint_matrix_apply(
+                sg, acc[t][hv], [=](float &x, size_t row, size_t) { x *= li[row]; });
+            const size_t off = static_cast<size_t>(t * TM) * BV + hv * KV_HALF + sg_id * TN;
+            if constexpr (PF16) {
+              jm::joint_matrix<sycl::sub_group, sycl::half, jm::use::accumulator, TM, TN> hc;
+              jm::joint_matrix_copy(sg, acc[t][hv], hc);
+              jm::joint_matrix_store(sg, hc, pOh + off, BV, jm::layout::row_major);
+            } else {
+              jm::joint_matrix_store(sg, acc[t][hv], pO + off, BV, jm::layout::row_major);
+            }
+          }
+        }
+      }
+    };
+    if constexpr (GRF == 256) {
+      sycl::ext::oneapi::experimental::properties props{
+          sycl::ext::intel::experimental::grf_size<256>};
+      h.parallel_for<Xe2KvTorchAbiS1MultiKernel<HKV, PF16, TMAX, GRF>>(sycl::nd_range<1>(g, l), props,
+                                                                       body);
+    } else {
+      h.parallel_for<Xe2KvTorchAbiS1MultiKernel<HKV, PF16, TMAX, GRF>>(sycl::nd_range<1>(g, l), body);
+    }
+  });
+}
+
+// Host dispatch for the multi-page kernel: picks the row-tile bound from q_len and the register
+// file from XE2_KV_S1_GRF (256 = large GRF; default: the compiler's choice).
+template <int HKV, bool PF16>
+static void launch_s1_multi_dispatch(sycl::queue &q, const std::int8_t *Q8, const float *Qsc,
+                                     const std::int8_t *K8, const float *Ksc, const std::uint8_t *V4,
+                                     const float *VS, const float *VZ, const std::int32_t *bt,
+                                     const std::int32_t *seq_lens, float *Part, float *M, float *L,
+                                     int n_groups, int npg, int q_len, size_t k_page_stride,
+                                     size_t v_page_stride, size_t sc_page_stride,
+                                     const std::int32_t *visible_lens, int pages_per_block,
+                                     int splits) {
+  const int tiles = (q_len * Heads<HKV>::gqa + TM - 1) / TM;
+  // Large GRF by default: the register-resident accumulators spill in the 128-GRF mode.
+  const char *gv = std::getenv("XE2_KV_S1_GRF");
+  const bool big = !(gv != nullptr && std::atoi(gv) == 128);
+  auto go = [&](auto tmax, auto grf) {
+    launch_int8k_int4v_s1_multi<HKV, PF16, decltype(tmax)::value, decltype(grf)::value>(
+        q, Q8, Qsc, K8, Ksc, V4, VS, VZ, bt, seq_lens, Part, M, L, n_groups, npg, q_len,
+        k_page_stride, v_page_stride, sc_page_stride, visible_lens, pages_per_block, splits);
+  };
+  auto pick = [&](auto grf) {
+    if (tiles <= 1) go(std::integral_constant<int, 1>{}, grf);
+    else if (tiles <= 3) go(std::integral_constant<int, 3>{}, grf);
+    else go(std::integral_constant<int, 6>{}, grf);
+  };
+  if (big) pick(std::integral_constant<int, 256>{});
+  else pick(std::integral_constant<int, 0>{});
+}
+
 template <int HKV>
 static void launch_s2_merge(sycl::queue &q, const float *M, const float *L, const float *Acc,
                             float *Merged, const std::int32_t *seq_lens, int n_splits) {
@@ -1288,7 +1607,8 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
 template <typename OutT, typename KernelName, int HKV, int N_SG, bool TWO_PASS = false,
           typename PartT = float>
 static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, const PartT *Acc,
-                               OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq) {
+                               OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq,
+                               int s1_pages = 1, int s1_splits = 0) {
   constexpr int HQ = Heads<HKV>::hq;
   constexpr int GQA = Heads<HKV>::gqa;
   constexpr int VEC = 4;
@@ -1312,9 +1632,12 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           const int row = tok * GQA + (h - head * GQA);
           const int p0 = head * n_splits;
           const std::int64_t seq_len = static_cast<std::int64_t>(seq_lens[0]);
+          // One split = s1_pages pages (multi-page S1); the same rule as the S1 kernel.
+          const std::int64_t split_tok =
+              static_cast<std::int64_t>(BM) * s1_pages_for(seq_len, s1_pages, s1_splits);
           const int n_live = static_cast<int>(sycl::max(
               static_cast<std::int64_t>(1),
-              sycl::min(static_cast<std::int64_t>(n_splits), (seq_len + BM - 1) / BM)));
+              sycl::min(static_cast<std::int64_t>(n_splits), (seq_len + split_tok - 1) / split_tok)));
           const int chunk = (n_live + N_SG - 1) / N_SG;
           const int s0 = sg_id * chunk;
           const int s1 = s0 + chunk < n_live ? s0 + chunk : n_live;
@@ -1415,27 +1738,27 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
 template <int HKV>
 static void launch_s2_parallel_half(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                     sycl::half *Out, const std::int32_t *seq_lens, int n_splits,
-                                    int tq, int nsg) {
+                                    int tq, int nsg, int s1_pages = 1, int s1_splits = 0) {
   if (env_is_1("XE2_KV_S2_TWO_PASS")) {
     if (nsg == 8)
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 8>, HKV, 8, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 8>, HKV, 8, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
     else if (nsg == 16)
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 16>, HKV, 16, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 16>, HKV, 16, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
     else
-      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 32>, HKV, 32, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2TwoPassHalf<HKV, 32>, HKV, 32, true>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
     return;
   }
   if (nsg == 8) {
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf8<HKV>, HKV, 8>(q, M, L, Acc, Out,
-                                                                            seq_lens, n_splits, tq);
+                                                                            seq_lens, n_splits, tq, s1_pages, s1_splits);
   } else if (nsg == 16) {
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf16<HKV>, HKV, 16>(q, M, L, Acc, Out,
                                                                               seq_lens, n_splits,
-                                                                              tq);
+                                                                              tq, s1_pages, s1_splits);
   } else {
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf32<HKV>, HKV, 32>(q, M, L, Acc, Out,
                                                                               seq_lens, n_splits,
-                                                                              tq);
+                                                                              tq, s1_pages, s1_splits);
   }
 }
 
@@ -1443,31 +1766,31 @@ template <int HKV>
 static void launch_s2_parallel_half_p16(sycl::queue &q, const float *M, const float *L,
                                         const sycl::half *Acc, sycl::half *Out,
                                         const std::int32_t *seq_lens, int n_splits, int tq,
-                                        int nsg) {
+                                        int nsg, int s1_pages = 1, int s1_splits = 0) {
   if (nsg == 8)
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf8P16<HKV>, HKV, 8, false,
-                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
   else if (nsg == 16)
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf16P16<HKV>, HKV, 16, false,
-                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
   else
     launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2ParallelHalf32P16<HKV>, HKV, 32, false,
-                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq);
+                       sycl::half>(q, M, L, Acc, Out, seq_lens, n_splits, tq, s1_pages, s1_splits);
 }
 
 template <int HKV>
 static void launch_s2_parallel_float(sycl::queue &q, const float *M, const float *L, const float *Acc,
                                      float *Out, const std::int32_t *seq_lens, int n_splits, int tq,
-                                     int nsg) {
+                                     int nsg, int s1_pages = 1, int s1_splits = 0) {
   if (nsg == 8) {
     launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat8<HKV>, HKV, 8>(q, M, L, Acc, Out,
-                                                                        seq_lens, n_splits, tq);
+                                                                        seq_lens, n_splits, tq, s1_pages, s1_splits);
   } else if (nsg == 16) {
     launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat16<HKV>, HKV, 16>(q, M, L, Acc, Out,
-                                                                          seq_lens, n_splits, tq);
+                                                                          seq_lens, n_splits, tq, s1_pages, s1_splits);
   } else {
     launch_s2_parallel<float, Xe2KvTorchAbiS2ParallelFloat32<HKV>, HKV, 32>(q, M, L, Acc, Out,
-                                                                          seq_lens, n_splits, tq);
+                                                                          seq_lens, n_splits, tq, s1_pages, s1_splits);
   }
 }
 
@@ -1821,8 +2144,30 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
   const std::int32_t *s2_seq = visible_ptr ? visible_ptr : seq_lens.data_ptr<int32_t>();
   const bool half_out = out.scalar_type() == at::kHalf;
   const bool pf16 = half_out && s2_parallel_enabled() && env_is_1("XE2_KV_PARTIAL_FP16");
+  // Opt-in multi-page S1 (XE2_KV_S1_PAGES=N > 1 or XE2_KV_S1_SPLITS=S > 0); S2 merges the
+  // groups with the same pages-per-program rule. Both unset keeps the one-page path.
+  const int npg = s1_pages_per_program();
+  const char *sv = std::getenv("XE2_KV_S1_SPLITS");
+  const int splits_env = sv == nullptr ? 0 : std::max(0, std::atoi(sv));
+  const bool multi = (npg > 1 || splits_env > 0) && tq * GQA <= kMultiMaxRows && s2_parallel_enabled();
+  const int splits = multi ? splits_env : 0;
+  // XE2_KV_S1_SPLITS=S > 0 instead: S programs per KV head, pages per program from the live length.
+  const int n_groups = !multi ? n_splits
+                              : (splits > 0 ? std::min(splits, n_splits) : (n_splits + npg - 1) / npg);
+  const int s2_pages = multi ? npg : 1;
   auto launch_s1 = [&]() {
     auto run = [&](auto pf) {
+    if (multi) {
+      launch_s1_multi_dispatch<HKV, decltype(pf)::value>(
+          current_xpu_queue(), q8.data_ptr<int8_t>(), q_scale.data_ptr<float>(),
+          k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(), v_cache.data_ptr<uint8_t>(),
+          v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), bt.data_ptr<int32_t>(),
+          seq_lens.data_ptr<int32_t>(), partials.data_ptr<float>(), m.data_ptr<float>(),
+          l.data_ptr<float>(), n_groups, npg, tq, static_cast<size_t>(k_cache.stride(0)),
+          static_cast<size_t>(v_cache.stride(0)), static_cast<size_t>(k_scale.stride(0)),
+          visible_ptr, ratio, splits);
+      return;
+    }
     launch_int8k_int4v_s1_paged<HKV, decltype(pf)::value>(current_xpu_queue(), q8.data_ptr<int8_t>(),
                                 q_scale.data_ptr<float>(),
                                 k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
@@ -1845,16 +2190,16 @@ static void int8k_int4v_s1_paged_impl(const at::Tensor &q8, const at::Tensor &q_
       if (parallel && pf16)
         launch_s2_parallel_half_p16<HKV>(current_xpu_queue(), m_ptr, l_ptr,
                                          reinterpret_cast<const sycl::half *>(part_ptr), dst, s2_seq,
-                                         n_splits, tq, nsg);
+                                         n_groups, tq, nsg, s2_pages, splits);
       else if (parallel)
         launch_s2_parallel_half<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq,
-                                     n_splits, tq, nsg);
+                                     n_groups, tq, nsg, s2_pages, splits);
       else
         launch_s2_merge_to_out_half<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr, dst, s2_seq,
                                     n_splits, tq);
     } else if (parallel) {
       launch_s2_parallel_float<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr,
-                                out.data_ptr<float>(), s2_seq, n_splits, tq, nsg);
+                                out.data_ptr<float>(), s2_seq, n_groups, tq, nsg, s2_pages, splits);
     } else {
       launch_s2_merge_to_out<HKV>(current_xpu_queue(), m_ptr, l_ptr, part_ptr,
                              out.data_ptr<float>(), s2_seq, n_splits, tq);
