@@ -126,9 +126,6 @@ def install(model, environ: dict[str, str] | None = None) -> bool:
         return False
     import torch
 
-    from vllm.logger import init_logger
-
-    logger = init_logger(__name__)
     head = getattr(model, "lm_head", None)
     proc = getattr(model, "logits_processor", None)
     if head is None or proc is None:
@@ -161,8 +158,9 @@ def install(model, environ: dict[str, str] | None = None) -> bool:
 
     model.compute_logits = MethodType(compute_logits, model)
     model.get_top_tokens = MethodType(get_top_tokens, model)
-    logger.info(
-        "K8V4 draft vocab: %d of %d rows from %s (%.0f MB draft-only head)",
-        len(ids_list), vocab, path, nbytes / 1e6,
+    print(
+        "k8v4 draft vocab: %d of %d rows from %s (%.0f MB draft-only head)"
+        % (len(ids_list), vocab, path, nbytes / 1e6),
+        flush=True,
     )
     return True

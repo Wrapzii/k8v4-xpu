@@ -418,6 +418,30 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertIn('K8V4_VERIFY_CHUNK=8', args)
         self.assertEqual(len(args), len(default) + 2)
 
+    def test_deep_draft_profile_only_when_set(self):
+        def spec_and_sizes(args):
+            spec = json.loads(next(x for x in args if x.startswith('--speculative-config=')).split('=', 1)[1])
+            graph = json.loads(next(x for x in args if x.startswith('--compilation-config=')).split('=', 1)[1])
+            return spec, graph['cudagraph_capture_sizes']
+
+        _, default = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4')
+        self.assertEqual(spec_and_sizes(default), ({'method': 'mtp', 'num_speculative_tokens': 6}, [7, 14, 21, 28]))
+        self.assertFalse([x for x in default if x.startswith(('K8V4_DEEP', 'K8V4_VERIFY'))])
+        result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        spec, sizes = spec_and_sizes(args)
+        self.assertEqual(spec, {'method': 'mtp', 'num_speculative_tokens': 15,
+                                'num_speculative_tokens_per_batch_size': [[1, 1, 15], [2, 4, 3]]})
+        self.assertEqual(sizes, [7, 8, 12, 16])
+        self.assertIn('K8V4_DEEP_DRAFT=12,16', args)
+        self.assertIn('K8V4_VERIFY_CHUNK=8', args)
+        _, one = self.command(K8V4_TP='1', K8V4_DEEP_DRAFT='12,16')
+        self.assertEqual(spec_and_sizes(one)[1], [7, 16])
+        for bad in ({'K8V4_DEEP_DRAFT': 'x'}, {'K8V4_DEEP_DRAFT': '12,16', 'K8V4_DEEP_DEPTH': '40'}):
+            with self.subTest(bad=bad):
+                result, _ = self.command(K8V4_TP='1', **bad)
+                self.assertEqual(result.returncode, 2)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

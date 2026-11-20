@@ -298,7 +298,8 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         if self._draft_lastrow is None:
             self._draft_lastrow = draft_lastrow_applies(layer)
             if self._draft_lastrow:
-                logger.info("K8/V4 draft layer %s: prefill attention on the last row only", getattr(layer, "layer_name", "?"))
+                print("k8v4 draft layer %s: prefill attention on the last row only"
+                      % getattr(layer, "layer_name", "?"), flush=True)
         del layer
         if output_scale is not None or output_block_scale is not None:
             raise RuntimeError("K8/V4 does not take an output scale")
