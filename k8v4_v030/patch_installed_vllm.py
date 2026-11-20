@@ -72,6 +72,48 @@ def _splice_island_wrap(path: Path) -> str:
     return 'patched'
 
 
+_EMBED_COPY_OLD = '        param[: loaded_weight.shape[0]].data.copy_(loaded_weight)\n'
+_EMBED_COPY_NEW = (
+    '        try:  # k8v4: K8V4_UPLOAD_SLICE_MB (default 0 = this same single copy_)\n'
+    '            from k8v4_v030.upload import copy_rows as _k8v4_copy_rows\n'
+    '        except ImportError:\n'
+    '            _k8v4_copy_rows = None\n'
+    '        if _k8v4_copy_rows is None:\n'
+    '            param[: loaded_weight.shape[0]].data.copy_(loaded_weight)\n'
+    '        else:\n'
+    '            _k8v4_copy_rows(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+)
+
+
+# vLLM 0.34 routes the same copy through model_executor.utils.copy_weight_
+# (a plain copy_ off integrated GPUs).
+_EMBED_COPY_OLD_034 = '        copy_weight_(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+_EMBED_COPY_NEW_034 = (
+    '        try:  # k8v4: K8V4_UPLOAD_SLICE_MB (default 0 = this same copy_weight_)\n'
+    '            from k8v4_v030.upload import copy_rows as _k8v4_copy_rows\n'
+    '        except ImportError:\n'
+    '            _k8v4_copy_rows = None\n'
+    '        if _k8v4_copy_rows is None:\n'
+    '            copy_weight_(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+    '        else:\n'
+    '            _k8v4_copy_rows(param[: loaded_weight.shape[0]].data, loaded_weight)\n'
+)
+
+
+def _splice_embed_copy(path: Path) -> str:
+    """Route VocabParallelEmbedding.weight_loader's table copy through k8v4_v030.upload.copy_rows,
+    which is a plain copy_ unless K8V4_UPLOAD_SLICE_MB is set (see k8v4_v030/upload.py)."""
+    text = path.read_text(encoding='utf-8')
+    if '_k8v4_copy_rows' in text:
+        return 'unchanged'
+    for old, new in ((_EMBED_COPY_OLD, _EMBED_COPY_NEW), (_EMBED_COPY_OLD_034, _EMBED_COPY_NEW_034)):
+        if text.count(old) == 1:
+            path.write_text(text.replace(old, new, 1), encoding='utf-8')
+            return 'patched'
+    raise RuntimeError('%s embed copy anchor count %d (0.30) / %d (0.34)'
+                       % (path, text.count(_EMBED_COPY_OLD), text.count(_EMBED_COPY_OLD_034)))
+
+
 _DEFAULT_ROOTS = (
     Path("/opt/venv/lib/python3.12/site-packages/vllm"),
     Path("/workspace/vllm/vllm"),
@@ -120,6 +162,9 @@ def patch_vllm_tree(root: Path) -> list[str]:
     gptq_utils = root / "model_executor/layers/quantization/utils/gptq_utils.py"
     if gptq_utils.exists():
         notes.append("int8_island:%s" % _splice_island_wrap(gptq_utils))
+    vocab = root / "model_executor/layers/vocab_parallel_embedding.py"
+    if vocab.exists():
+        notes.append("embed_copy:%s" % _splice_embed_copy(vocab))
     return notes
 
 
