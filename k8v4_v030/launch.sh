@@ -75,10 +75,17 @@ if [ -n "${K8V4_W4A8_AGROUP:-}" ]; then
   CACHE_NAMESPACE="${CACHE_NAMESPACE}-agroup-${K8V4_W4A8_AGROUP}"
 fi
 if [ -n "${K8V4_W4A8_FUSED:-}" ]; then
-  [[ "$K8V4_W4A8_FUSED" =~ ^(silu|gnorm)(,(silu|gnorm))?$ ]] || { echo "K8V4_W4A8_FUSED must be silu, gnorm or silu,gnorm" >&2; exit 2; }
-  [ "${K8V4_W4A8_KERNEL:-}" = onednn ] && [[ "${K8V4_W4A8_AGROUP:-0}" != 0 ]] || {
-    echo "K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn and K8V4_W4A8_AGROUP" >&2; exit 2;
-  }
+  # silu and gnorm need grouped scales (K8V4_W4A8_AGROUP); addnorm also runs with per-token scales.
+  fused_ok=1
+  [[ "$K8V4_W4A8_FUSED" =~ ^(silu|gnorm|addnorm)(,(silu|gnorm|addnorm)){0,2}$ ]] || fused_ok=0
+  for f in silu gnorm addnorm; do
+    if [[ ",$K8V4_W4A8_FUSED," =~ ,$f,(.*,)?$f, ]]; then fused_ok=0; fi
+  done
+  [ "$fused_ok" = 1 ] || { echo "K8V4_W4A8_FUSED must be a comma list of silu, gnorm, addnorm" >&2; exit 2; }
+  [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || { echo "K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2; }
+  if [[ ",$K8V4_W4A8_FUSED," =~ ,(silu|gnorm), ]] && [[ "${K8V4_W4A8_AGROUP:-0}" == 0 ]]; then
+    echo "K8V4_W4A8_FUSED=silu/gnorm needs K8V4_W4A8_AGROUP" >&2; exit 2
+  fi
   w4a8_env+=(-e "K8V4_W4A8_FUSED=${K8V4_W4A8_FUSED}")
   CACHE_NAMESPACE="${CACHE_NAMESPACE}-fused-${K8V4_W4A8_FUSED//,/-}"
 fi

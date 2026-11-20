@@ -409,20 +409,23 @@ def _runtime_mlp_fake(x, packed, scales, zeros, group_size, bias):
 # product is rounded to the activation dtype before quantizing, as the
 # unfused SiLU-and-mul output is. Rows at or below SMALL_M_MAX take vLLM's
 # silu_and_mul op and the library w4a16 GEMM.
-FUSIONS = ("silu", "gnorm")
+FUSIONS = ("silu", "gnorm", "addnorm")
 _FUSED = frozenset()
 _SILU_COMPILED = None
 
 
 def parse_fused(raw: str | None, kernel: str, agroup: int) -> frozenset:
+    """``silu`` and ``gnorm`` need grouped scales; ``addnorm`` also takes per-token scales."""
     if raw is None or raw.strip() == "":
         return frozenset()
     names = [name.strip().lower() for name in raw.split(",")]
-    if any(name not in FUSIONS for name in names):
+    if any(name not in FUSIONS for name in names) or len(set(names)) != len(names):
         raise RuntimeError("K8V4_W4A8_FUSED must be a comma list of %s, got %s"
                            % (",".join(FUSIONS), raw))
-    if kernel != "onednn" or not agroup:
-        raise RuntimeError("K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn and K8V4_W4A8_AGROUP")
+    if kernel != "onednn":
+        raise RuntimeError("K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn")
+    if not agroup and any(name in ("silu", "gnorm") for name in names):
+        raise RuntimeError("K8V4_W4A8_FUSED=silu/gnorm needs K8V4_W4A8_AGROUP")
     return frozenset(names)
 
 
@@ -564,6 +567,129 @@ def _install_gnorm(cls) -> None:
     cls._output_projection = _output_projection
 
 
+# K8V4_W4A8_FUSED=addnorm (with K8V4_W4A8_KERNEL=onednn; mlp in K8V4_W4A8_LAYERS): a
+# decoder layer's post-attention residual add + Gemma RMSNorm and the int8
+# quantization of gate_up_proj's input run as one pass inside gate_up_proj's op,
+# so the normed [tokens, hidden] activation is never written out and read back.
+# Per-token or grouped scales, whichever K8V4_W4A8_AGROUP selects. Rows at or
+# below SMALL_M_MAX get the same add + norm unquantized and the w4a16 GEMM.
+# The layer forward is the stock Qwen3Next one with the post-attention norm and
+# the MLP's first GEMM merged; the installer checks that source and refuses
+# any other.
+_ADDNORM_COMPILED = None
+_ADDNORM_ANCHORS = (
+    "hidden_states, residual = self.input_layernorm(hidden_states, residual)",
+    "hidden_states = self.linear_attn(hidden_states=hidden_states)",
+    "hidden_states = self.self_attn(",
+    "if self.layer_scale:",
+    "hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)",
+    "hidden_states = self.mlp(hidden_states)",
+    "return hidden_states, residual",
+)
+
+
+def _addnorm_torch(x, residual, weight, eps: float):
+    """GemmaRMSNorm's fused-add path: (normed, new residual), both in x's dtype."""
+    v = x.to(torch.float32) + residual.to(torch.float32)
+    normed = v * torch.rsqrt(v.pow(2).mean(dim=-1, keepdim=True) + eps)
+    return (normed * (1.0 + weight.to(torch.float32))).to(x.dtype), v.to(x.dtype)
+
+
+def _addnorm_quantize(x, residual, weight, eps: float, group: int):
+    normed, new_residual = _addnorm_torch(x, residual, weight, eps)
+    if group:
+        return _quantize_grouped(normed, group), new_residual
+    quant_x, x_scale, _zero = _quantize_stored(normed)
+    return (quant_x, x_scale), new_residual
+
+
+def _addnorm_body(x, residual, weight, eps, packed, scales, zeros, group_size):
+    large = _RUNTIME_ENABLED and x.shape[0] > SMALL_M_MAX and zeros.numel() == 0
+    if not large:
+        if _TRITON is not None:
+            normed, new_residual = _TRITON.addnorm(x, residual, weight, eps)
+        else:
+            normed, new_residual = _addnorm_torch(x, residual, weight, eps)
+        return _runtime_mlp_body(normed, packed, scales, zeros, group_size, None), new_residual
+    global _ADDNORM_COMPILED
+    if _TRITON is not None:
+        (quant_x, x_scale), new_residual = _TRITON.addnorm_quantize(x, residual, weight, eps, _AGROUP)
+    else:
+        if _ADDNORM_COMPILED is None:
+            _ADDNORM_COMPILED = torch.compile(_addnorm_quantize, dynamic=True, fullgraph=True)
+        (quant_x, x_scale), new_residual = _ADDNORM_COMPILED(x, residual, weight, eps, _AGROUP)
+    out = _lib().int4_gemm_w4a8(quant_x, x_scale, None, packed, scales, None, group_size, None,
+                                x.dtype == torch.bfloat16)
+    return (out if out.dtype == x.dtype else out.to(dtype=x.dtype)), new_residual
+
+
+@torch.library.custom_op("k8v4_prefill::addnorm_gemm", mutates_args=())
+def runtime_addnorm_gemm(x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float,
+                         packed: torch.Tensor, scales: torch.Tensor, zeros: torch.Tensor,
+                         group_size: int) -> tuple[torch.Tensor, torch.Tensor]:
+    return _addnorm_body(x, residual, weight, eps, packed, scales, zeros, group_size)
+
+
+@runtime_addnorm_gemm.register_fake
+def _runtime_addnorm_fake(x, residual, weight, eps, packed, scales, zeros, group_size):
+    return x.new_empty((x.shape[0], packed.shape[1])), torch.empty_like(x)
+
+
+def _mlp_after_gate_up(mlp, gate_up):
+    """The rest of Qwen2MoeMLP.forward once gate_up_proj has run."""
+    down = mlp.down_proj
+    kernel = getattr(down, "_k8v4_silu_kernel", None)
+    if kernel is not None:
+        packed, scales, zeros = _compile_safe_views(kernel, down)
+        return runtime_silu_gemm(gate_up, packed, scales, zeros, int(kernel.config.group_size))
+    out, _ = down(mlp.act_fn(gate_up))
+    return out
+
+
+def check_addnorm_source(source: str) -> None:
+    missing = [anchor for anchor in _ADDNORM_ANCHORS if anchor not in source]
+    if missing:
+        raise RuntimeError("K8V4_W4A8_FUSED=addnorm: the installed vLLM decoder layer forward is not the one "
+                           "this fusion was written against (missing %s); refusing" % missing[0])
+
+
+def _install_addnorm(cls, base_forward) -> None:
+    """Route a decoder layer whose gate_up_proj is marked (_k8v4_addnorm_kernel) through the fused op."""
+    import inspect
+
+    if "forward" in vars(cls) and getattr(cls.forward, "_k8v4_addnorm", False):
+        return
+    if "forward" in vars(cls):
+        raise RuntimeError("K8V4_W4A8_FUSED=addnorm: %s defines its own forward; refusing" % cls.__name__)
+    check_addnorm_source(inspect.getsource(base_forward))
+    current = cls.forward
+
+    def forward(self, hidden_states, residual, positions, **kwargs):
+        mlp = self.mlp
+        gate_up_proj = getattr(mlp, "gate_up_proj", None)
+        kernel = getattr(gate_up_proj, "_k8v4_addnorm_kernel", None)
+        if (kernel is None or residual is None or kwargs or self.layer_scale
+                or self.use_attn_reduce_scatter_for_moe or getattr(mlp, "expert_gate", None) is not None):
+            return current(self, hidden_states, residual, positions, **kwargs)
+        hidden_states, residual = self.input_layernorm(hidden_states, residual)
+        if self.layer_type == "linear_attention":
+            hidden_states = self.linear_attn(hidden_states=hidden_states)
+        elif self.layer_type == "full_attention":
+            hidden_states = self.self_attn(hidden_states=hidden_states, positions=positions)
+        else:
+            raise ValueError("Invalid layer_type")
+        norm = self.post_attention_layernorm
+        packed, scales, zeros = _compile_safe_views(kernel, gate_up_proj)
+        gate_up, residual = runtime_addnorm_gemm(hidden_states, residual, norm.weight,
+                                                 float(norm.variance_epsilon), packed, scales, zeros,
+                                                 int(kernel.config.group_size))
+        return _mlp_after_gate_up(mlp, gate_up), residual
+
+    forward._k8v4_addnorm = True
+    forward._k8v4_orig = current
+    cls.forward = forward
+
+
 def _install_on_class(cls) -> None:
     global _ORIG_APPLY
     current = cls.apply_weights
@@ -619,6 +745,9 @@ def _install_s4_loader(cls) -> None:
         if ("gnorm" in _FUSED and _AGROUP and prefix.endswith(".linear_attn.out_proj")
                 and getattr(layer, "tp_size", 1) == 1):
             layer._k8v4_gnorm_kernel = self
+        if ("addnorm" in _FUSED and prefix.endswith(".mlp.gate_up_proj")
+                and getattr(layer, "tp_size", 1) == 1 and getattr(layer, "bias", None) is None):
+            layer._k8v4_addnorm_kernel = self
 
     process_weights_after_loading._k8v4_s4 = True
     cls.process_weights_after_loading = process_weights_after_loading
@@ -632,8 +761,9 @@ def wrap_kernel_module(module) -> None:
 
 
 class _KernelFinder:
-    def __init__(self, target: str):
+    def __init__(self, target: str, on_load=None):
         self.target = target
+        self.on_load = on_load
         self._busy = False
 
     def find_spec(self, fullname, path, target=None):
@@ -664,15 +794,16 @@ class _KernelFinder:
             return None
         if getattr(spec.loader, "_k8v4_w4a8_loader", False):
             return spec
-        spec.loader = _KernelLoader(spec.loader)
+        spec.loader = _KernelLoader(spec.loader, self.on_load)
         return spec
 
 
 class _KernelLoader:
     _k8v4_w4a8_loader = True
 
-    def __init__(self, inner):
+    def __init__(self, inner, on_load=None):
         self._inner = inner
+        self._on_load = on_load or wrap_kernel_module
 
     def create_module(self, spec):
         create = getattr(self._inner, "create_module", None)
@@ -682,7 +813,7 @@ class _KernelLoader:
 
     def exec_module(self, module):
         self._inner.exec_module(module)
-        wrap_kernel_module(module)
+        self._on_load(module)
 
 
 def install() -> None:
@@ -714,6 +845,30 @@ def remove_import_hook(finder=None) -> None:
         return
 
 
+
+
+_ADDNORM_FINDER = None
+_ADDNORM_TARGET = "vllm.model_executor.models.qwen3_5"
+
+
+def _addnorm_on_load(module) -> None:
+    from vllm.model_executor.models import qwen3_next
+
+    _install_addnorm(module.Qwen3_5DecoderLayer, qwen3_next.Qwen3NextDecoderLayer.forward)
+
+
+def install_addnorm() -> None:
+    """Patch Qwen3_5DecoderLayer when vLLM imports it (now, if it already has)."""
+    global _ADDNORM_FINDER
+    import sys
+
+    existing = sys.modules.get(_ADDNORM_TARGET)
+    if existing is not None:
+        _addnorm_on_load(existing)
+        return
+    if _ADDNORM_FINDER is None:
+        _ADDNORM_FINDER = _KernelFinder(_ADDNORM_TARGET, _addnorm_on_load)
+        sys.meta_path.insert(0, _ADDNORM_FINDER)
 
 
 def install_if_requested() -> None:
@@ -758,6 +913,9 @@ def install_if_requested() -> None:
             _GNORM_STATIC = RMSNormGated.forward_static
             _install_gnorm(qwen_gdn_linear_attn.QwenGatedDeltaNetAttention)
             sys.stderr.write("k8v4_w4a8: GDN gated norm fused into out_proj's quantizer\n")
+        if "addnorm" in _FUSED:
+            install_addnorm()
+            sys.stderr.write("k8v4_w4a8: post-attention add + RMSNorm fused into gate_up_proj's quantizer\n")
         if _LAYERS == frozenset(("mlp",)):
             sys.stderr.write("k8v4_w4a8: MLP-only installer active; small-M runtime gate=128\n")
         else:

@@ -77,6 +77,21 @@ class TritonQuantTest(unittest.TestCase):
                 ulp = ref.float().abs().clamp(min=1e-3) * (2.0 ** -10 if dtype == torch.float16 else 2.0 ** -7)
                 self.assertTrue(bool(((y.float() - ref.float()).abs() <= ulp).all()))
 
+    def test_addnorm(self):
+        from k8v4_v030 import w4a8_triton as tr
+
+        x = (torch.randn(300, 5120, device="xpu") * 3).to(torch.bfloat16)
+        r = (torch.randn(300, 5120, device="xpu") * 10).to(torch.bfloat16)
+        w = (torch.randn(5120, device="xpu") * 0.2).to(torch.bfloat16)
+        ref, ref_residual = gemm._addnorm_torch(x, r, w, 1e-6)
+        y, res = tr.addnorm(x, r, w, 1e-6)
+        self.assertTrue(torch.equal(res, ref_residual))
+        self.assertLessEqual(float((y.float() - ref.float()).abs().max()), float(ref.float().abs().max()) / 64)
+        for group in (0, 64):
+            (q, s), res = tr.addnorm_quantize(x, r, w, 1e-6, group)
+            self.assertTrue(torch.equal(res, ref_residual))
+            self.check(q, s, y, group or 5120)
+
 
 if __name__ == "__main__":
     unittest.main()

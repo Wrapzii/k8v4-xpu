@@ -9,7 +9,8 @@ zero, as int8 symmetric quantizers usually round; scales are the fp16-rounded
 ``amax / 127`` and the codes are computed with that rounded scale.
 The fused variants also compute SiLU(gate) * up, or the gated RMSNorm of a
 GDN head (vLLM's RMSNormGated.forward_static with the gate after the norm),
-rounded to the activation dtype before quantizing.
+or the decoder layer's post-attention residual add + Gemma RMSNorm (which also
+writes the new residual), rounded to the activation dtype before quantizing.
 """
 
 from __future__ import annotations
@@ -149,6 +150,105 @@ def _gnorm_kernel(o_ptr, z_ptr, w_ptr, y_ptr, K, eps, SIGMOID: tl.constexpr, BF1
         tl.store(y_ptr + base + offs, y.to(tl.bfloat16))
     else:
         tl.store(y_ptr + base + offs, y.to(tl.float16))
+
+
+@triton.jit
+def _addnorm_q8_kernel(x_ptr, r_ptr, w_ptr, q_ptr, s_ptr, y_ptr, ro_ptr, K, NG, eps, BF16: tl.constexpr,
+                       G: tl.constexpr, BLOCK: tl.constexpr, MODE: tl.constexpr):
+    """One row of the decoder layer's post-attention add + Gemma RMSNorm.
+
+    v = x + r in fp32; ro = v rounded to the activation dtype (the new residual);
+    y = v * rsqrt(mean(v^2) + eps) * (1 + w), rounded to the activation dtype, as
+    vLLM's GemmaRMSNorm fused-add path computes it. MODE 0 stores y; MODE 1
+    quantizes y per G channels; MODE 2 quantizes y per token (G unused).
+    """
+    row = tl.program_id(0).to(tl.int64)
+    base = row * K
+    acc = tl.zeros([BLOCK], dtype=tl.float32)
+    for k in range(0, K, BLOCK):
+        offs = k + tl.arange(0, BLOCK)
+        m = offs < K
+        v = (tl.load(x_ptr + base + offs, mask=m, other=0.0).to(tl.float32)
+             + tl.load(r_ptr + base + offs, mask=m, other=0.0).to(tl.float32))
+        if BF16:
+            tl.store(ro_ptr + base + offs, v.to(tl.bfloat16), mask=m)
+        else:
+            tl.store(ro_ptr + base + offs, v.to(tl.float16), mask=m)
+        acc += v * v
+    rstd = tl.rsqrt(tl.sum(acc, 0) / K + eps)
+    amax = tl.zeros([BLOCK], dtype=tl.float32)
+    if MODE == 2:
+        for k in range(0, K, BLOCK):
+            offs = k + tl.arange(0, BLOCK)
+            m = offs < K
+            v = (tl.load(x_ptr + base + offs, mask=m, other=0.0).to(tl.float32)
+                 + tl.load(r_ptr + base + offs, mask=m, other=0.0).to(tl.float32))
+            w = tl.load(w_ptr + offs, mask=m, other=0.0).to(tl.float32) + 1.0
+            y = v * rstd * w
+            if BF16:
+                y = y.to(tl.bfloat16).to(tl.float32)
+            else:
+                y = y.to(tl.float16).to(tl.float32)
+            amax = tl.maximum(amax, tl.abs(y))
+    s16 = tl.maximum(tl.max(amax, 0) / 127.0, 1e-5).to(tl.float16)
+    inv = 1.0 / s16.to(tl.float32)
+    for k in range(0, K, BLOCK):
+        offs = k + tl.arange(0, BLOCK)
+        m = offs < K
+        v = (tl.load(x_ptr + base + offs, mask=m, other=0.0).to(tl.float32)
+             + tl.load(r_ptr + base + offs, mask=m, other=0.0).to(tl.float32))
+        w = tl.load(w_ptr + offs, mask=m, other=0.0).to(tl.float32) + 1.0
+        y = v * rstd * w
+        if BF16:
+            y = y.to(tl.bfloat16)
+        else:
+            y = y.to(tl.float16)
+        if MODE == 0:
+            tl.store(y_ptr + base + offs, y, mask=m)
+        elif MODE == 2:
+            tl.store(q_ptr + base + offs, _round_clamp(y.to(tl.float32) * inv).to(tl.int8), mask=m)
+        else:
+            y2 = tl.reshape(y.to(tl.float32), (BLOCK // G, G))
+            g16 = tl.maximum(tl.max(tl.abs(y2), 1) / 127.0, 1e-5).to(tl.float16)
+            q = _round_clamp(y2 * (1.0 / g16.to(tl.float32))[:, None])
+            tl.store(q_ptr + base + offs, tl.reshape(q, (BLOCK,)).to(tl.int8), mask=m)
+            goffs = k // G + tl.arange(0, BLOCK // G)
+            tl.store(s_ptr + row * NG + goffs, g16, mask=goffs < NG)
+    if MODE == 2:
+        tl.store(s_ptr + row, s16)
+
+
+def addnorm(x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float):
+    """(GemmaRMSNorm(x + residual), x + residual), both in x's dtype."""
+    x, residual = x.contiguous(), residual.contiguous()
+    rows, width = x.shape
+    y = torch.empty_like(x)
+    ro = torch.empty_like(x)
+    if rows:
+        _addnorm_q8_kernel[(rows,)](x, residual, weight, x, x, y, ro, width, 1, eps,
+                                    BF16=x.dtype == torch.bfloat16, G=1, BLOCK=BLOCK, MODE=0, num_warps=4)
+    return y, ro
+
+
+def addnorm_quantize(x: torch.Tensor, residual: torch.Tensor, weight: torch.Tensor, eps: float, group: int):
+    """Int8 of GemmaRMSNorm(x + residual): ((q [M, K], s), new residual).
+
+    ``group`` 0 is one scale per token (s [M, 1]), else per token and ``group``
+    channels (s [M, K/group]), the same codes quantize_rows / quantize_groups
+    give for the unfused normed activation.
+    """
+    x, residual = x.contiguous(), residual.contiguous()
+    rows, width = x.shape
+    if group and (width % BLOCK or BLOCK % group):
+        raise RuntimeError("add-norm quantizer: width %d / group %d do not tile block %d" % (width, group, BLOCK))
+    q = torch.empty((rows, width), dtype=torch.int8, device=x.device)
+    s = torch.empty((rows, width // group if group else 1), dtype=torch.float16, device=x.device)
+    ro = torch.empty_like(x)
+    if rows:
+        _addnorm_q8_kernel[(rows,)](x, residual, weight, q, s, x, ro, width, width // group if group else 1, eps,
+                                    BF16=x.dtype == torch.bfloat16, G=group or 1, BLOCK=BLOCK,
+                                    MODE=1 if group else 2, num_warps=4)
+    return (q, s), ro
 
 
 def quantize_rows(x: torch.Tensor):
