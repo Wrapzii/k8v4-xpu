@@ -279,6 +279,29 @@ class LaunchProfileTest(unittest.TestCase):
                 with self.subTest(bad=bad):
                     result, args = self.command(**bad)
                     self.assertEqual(result.returncode, 2)
+    def test_gdn_heads_mount_is_opt_in(self):
+        lib_target = '/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so'
+        def norm(args):  # each call gets its own temporary model and cache directories
+            return [a for a in args if not a.endswith((':/model:ro', ':/root/.cache/vllm'))]
+        _, default = self.command(K8V4_TP='1')
+        _, off = self.command(K8V4_TP='1', K8V4_GDN_HEADS='0')
+        default, off = norm(default), norm(off)
+        self.assertEqual(default, off)
+        self.assertFalse(any(lib_target in arg for arg in default))
+        with tempfile.TemporaryDirectory() as temp:
+            lib = Path(temp) / 'libgdn_attn_kernels_xe_2.so'
+            lib.write_bytes(b'')
+            result, args = self.command(K8V4_TP='1', K8V4_GDN_HEADS='1', K8V4_GDN_HEADS_LIB=str(lib))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            mount = args.index('%s:%s:ro' % (lib, lib_target))
+            self.assertEqual(args[mount - 1], '-v')
+            self.assertEqual(norm([a for i, a in enumerate(args) if i not in (mount - 1, mount)]), default)
+            for options in ({'K8V4_GDN_HEADS': 'yes'},
+                            {'K8V4_GDN_HEADS': '1', 'K8V4_GDN_HEADS_LIB': str(Path(temp) / 'missing.so')}):
+                with self.subTest(options=options):
+                    result, args = self.command(K8V4_TP='1', **options)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(args, [])
 
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},

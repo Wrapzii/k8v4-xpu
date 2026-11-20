@@ -320,6 +320,18 @@ if [ -n "${K8V4_DRAFT_SKIP_SHARED:-}" ]; then
   extra+=(-e "K8V4_DRAFT_SKIP_SHARED=${K8V4_DRAFT_SKIP_SHARED}")
 fi
 
+# Optional head-parallel GDN prefill kernels (see docs/2026-11-19-gdn-heads.md): K8V4_GDN_HEADS=1 mounts
+# build/libgdn_attn_kernels_xe_2.so (k8v4_v030/compile_gdn.sh; K8V4_GDN_HEADS_LIB overrides the path)
+# over the image's vllm-xpu-kernels copy (build it against the same vLLM image). Bit-identical outputs.
+# Off unless set.
+GDN_HEADS=${K8V4_GDN_HEADS:-0}
+[[ "$GDN_HEADS" =~ ^[01]$ ]] || { echo "K8V4_GDN_HEADS must be 0 or 1" >&2; exit 2; }
+if [ "$GDN_HEADS" = 1 ]; then
+  GDN_LIB=${K8V4_GDN_HEADS_LIB:-$ROOT/build/libgdn_attn_kernels_xe_2.so}
+  [ -f "$GDN_LIB" ] || { echo "K8V4_GDN_HEADS=1 needs $GDN_LIB (run k8v4_v030/compile_gdn.sh)" >&2; exit 2; }
+  extra+=(-v "$(cd "$(dirname "$GDN_LIB")" && pwd)/$(basename "$GDN_LIB"):/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so:ro")
+fi
+
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \
