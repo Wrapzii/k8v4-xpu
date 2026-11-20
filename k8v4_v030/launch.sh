@@ -1,11 +1,11 @@
 #!/bin/bash
-# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.30 XPU.
+# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.34 XPU.
 # TP2 defaults are the measured deployment. K8V4_TP=1 selects the Studio profile.
 # Does not stop containers other than the selected NAME.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-unified}
+IMAGE=${IMAGE:-vllm-openai-xpu:v0.34.0-k8v4-unified}
 TP=${K8V4_TP:-2}
 case "$TP" in
   1)
