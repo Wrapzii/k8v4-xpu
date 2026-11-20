@@ -1,4 +1,4 @@
-FROM vllm/vllm-openai-xpu:v0.30.0@sha256:fc0e112afb64e3a06fe8daff34652435822a629412f38efce8f0f67a46636b8d
+FROM vllm/vllm-openai-xpu:v0.34.0@sha256:cb55d8cffeb1851c552c4b002a5e8be21daa99a51a678d53c57f271e7c16b3f0
 COPY k8v4_v030 /opt/k8v4/k8v4_v030
 COPY libxe2_kv.so /opt/k8v4/libxe2_kv.so
 COPY libk8v4_sdpa.so /opt/k8v4/libk8v4_sdpa.so

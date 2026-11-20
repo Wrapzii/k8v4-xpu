@@ -1,11 +1,11 @@
 #!/bin/bash
-# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.30 XPU.
+# Serve Qwen3.8-27B GPTQ INT4 with the K8/V4 stack on vLLM 0.34 XPU.
 # TP2 defaults are the measured deployment. K8V4_TP=1 selects the Studio profile.
 # Does not stop containers other than the selected NAME.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
-IMAGE=${IMAGE:-vllm-openai-xpu:v0.30.0-k8v4-unified}
+IMAGE=${IMAGE:-vllm-openai-xpu:v0.34.0-k8v4-unified}
 TP=${K8V4_TP:-2}
 case "$TP" in
   1)
@@ -30,6 +30,19 @@ case "$TP" in
     ;;
   *) echo "K8V4_TP must be 1 or 2" >&2; exit 2 ;;
 esac
+# Optional [K, N]-contiguous dense weights for matching layers (k8v4_v030/ncontig.py). Unset changes
+# nothing; a set value is passed through and gets its own compile-cache namespace.
+ncontig_env=()
+if [ -n "${K8V4_NCONTIG_RE:-}" ]; then
+  ncontig_env+=(-e "K8V4_NCONTIG_RE=${K8V4_NCONTIG_RE}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-ncontig"
+fi
+# Optional bitwise-reproducible oneDNN matmuls for torch's dense linears (k8v4_v030/onednn_det.py).
+# Unset changes nothing; a runtime flag, so the compile-cache namespace stays.
+if [ -n "${K8V4_ONEDNN_DETERMINISTIC:-}" ]; then
+  [[ "$K8V4_ONEDNN_DETERMINISTIC" =~ ^[01]$ ]] || { echo "K8V4_ONEDNN_DETERMINISTIC must be 0 or 1" >&2; exit 2; }
+  ncontig_env+=(-e "K8V4_ONEDNN_DETERMINISTIC=${K8V4_ONEDNN_DETERMINISTIC}")
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
@@ -141,6 +154,11 @@ if [ -n "${XE2_KV_S2_PARALLEL:-}" ]; then
   extra+=(-e "XE2_KV_S2_PARALLEL=${XE2_KV_S2_PARALLEL}")
 fi
 
+# Optional Hadamard-rotated K / V cache contents (k8v4_v030/kv_rotate.py). Unset keeps the command unchanged.
+if [ -n "${K8V4_KV_ROTATE:-}" ]; then
+  [[ "$K8V4_KV_ROTATE" =~ ^(k|v|kv)$ ]] || { echo "K8V4_KV_ROTATE must be k, v or kv" >&2; exit 2; }
+  extra+=(-e "K8V4_KV_ROTATE=${K8V4_KV_ROTATE}")
+fi
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \
@@ -151,6 +169,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -v "${CACHE}:/root/.cache/vllm" \
   -v "${HERE}:/opt/k8v4/k8v4_v030:ro" \
   "${extra[@]}" \
+  "${ncontig_env[@]}" \
   -e PYTHONPATH=/opt/k8v4 \
   -e XE2_KV_LIB=/opt/k8v4/libxe2_kv.so \
   -e K8V4_SDPA_LIB=/opt/k8v4/libk8v4_sdpa.so \

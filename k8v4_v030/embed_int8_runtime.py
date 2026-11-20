@@ -40,8 +40,9 @@ def materialize(layer):
     device = layer.weight.device
     if device.type == 'xpu':
         torch.xpu.synchronize(device)  # Finish weight-loader copies before retiring the dense allocation.
-    layer.weight = Parameter(weight.to(device), requires_grad=False)
-    layer.register_parameter('weight_scale', Parameter(scale.to(device), requires_grad=False))
+    from k8v4_v030.upload import to_device  # K8V4_UPLOAD_SLICE_MB; default 0 = plain .to(device)
+    layer.weight = Parameter(to_device(weight, device), requires_grad=False)
+    layer.register_parameter('weight_scale', Parameter(to_device(scale, device), requires_grad=False))
     layer._swift_embed_int8 = True
     if device.type == 'xpu':
         torch.xpu.synchronize(device)
