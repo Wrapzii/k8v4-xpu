@@ -302,6 +302,28 @@ class LaunchProfileTest(unittest.TestCase):
                     result, args = self.command(K8V4_TP='1', **options)
                     self.assertEqual(result.returncode, 2)
                     self.assertEqual(args, [])
+    def test_gdn_recoverssm_is_opt_in(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertNotIn('--use-replayssm', default)
+        self.assertFalse([arg for arg in default if 'RSSM' in arg or 'RECOVERSSM' in arg])
+        result, args = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM='0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(args), len(default))
+        self.assertNotIn("--use-replayssm", args)
+        for bad in ('2', 'yes'):
+            result, args = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM=bad)
+            self.assertEqual(result.returncode, 2)
+        result, args = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM='1', K8V4_RSSM_LIB='/nonexistent/lib.so')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b'compile_rssm.sh', result.stderr)
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            result, args = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM='1', K8V4_RSSM_LIB=lib.name)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('--use-replayssm', args)
+            self.assertIn('%s:/opt/k8v4/libk8v4_rssm.so:ro' % os.path.realpath(lib.name), args)
+            self.assertIn('K8V4_GDN_RECOVERSSM=1', args)
+            self.assertIn('K8V4_RSSM_LIB=/opt/k8v4/libk8v4_rssm.so', args)
+            self.assertEqual(len(args), len(default) + 7)
 
     def test_s1_fast_is_passed_only_when_set(self):
         result, args = self.command(K8V4_TP='1')

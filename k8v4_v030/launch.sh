@@ -214,6 +214,20 @@ if [ -n "${K8V4_MAMBA_SSM_DTYPE:-}" ]; then
   }
   mamba+=(--mamba-ssm-cache-dtype="$K8V4_MAMBA_SSM_DTYPE")
 fi
+# Optional RecoverSSM spec verify on the GDN layers (k8v4_v030/gdn_recoverssm.py): K8V4_GDN_RECOVERSSM=1 passes
+# --use-replayssm and mounts build/libk8v4_rssm.so (k8v4_v030/compile_rssm.sh; K8V4_RSSM_LIB overrides the path).
+# Off unless set.
+rssm=()
+if [ -n "${K8V4_GDN_RECOVERSSM:-}" ]; then
+  [[ "$K8V4_GDN_RECOVERSSM" =~ ^[01]$ ]] || { echo "K8V4_GDN_RECOVERSSM must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_GDN_RECOVERSSM" = 1 ]; then
+    RSSM_LIB=${K8V4_RSSM_LIB:-$ROOT/build/libk8v4_rssm.so}
+    [ -f "$RSSM_LIB" ] || { echo "K8V4_GDN_RECOVERSSM=1 needs $RSSM_LIB (run k8v4_v030/compile_rssm.sh)" >&2; exit 2; }
+    extra+=(-v "$(cd "$(dirname "$RSSM_LIB")" && pwd)/$(basename "$RSSM_LIB"):/opt/k8v4/libk8v4_rssm.so:ro"
+            -e K8V4_GDN_RECOVERSSM=1 -e K8V4_RSSM_LIB=/opt/k8v4/libk8v4_rssm.so)
+    rssm+=(--use-replayssm)
+  fi
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots
@@ -419,6 +433,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --reasoning-parser=qwen3 \
   "${prefix[@]}" \
   "${mamba[@]}" \
+  "${rssm[@]}" \
   "${multimodal[@]}" \
   "${api[@]}" \
   --trust-remote-code \
