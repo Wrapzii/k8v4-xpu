@@ -100,6 +100,20 @@ class LaunchProfileTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(args, [])
 
+    def test_kv_rotate_is_passed_only_when_set(self):
+        result, default = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('K8V4_KV_ROTATE' in arg for arg in default))
+        result, args = self.command(K8V4_TP='1', K8V4_KV_ROTATE='v')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        i = args.index('K8V4_KV_ROTATE=v')
+        self.assertEqual(args[i - 1], '-e')
+        own = lambda argv: [a for a in argv if not a.startswith(tempfile.gettempdir())]  # per-call temp mounts
+        self.assertEqual(own(args[:i - 1] + args[i + 1:]), own(default))
+        result, _ = self.command(K8V4_TP='1', K8V4_KV_ROTATE='hadamard')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b'K8V4_KV_ROTATE must be', result.stderr)
+
 
 # The default argv of b70/vllm-034 (vLLM 0.34 base, every opt-in knob unset), recorded from its launch.sh with
 # K8V4_DRY_RUN=1; <ROOT> is the checkout. Every opt-in port on b70/combined-final must leave it byte-identical.
