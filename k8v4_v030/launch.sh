@@ -359,6 +359,13 @@ if [ -n "${XE2_KV_BATCH_REQS:-}" ]; then
     *) echo "XE2_KV_BATCH_REQS must be 0 or 1, got '$XE2_KV_BATCH_REQS'" >&2; exit 2 ;;
   esac
 fi
+# Optional shared-prefix cascade for the one-row drafter batch (needs XE2_KV_BATCH_REQS=1). Off unless set.
+if [ -n "${XE2_KV_CASCADE:-}" ]; then
+  case "$XE2_KV_CASCADE" in
+    0|1) extra+=(-e "XE2_KV_CASCADE=${XE2_KV_CASCADE}") ;;
+    *) echo "XE2_KV_CASCADE must be 0 or 1, got '$XE2_KV_CASCADE'" >&2; exit 2 ;;
+  esac
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \

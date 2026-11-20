@@ -1871,12 +1871,17 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
 // contiguous run of pages, then subgroup 0 combines those N_SG states.
 // Page Acc is normalized, so the page update scales by w*L. A subgroup
 // state is already the weighted numerator, so the second update scales by w.
+// CASC (XE2_KV_CASCADE, BATCH only): each row also merges the shared-prefix programs
+// (M2 / L2 / Acc2, one pseudo request whose row for token t is t * GQA + g) after its own tail
+// programs; *shared_len tokens were walked there (0: none, the row merges its tail only).
 template <typename OutT, typename KernelName, int HKV, int N_SG, bool TWO_PASS = false,
-          typename PartT = float, bool BATCH = false>
+          typename PartT = float, bool BATCH = false, bool CASC = false>
 static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, const PartT *Acc,
                                OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq,
                                int s1_pages = 1, int s1_splits = 0, int q_per_req = 1,
-                               int seq_stride = 0) {
+                               int seq_stride = 0, const float *M2 = nullptr,
+                               const float *L2 = nullptr, const PartT *Acc2 = nullptr,
+                               const std::int32_t *shared_len = nullptr) {
   constexpr int HQ = Heads<HKV>::hq;
   constexpr int GQA = Heads<HKV>::gqa;
   constexpr int VEC = 4;
@@ -1914,9 +1919,28 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           const int n_live = static_cast<int>(sycl::max(
               static_cast<std::int64_t>(1),
               sycl::min(static_cast<std::int64_t>(n_splits), (seq_len + split_tok - 1) / split_tok)));
-          const int chunk = (n_live + N_SG - 1) / N_SG;
+          int n_total = n_live;
+          int p0s = 0, row_s = 0;
+          if constexpr (CASC) {
+            const std::int64_t sl = static_cast<std::int64_t>(shared_len[0]);
+            if (sl > 0) {
+              const std::int64_t split2 = static_cast<std::int64_t>(BM) * s1_pages_for(sl, s1_pages, s1_splits);
+              n_total += static_cast<int>(
+                  sycl::min(static_cast<std::int64_t>(n_splits), (sl + split2 - 1) / split2));
+            }
+            p0s = head * n_splits;
+            row_s = tok * GQA + (h - head * GQA);
+          }
+          // Group s < n_live: this row's own programs; s >= n_live (CASC): the shared ones.
+          auto src_row = [&](int s) -> size_t {
+            if constexpr (CASC) {
+              if (s >= n_live) return static_cast<size_t>(p0s + s - n_live) * BM + row_s;
+            }
+            return static_cast<size_t>(p0 + s) * BM + row;
+          };
+          const int chunk = (n_total + N_SG - 1) / N_SG;
           const int s0 = sg_id * chunk;
-          const int s1 = s0 + chunk < n_live ? s0 + chunk : n_live;
+          const int s1 = s0 + chunk < n_total ? s0 + chunk : n_total;
 
           float gm = -INFINITY;
           float lsum = 0.f;
@@ -1927,18 +1951,19 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           // Empty causal pages have M=-inf and L=0; retain the explicit guard.
           if constexpr (TWO_PASS) {
             for (int s = s0; s < s1; ++s)
-              gm = sycl::max(gm, M[static_cast<size_t>(p0 + s) * BM + row]);
+              gm = sycl::max(gm, (CASC && s >= n_live ? M2 : M)[src_row(s)]);
           }
           for (int s = s0; s < s1; ++s) {
-            const size_t mr = static_cast<size_t>(p0 + s) * BM + row;
-            const float mv = M[mr];
-            const float lv = L[mr];
+            const size_t mr = src_row(s);
+            const bool sh = CASC && s >= n_live;
+            const float mv = (sh ? M2 : M)[mr];
+            const float lv = (sh ? L2 : L)[mr];
             const float new_gm = TWO_PASS ? gm : sycl::max(gm, mv);
             const float alpha = TWO_PASS ? 1.f : ((gm == -INFINITY) ? 0.f : sycl::exp(gm - new_gm));
             const float w = (mv == -INFINITY || new_gm == -INFINITY) ? 0.f : sycl::exp(mv - new_gm);
             const float wl = w * lv;
             lsum = lsum * alpha + wl;
-            const PartT *ap = Acc + mr * BV;
+            const PartT *ap = (sh ? Acc2 : Acc) + mr * BV;
 #pragma unroll
             for (int t = 0; t < NV; ++t) {
               const int d0 = t * (SG_SIZE * VEC) + lane * VEC;
@@ -2608,6 +2633,63 @@ static void int8k_int4v_decode_step(const at::Tensor &q_fp16, const at::Tensor &
 
 template <int HKV, int NSG, bool P16> class Xe2KvTorchAbiS2BatchHalf;
 template <int HKV, int NSG> class Xe2KvTorchAbiS2BatchFloat;
+template <int HKV, int NSG, bool P16> class Xe2KvTorchAbiS2CascHalf;
+template <int HKV, int NSG> class Xe2KvTorchAbiS2CascFloat;
+class Xe2KvTorchAbiCascadePlan;
+
+// XE2_KV_CASCADE=1 (with XE2_KV_BATCH_REQS=1, multi-page S1, one query row per request, i.e. the
+// MTP drafter): block-table entries that every request of the batch shares (same physical block
+// from entry 0) are walked ONCE by one multi-page S1 launch whose Q tile holds every request's
+// rows; each request then walks only its own tail and S2 merges tail + shared partials. The
+// shared prefix is found on the device (graph-capture legal); with no shared entry the shared
+// launch exits at once and S2 merges the same groups in the same order as without the cascade.
+// Not bit-exact with the plain batched path when a prefix is shared (other page grouping, one
+// more merge step): fp16-level differences. Off unless set; 0 or 1 only.
+static bool cascade_enabled() {
+  const char *v = std::getenv("XE2_KV_CASCADE");
+  if (v == nullptr || (v[0] == '0' && v[1] == '\0')) return false;
+  TORCH_CHECK(v[0] == '1' && v[1] == '\0', "XE2_KV_CASCADE must be 0 or 1, got '", v, "'");
+  return true;
+}
+
+// One work-group: S = the number of leading block-table entries identical in every request,
+// capped so each request keeps at least one token in its tail. Writes vis_shared[0..nreq] = S *
+// block_tokens (the shared pseudo request's length and every row's visible length), each
+// request's tail length and its tail table (row shifted left by S entries, last entry repeated).
+static void launch_cascade_plan(sycl::queue &q, const std::int32_t *bt, const std::int32_t *seq_lens,
+                                int nreq, int width, int block_tokens, std::int32_t *vis_shared,
+                                std::int32_t *lens_tail, std::int32_t *bt_tail) {
+  constexpr int WG = 256;
+  q.submit([&](sycl::handler &h) {
+    h.parallel_for<Xe2KvTorchAbiCascadePlan>(
+        sycl::nd_range<1>(sycl::range<1>(WG), sycl::range<1>(WG)), [=](sycl::nd_item<1> item) {
+          const int lid = static_cast<int>(item.get_local_id(0));
+          int first_diff = width;
+          for (int e = lid; e < width; e += WG) {
+            const std::int32_t lead = bt[e];
+            bool same = true;
+            for (int r = 1; r < nreq; ++r) same = same && bt[static_cast<size_t>(r) * width + e] == lead;
+            if (!same && e < first_diff) first_diff = e;
+          }
+          int common = sycl::reduce_over_group(item.get_group(), first_diff, sycl::minimum<int>());
+          for (int r = 0; r < nreq; ++r) {
+            const int s = seq_lens[r];
+            const int cap = s > 0 ? (s - 1) / block_tokens : 0;
+            common = common < cap ? common : cap;
+          }
+          if (nreq < 2) common = 0;
+          const int shared = common * block_tokens;
+          if (lid <= nreq) vis_shared[lid] = shared;
+          if (lid < nreq) lens_tail[lid] = seq_lens[lid] - shared;
+          for (int i = lid; i < nreq * width; i += WG) {
+            const int r = i / width;
+            const int j = i - r * width;
+            const int src = j + common < width ? j + common : width - 1;
+            bt_tail[i] = bt[static_cast<size_t>(r) * width + src];
+          }
+        });
+  });
+}
 
 // XE2_KV_BATCH_REQS=1: all requests of int8k_int4v_attn_batch in one q-pack, one S1 and one S2
 // launch (multi-page S1 only). Off unless set; 0 or 1 only.
@@ -2615,6 +2697,109 @@ static bool batch_reqs_enabled() {
   const char *v = std::getenv("XE2_KV_BATCH_REQS");
   if (v == nullptr || (v[0] == '0' && v[1] == '\0')) return false;
   TORCH_CHECK(v[0] == '1' && v[1] == '\0', "XE2_KV_BATCH_REQS must be 0 or 1, got '", v, "'");
+  return true;
+}
+
+// XE2_KV_CASCADE body for q_len == 1. Workspace layout (all inside the caller's partials tensor,
+// nothing allocated): tail programs [0, B * G * HKV), shared programs [B * G * HKV, (B + 1) * G *
+// HKV), then the tail Q tiles, the shared Q tile and the plan's int32 arrays. Returns false
+// (plain batched path) when that does not fit.
+template <int HKV>
+static bool attn_batch_cascade(const at::Tensor &q_fp16, const at::Tensor &k_cache,
+                               const at::Tensor &k_scale, const at::Tensor &v_cache,
+                               const at::Tensor &v_scale, const at::Tensor &v_zero,
+                               const at::Tensor &block_table, const at::Tensor &seq_lens,
+                               const at::Tensor &partials_ws, const at::Tensor &m_ws,
+                               const at::Tensor &l_ws, at::Tensor out, int batch, int ratio,
+                               int npg, int splits, int n_groups, int64_t tail_progs) {
+  const int width = static_cast<int>(block_table.size(1));
+  const int64_t ws_progs = partials_ws.size(0);
+  const int64_t shared_progs = static_cast<int64_t>(n_groups) * HKV;
+  const int64_t all_progs = tail_progs + shared_progs;
+  const int64_t tile_q8 = static_cast<int64_t>(HKV) * BM * BK;
+  const int64_t tile_sc = static_cast<int64_t>(HKV) * BM * static_cast<int64_t>(sizeof(float));
+  auto align = [](int64_t x) { return (x + 255) / 256 * 256; };
+  const int64_t part_bytes = ws_progs * BM * BV * static_cast<int64_t>(sizeof(float));
+  const int64_t q_off = align(all_progs * BM * BV * static_cast<int64_t>(sizeof(float)));
+  const int64_t qsc_off = align(q_off + batch * tile_q8);
+  const int64_t sq_off = align(qsc_off + batch * tile_sc);
+  const int64_t ssc_off = align(sq_off + tile_q8);
+  const int64_t vis_off = align(ssc_off + tile_sc);
+  const int64_t lens_off = align(vis_off + static_cast<int64_t>(batch + 1) * 4);
+  const int64_t bt_off = align(lens_off + static_cast<int64_t>(batch) * 4);
+  const int64_t need = bt_off + static_cast<int64_t>(batch) * width * 4;
+  if (all_progs > ws_progs || need > part_bytes) return false;
+  const bool half_out = out.scalar_type() == at::kHalf;
+  const bool pf16 = half_out && env_is_1("XE2_KV_PARTIAL_FP16");
+  auto &queue = current_xpu_queue();
+  auto *base = reinterpret_cast<std::uint8_t *>(partials_ws.data_ptr<float>());
+  auto *q8 = reinterpret_cast<std::int8_t *>(base + q_off);
+  auto *qsc = reinterpret_cast<float *>(base + qsc_off);
+  auto *sq8 = reinterpret_cast<std::int8_t *>(base + sq_off);
+  auto *ssc = reinterpret_cast<float *>(base + ssc_off);
+  auto *vis_shared = reinterpret_cast<std::int32_t *>(base + vis_off);
+  auto *lens_tail = reinterpret_cast<std::int32_t *>(base + lens_off);
+  auto *bt_tail = reinterpret_cast<std::int32_t *>(base + bt_off);
+  const std::int32_t *bt = block_table.data_ptr<int32_t>();
+  launch_cascade_plan(queue, bt, seq_lens.data_ptr<int32_t>(), batch, width, ratio * BM, vis_shared,
+                      lens_tail, bt_tail);
+  // Tails: one Q tile per request (one row each). Shared: every request's row in one tile, as one
+  // pseudo request of q_len = batch whose rows all see exactly the shared tokens.
+  launch_pack_q_quant_batch<HKV>(queue, as_half_c(q_fp16), q8, qsc, 1, batch);
+  launch_pack_q_quant<HKV>(queue, as_half_c(q_fp16), sq8, ssc, batch);
+  float *mp = m_ws.data_ptr<float>();
+  float *lp = l_ws.data_ptr<float>();
+  float *part = partials_ws.data_ptr<float>();
+  float *part_sh = pf16 ? reinterpret_cast<float *>(reinterpret_cast<sycl::half *>(part) +
+                                                    tail_progs * BM * BV)
+                        : part + tail_progs * BM * BV;
+  float *mp_sh = mp + tail_progs * BM;
+  float *lp_sh = lp + tail_progs * BM;
+  auto run_s1 = [&](auto pf) {
+    constexpr bool P = decltype(pf)::value;
+    launch_s1_multi_dispatch<HKV, P>(
+        queue, q8, qsc, k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
+        v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), bt_tail,
+        lens_tail, part, mp, lp, n_groups, npg, 1, static_cast<size_t>(k_cache.stride(0)),
+        static_cast<size_t>(v_cache.stride(0)), static_cast<size_t>(k_scale.stride(0)), nullptr,
+        ratio, splits, batch, width, 0);
+    launch_s1_multi_dispatch<HKV, P>(
+        queue, sq8, ssc, k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
+        v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(), v_zero.data_ptr<float>(), bt,
+        vis_shared, part_sh, mp_sh, lp_sh, n_groups, npg, batch,
+        static_cast<size_t>(k_cache.stride(0)), static_cast<size_t>(v_cache.stride(0)),
+        static_cast<size_t>(k_scale.stride(0)), vis_shared, ratio, splits, 1, width, 0);
+  };
+  if (pf16) run_s1(std::true_type{}); else run_s1(std::false_type{});
+  const int nsg = s2_parallel_subgroups(1);
+  if (half_out) {
+    auto *dst = reinterpret_cast<sycl::half *>(out.data_ptr<at::Half>());
+    auto go = [&](auto n, auto p16) {
+      constexpr int N = decltype(n)::value;
+      constexpr bool P = decltype(p16)::value;
+      using PartT = std::conditional_t<P, sycl::half, float>;
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2CascHalf<HKV, N, P>, HKV, N, false, PartT, true,
+                         true>(queue, mp, lp, reinterpret_cast<const PartT *>(part), dst, lens_tail,
+                               n_groups, batch, npg, splits, 1, 1, mp_sh, lp_sh,
+                               reinterpret_cast<const PartT *>(part_sh), vis_shared);
+    };
+    auto pick = [&](auto p16) {
+      if (nsg == 8) go(std::integral_constant<int, 8>{}, p16);
+      else if (nsg == 16) go(std::integral_constant<int, 16>{}, p16);
+      else go(std::integral_constant<int, 32>{}, p16);
+    };
+    if (pf16) pick(std::true_type{}); else pick(std::false_type{});
+  } else {
+    auto go = [&](auto n) {
+      constexpr int N = decltype(n)::value;
+      launch_s2_parallel<float, Xe2KvTorchAbiS2CascFloat<HKV, N>, HKV, N, false, float, true, true>(
+          queue, mp, lp, part, out.data_ptr<float>(), lens_tail, n_groups, batch, npg, splits, 1, 1,
+          mp_sh, lp_sh, part_sh, vis_shared);
+    };
+    if (nsg == 8) go(std::integral_constant<int, 8>{});
+    else if (nsg == 16) go(std::integral_constant<int, 16>{});
+    else go(std::integral_constant<int, 32>{});
+  }
   return true;
 }
 
@@ -2649,6 +2834,13 @@ static bool attn_batch_fused(const at::Tensor &q_fp16, const at::Tensor &k_cache
   const int64_t ws_progs = partials_ws.size(0);
   if (m_ws.numel() < ws_progs * BM || l_ws.numel() < ws_progs * BM) return false;
   const int64_t used_progs = static_cast<int64_t>(batch) * n_groups * HKV;
+  if (cascade_enabled() && q_len == 1 && batch >= 2 && batch * GQA <= kMultiMaxRows &&
+      !(visible_lens.defined() && visible_lens.numel() > 0) && block_table.is_contiguous() &&
+      seq_lens.is_contiguous() &&
+      attn_batch_cascade<HKV>(q_fp16, k_cache, k_scale, v_cache, v_scale, v_zero, block_table,
+                              seq_lens, partials_ws, m_ws, l_ws, out, batch, ratio, npg, splits,
+                              n_groups, used_progs))
+    return true;
   // Q tiles after the used partials, 256-byte aligned.
   const int64_t part_bytes = ws_progs * BM * BV * static_cast<int64_t>(sizeof(float));
   const int64_t q_off = (used_progs * BM * BV * static_cast<int64_t>(sizeof(float)) + 255) / 256 * 256;

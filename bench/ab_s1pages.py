@@ -23,7 +23,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-KEYS = ("XE2_KV_S1_PAGES", "XE2_KV_PARTIAL_FP16", "XE2_KV_S1_GRF", "XE2_KV_SMALL_S1", "XE2_KV_BATCH_REQS")
+KEYS = ("XE2_KV_S1_PAGES", "XE2_KV_PARTIAL_FP16", "XE2_KV_S1_GRF", "XE2_KV_SMALL_S1", "XE2_KV_BATCH_REQS",
+        "XE2_KV_CASCADE")
 
 
 def emit(**row):
@@ -57,6 +58,9 @@ def main():
                     help="requests per op (request r has length - 37 * r tokens and its own pages)")
     ap.add_argument("--ops-per-graph", type=int, default=1,
                     help="capture the op this many times per graph (amortizes host replay cost)")
+    ap.add_argument("--shared", type=float, default=0.0,
+                    help="with --batch: fraction of the shortest request that all requests share "
+                         "(same leading block-table entries, stored once; XE2_KV_CASCADE)")
     args = ap.parse_args()
 
     os.environ.pop("XE2_KV_S2_NSG_DRAFT", None)
@@ -78,7 +82,8 @@ def main():
     for item in filter(None, args.variants.split(";")):
         label, spec = item.split(":", 1)
         variants.append((label, spec))
-    emit(kind="begin", variants=variants, lengths=args.lengths, queries=args.queries)
+    emit(kind="begin", variants=variants, lengths=args.lengths, queries=args.queries, batch=args.batch,
+         shared=args.shared)
     fails = []
     summary = []
     for length in map(int, args.lengths.split(",")):
@@ -93,8 +98,10 @@ def main():
         perm = torch.randperm(nb * blocks, generator=gen).to(torch.int64).reshape(nb, blocks)
         bs = PAGE * ppb
         lens = [length - 37 * r for r in range(nb)]
+        shared_blocks = int(args.shared * min(lens)) // bs if nb > 1 else 0
+        perm[:, :shared_blocks] = perm[0, :shared_blocks]
         for r in range(nb):
-            for start in range(0, lens[r], 2048):
+            for start in range(shared_blocks * bs if r else 0, lens[r], 2048):
                 count = min(2048, lens[r] - start)
                 k = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
                 v = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
