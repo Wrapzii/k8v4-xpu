@@ -75,6 +75,22 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('K8V4_NCONTIG_RE=in_proj_ba', args)
         self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-ncontig', args)
+    def test_onednn_deterministic_is_passed_only_when_set(self):
+        result, default = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('K8V4_ONEDNN_DETERMINISTIC' in arg for arg in default))
+        result, args = self.command(K8V4_TP='1', K8V4_ONEDNN_DETERMINISTIC='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_ONEDNN_DETERMINISTIC=1', args)
+        self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1', args)
+        i = args.index('K8V4_ONEDNN_DETERMINISTIC=1')
+        self.assertEqual(args[i - 1], '-e')
+        model = lambda xs: [x.split('/', 3)[-1] if x.startswith('/tmp/') else x for x in xs]  # temp dirs differ per call
+        self.assertEqual(model(args[:i - 1] + args[i + 1:]), model(default))
+        result, _ = self.command(K8V4_TP='1', K8V4_ONEDNN_DETERMINISTIC='yes')
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(b'K8V4_ONEDNN_DETERMINISTIC must be 0 or 1', result.stderr)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

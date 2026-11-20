@@ -13,10 +13,12 @@ from dataclasses import replace
 import torch
 
 from k8v4_v030.ncontig import install_if_requested as install_ncontig
+from k8v4_v030.onednn_det import install_if_requested as install_onednn_det
 from k8v4_v030.w4a8_prefill import install_if_requested
 
 install_if_requested()
 install_ncontig()
+install_onednn_det()
 
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030.cache_views import bind_regions

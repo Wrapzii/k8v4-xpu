@@ -37,6 +37,12 @@ if [ -n "${K8V4_NCONTIG_RE:-}" ]; then
   ncontig_env+=(-e "K8V4_NCONTIG_RE=${K8V4_NCONTIG_RE}")
   CACHE_NAMESPACE="${CACHE_NAMESPACE}-ncontig"
 fi
+# Optional bitwise-reproducible oneDNN matmuls for torch's dense linears (k8v4_v030/onednn_det.py).
+# Unset changes nothing; a runtime flag, so the compile-cache namespace stays.
+if [ -n "${K8V4_ONEDNN_DETERMINISTIC:-}" ]; then
+  [[ "$K8V4_ONEDNN_DETERMINISTIC" =~ ^[01]$ ]] || { echo "K8V4_ONEDNN_DETERMINISTIC must be 0 or 1" >&2; exit 2; }
+  ncontig_env+=(-e "K8V4_ONEDNN_DETERMINISTIC=${K8V4_ONEDNN_DETERMINISTIC}")
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
