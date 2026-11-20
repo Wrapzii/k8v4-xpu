@@ -101,7 +101,12 @@ class GDNRecoverSSMMetadata(GDNAttentionMetadata, RecoverSSMMetadata):
         if c is None:
             return None
         n = self.num_spec_decodes
-        self.recoverssm_context.commit(
+        commit = self.recoverssm_context.commit
+        if getattr(self.recoverssm_context, "k8v4_defer", None) is not None:
+            from k8v4_v030 import rssm_defer
+
+            commit = lambda *a, **kw: rssm_defer.commit(self.recoverssm_context, *a, **kw)  # noqa: E731
+        commit(
             num_accepted_tokens,
             c.state_indices[:n, 0],
             c.query_start_loc[: n + 1],
@@ -139,6 +144,9 @@ class GDNRecoverSSMMetadataBuilder(GDNAttentionMetadataBuilder):
         self._context: Any = None
         self._logged = False
         self._capturing = False
+        from k8v4_v030 import rssm_defer
+
+        self._defer = rssm_defer.defer_enabled()
 
     def _get_context(self):
         if self._context is None:
@@ -151,6 +159,11 @@ class GDNRecoverSSMMetadataBuilder(GDNAttentionMetadataBuilder):
                 spec_query_len=1 + self.num_spec,
                 max_num_reqs=self.vllm_config.scheduler_config.max_num_seqs,
             )
+            if self._defer:
+                from k8v4_v030 import rssm_defer
+
+                rssm_defer.attach(self._context, self.vllm_config.scheduler_config.max_num_seqs)
+                logger.info("GDN RecoverSSM deferred commit (K8V4_RSSM_DEFER_COMMIT=1)")
             logger.info(
                 "GDN RecoverSSM commit context: %d layers, spec_query_len %d",
                 len(layers),
@@ -190,6 +203,13 @@ class GDNRecoverSSMMetadataBuilder(GDNAttentionMetadataBuilder):
             num_decode_draft_tokens_cpu=num_decode_draft_tokens_cpu,
             fast_build=fast_build,
         )
+        if self._defer:
+            if m.req_idx is None and meta.num_spec_decodes > 0 and not self._capturing:
+                raise ValueError(
+                    "K8V4_RSSM_DEFER_COMMIT=1 needs the request slots in the attention metadata "
+                    "(tools/patch_rssm_defer_v030.py)"
+                )
+            self._clear_prefill_slots(m, rows)
         base = {f.name: getattr(meta, f.name) for f in fields(meta)}
         commit = None
         if meta.num_spec_decodes > 0:
@@ -253,6 +273,23 @@ class GDNRecoverSSMMetadataBuilder(GDNAttentionMetadataBuilder):
         gpu = self._record_indices.gpu[:padded_len]
         async_tensor_h2d(host, out=gpu)
         return gpu
+
+    def _clear_prefill_slots(self, m: CommonAttentionMetadata, spec_rows) -> None:
+        """K8V4_RSSM_DEFER_COMMIT: a request slot that runs a prefill starts a new (or recomputed) state, so the
+        pending records a finished request left in that slot must not be folded into it."""
+        if self._capturing or self._context is None:
+            return
+        if m.is_prefilling is None or m.is_prefilling.device.type != "cpu" or m.req_idx is None:
+            # dummy / profile batches (no request slots); every real model-runner step carries both
+            return
+        prefill = m.is_prefilling[: m.num_reqs].clone()
+        if spec_rows is not None and spec_rows.numel():
+            prefill[spec_rows] = False
+        rows = prefill.nonzero().flatten().numpy()
+        if rows.size:
+            from k8v4_v030 import rssm_defer
+
+            rssm_defer.clear_slots(self._context, m.req_idx[rows])
 
     def build_for_cudagraph_capture(
         self, common_attn_metadata: CommonAttentionMetadata

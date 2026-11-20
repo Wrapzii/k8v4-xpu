@@ -18,6 +18,8 @@ Pieces (all inert unless K8V4_GDN_RECOVERSSM=1 and vLLM runs with --use-replayss
     of vllm-xpu-kernels 0.1.17 built as a standalone op with per-request replay rows (native/rssm,
     K8V4_RSSM_LIB). Mixed steps (prefill chunks + decodes) run the non-spec rows through the stock fused op in
     their own call, as the stock fused conv is spec XOR non-spec.
+  - K8V4_RSSM_VERIFY=slm / K8V4_RSSM_DEFER_COMMIT=1 (k8v4_v030/rssm_defer.py): the SLM-staged verify kernel and the
+    deferred commit; unset keeps the stock verify op and the commit after sampling.
 """
 
 from __future__ import annotations
@@ -36,6 +38,7 @@ ARCHITECTURES = (
 )
 
 _lib_loaded = [False]
+_verify_op = []  # (op name, deferred) once per process
 
 
 def enabled() -> bool:
@@ -72,11 +75,15 @@ def install_layer(cls) -> None:
             import torch
             from vllm.config import get_current_vllm_config
 
+            from k8v4_v030 import rssm_defer
+
+            rssm_defer.check_window(self.num_spec)
+
             # Per-token replay records [HV, spec_query_len, V + K + 1] fp32, one row per request slot. Allocated
             # here so the memory profiler counts it (4 seqs: about 0.8 MB per layer at depth 3).
             self.register_buffer(
                 'recoverssm_replay',
-                torch.zeros(get_current_vllm_config().scheduler_config.max_num_seqs,
+                torch.zeros(rssm_defer.replay_rows(get_current_vllm_config().scheduler_config.max_num_seqs),
                             self.num_v_heads // self.tp_size, self.num_spec + 1,
                             self.head_v_dim + self.head_k_dim + 1, dtype=torch.float32),
                 persistent=False)
@@ -118,17 +125,42 @@ def _verify(layer, md, out, z, qkvz, ba, conv_weights, sp_loc, sp_idx, sp_state,
     import torch
 
     _load_lib()
+    if not _verify_op:
+        from k8v4_v030 import rssm_defer
+
+        _verify_op.append((rssm_defer.verify_mode(), rssm_defer.defer_enabled()))
+    mode, deferred = _verify_op[0]
+    if mode == 'stock' and not deferred:
+        col_w, col0 = sp_state[:, :1].expand(-1, layer.num_spec + 1).contiguous(), None
+    else:
+        # The checkpoint columns are the same for every GDN layer of a step: copy them once per step (metadata
+        # object), not twice per layer.
+        key = (sp_state.data_ptr(), tuple(sp_state.shape), n_spec, layer.num_spec)
+        cols = getattr(md, '_k8v4_rssm_cols', None)
+        if cols is None or cols[0] != key:
+            cols = (key, sp_state[:, :1].expand(-1, layer.num_spec + 1).contiguous(),
+                    sp_state[:n_spec, 0].contiguous())
+            md._k8v4_rssm_cols = cols
+        col_w, col0 = cols[1], cols[2]
     q, k, v, b, a = torch.ops._xpu_C.causal_conv1d_spec(
         z, qkvz, ba, layer.num_k_heads, layer.num_v_heads, layer.head_k_dim, layer.head_v_dim,
         layer.kv_cache[0], conv_weights, layer.conv1d.bias, layer.activation, 0, 0, n_spec,
         sp_loc.contiguous(), sp_idx.contiguous(),
         # one checkpoint column; the conv kernel reads the window width from the column count
-        sp_state[:, :1].expand(-1, layer.num_spec + 1).contiguous(),
+        col_w,
         md.num_accepted_tokens.contiguous(), n_tok, layer.tp_size, not layer.gqa_interleaved_layout)
     rec = md.recoverssm_record_indices
-    torch.ops._k8v4_rssm.verify(
+    op = 'verify_slm' if mode == 'slm' else 'verify'
+    if deferred:
+        # K8V4_RSSM_DEFER_COMMIT: fold the slot's pending accepted records first (rssm_defer.py)
+        d = md.recoverssm_context.k8v4_defer
+        torch.ops._k8v4_rssm.verify_deferred(
+            out, q, k, v, b, a, layer.A_log, layer.dt_bias, layer.kv_cache[1], layer.recoverssm_replay,
+            sp_loc[: n_spec + 1].contiguous(), sp_idx, col0, rec[:n_spec].contiguous(), 0, d.pending, d.parity)
+        return
+    getattr(torch.ops._k8v4_rssm, op)(
         out, q, k, v, b, a, layer.A_log, layer.dt_bias, layer.kv_cache[1], layer.recoverssm_replay,
-        sp_loc[: n_spec + 1].contiguous(), sp_idx, sp_state[:n_spec, 0].contiguous(),
+        sp_loc[: n_spec + 1].contiguous(), sp_idx, sp_state[:n_spec, 0].contiguous() if col0 is None else col0,
         None if rec is None else rec[:n_spec].contiguous(), 0)
 
 

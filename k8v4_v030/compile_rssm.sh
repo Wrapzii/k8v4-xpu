@@ -39,7 +39,7 @@ git -C /w/xk remote add origin https://github.com/vllm-project/vllm-xpu-kernels.
 git -C /w/xk fetch -q --depth 1 origin "$XK_COMMIT"
 git -C /w/xk checkout -q FETCH_HEAD
 cp /w/xk/csrc/xpu/gdn_attn/gated_delta_rule.hpp /w/xk/csrc/xpu/gdn_attn/gated_delta_rule_recoverssm.hpp /w/
-cp /src/k8v4_rssm.cpp /w/
+cp /src/k8v4_rssm.cpp /src/*.hpp /w/
 /opt/venv/bin/python -I /src/rssm_record_rows.py /w/gated_delta_rule_recoverssm.hpp
 T=/opt/venv/lib/python3.12/site-packages/torch
 nice -n 19 icpx -fsycl -fsycl-targets=spir64_gen -Xs "-device $AOT" -O2 -fPIC -shared -std=c++20 \

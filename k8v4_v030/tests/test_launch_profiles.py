@@ -370,6 +370,25 @@ class LaunchProfileTest(unittest.TestCase):
                 result, args = self.command(K8V4_TP='1', XE2_KV_CASCADE=bad)
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(args, [])
+    def test_rssm_verify_and_deferred_commit_are_opt_in(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if 'K8V4_RSSM_VERIFY' in arg or 'K8V4_RSSM_DEFER' in arg])
+        result, args = self.command(K8V4_TP='1', K8V4_RSSM_DEFER_COMMIT='0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(args), len(default))
+        for bad in ({'K8V4_RSSM_VERIFY': 'fast'}, {'K8V4_RSSM_DEFER_COMMIT': 'yes'}, {'K8V4_RSSM_VERIFY': 'slm'},
+                    {'K8V4_RSSM_DEFER_COMMIT': '1'}):
+            result, _ = self.command(K8V4_TP='1', **bad)
+            self.assertEqual(result.returncode, 2, bad)
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            _, base = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM='1', K8V4_RSSM_LIB=lib.name)
+            result, args = self.command(K8V4_TP='1', K8V4_GDN_RECOVERSSM='1', K8V4_RSSM_LIB=lib.name,
+                                        K8V4_RSSM_VERIFY='slm', K8V4_RSSM_DEFER_COMMIT='1')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_RSSM_VERIFY=slm', args)
+            self.assertIn('K8V4_RSSM_DEFER_COMMIT=1', args)
+            self.assertEqual(len(args), len(base) + 4)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},
