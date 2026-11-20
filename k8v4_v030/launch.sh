@@ -352,6 +352,13 @@ if [ -n "${XE2_KV_S1_FAST:-}" ]; then
     *) echo "XE2_KV_S1_FAST must be 0 or 1, got '$XE2_KV_S1_FAST'" >&2; exit 2 ;;
   esac
 fi
+# Optional one launch for all requests of a decode batch (q-pack, S1, S2; multi-page S1 only). Off unless set.
+if [ -n "${XE2_KV_BATCH_REQS:-}" ]; then
+  case "$XE2_KV_BATCH_REQS" in
+    0|1) extra+=(-e "XE2_KV_BATCH_REQS=${XE2_KV_BATCH_REQS}") ;;
+    *) echo "XE2_KV_BATCH_REQS must be 0 or 1, got '$XE2_KV_BATCH_REQS'" >&2; exit 2 ;;
+  esac
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \

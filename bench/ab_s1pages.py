@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-KEYS = ("XE2_KV_S1_PAGES", "XE2_KV_PARTIAL_FP16", "XE2_KV_S1_GRF", "XE2_KV_SMALL_S1")
+KEYS = ("XE2_KV_S1_PAGES", "XE2_KV_PARTIAL_FP16", "XE2_KV_S1_GRF", "XE2_KV_SMALL_S1", "XE2_KV_BATCH_REQS")
 
 
 def emit(**row):
@@ -53,6 +53,8 @@ def main():
     ap.add_argument("--warmup", type=int, default=16)
     ap.add_argument("--no-timing", action="store_true")
     ap.add_argument("--tol", type=float, default=2e-3)
+    ap.add_argument("--batch", type=int, default=1,
+                    help="requests per op (request r has length - 37 * r tokens and its own pages)")
     ap.add_argument("--ops-per-graph", type=int, default=1,
                     help="capture the op this many times per graph (amortizes host replay cost)")
     args = ap.parse_args()
@@ -83,30 +85,36 @@ def main():
         ppb = args.pages_per_block
         blocks = (max(length, args.capacity) + PAGE * ppb - 1) // (PAGE * ppb)
         pages = blocks * ppb
-        raw = torch.zeros(pages * layout.page_bytes, dtype=torch.int8, device=device)
+        nb = args.batch
+        raw = torch.zeros(nb * pages * layout.page_bytes, dtype=torch.int8, device=device)
         views = bind_regions(raw, layout)
         gen = torch.Generator(device="cpu").manual_seed(length)
         # Permuted block table: logical pages are not physically consecutive.
-        perm = torch.randperm(blocks, generator=gen).to(torch.int64)
+        perm = torch.randperm(nb * blocks, generator=gen).to(torch.int64).reshape(nb, blocks)
         bs = PAGE * ppb
-        for start in range(0, length, 2048):
-            count = min(2048, length - start)
-            k = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
-            v = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
-            pos = torch.arange(start, start + count, dtype=torch.int64)
-            slots = (perm[pos // bs] * bs + pos % bs).to(device)
-            ops().kv_store_paged(k, v, slots, views["k"], views["k_scale"], views["v"],
-                                 views["v_scale"], views["v_zero"])
-        table = perm.to(torch.int32).to(device).reshape(1, blocks)
-        seq = torch.tensor([length], dtype=torch.int32, device=device)
+        lens = [length - 37 * r for r in range(nb)]
+        for r in range(nb):
+            for start in range(0, lens[r], 2048):
+                count = min(2048, lens[r] - start)
+                k = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
+                v = torch.randn(count, hkv, D, generator=gen, dtype=torch.float16).to(device)
+                pos = torch.arange(start, start + count, dtype=torch.int64)
+                slots = (perm[r][pos // bs] * bs + pos % bs).to(device)
+                ops().kv_store_paged(k, v, slots, views["k"], views["k_scale"], views["v"],
+                                     views["v_scale"], views["v_zero"])
+        table = perm.to(torch.int32).to(device).contiguous()
+        seq = torch.tensor(lens, dtype=torch.int32, device=device)
         for qlen in map(int, args.queries.split(",")):
-            scratch = Scratch(device, layout, workspace_programs(pages, 1, layout), 1, qlen)
-            query, out = scratch.attention_pair(qlen)
-            query.copy_(torch.randn(qlen, hq, D, generator=gen, dtype=torch.float16).to(device))
+            scratch = Scratch(device, layout, workspace_programs(pages, 1, layout), 1, nb * qlen)
+            query, out = scratch.attention_pair(nb * qlen)
+            query.copy_(torch.randn(nb * qlen, hq, D, generator=gen, dtype=torch.float16).to(device))
             ws = scratch.workspace(workspace_programs(pages, 1, layout))
             # Causal per-row visible lengths (spec verify): rows see staggered prefixes.
-            vis_rows = [max(1, length - qlen + i + 1 - 97 * (qlen - 1 - i)) for i in range(qlen)]
-            vis = torch.tensor([[max(vis_rows)] + vis_rows], dtype=torch.int32, device=device)
+            vis_list = []
+            for r in range(nb):
+                vis_rows = [max(1, lens[r] - qlen + i + 1 - 97 * (qlen - 1 - i)) for i in range(qlen)]
+                vis_list.append([max(vis_rows)] + vis_rows)
+            vis = torch.tensor(vis_list, dtype=torch.int32, device=device)
             empty = scratch.visible
 
             def run(visible):

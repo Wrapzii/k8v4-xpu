@@ -297,6 +297,61 @@ static void launch_pack_q_quant(sycl::queue &q, const sycl::half *Qtok, std::int
   });
 }
 
+template <int HKV> class Xe2KvTorchAbiPackQquantBatchKernel;
+// launch_pack_q_quant for nreq requests of q_len tokens each in one launch: request r's tokens
+// [r * q_len, (r + 1) * q_len) go to Q tile r (Q8 + r * HKV * BM * BK, Qsc + r * HKV * BM).
+template <int HKV>
+static void launch_pack_q_quant_batch(sycl::queue &q, const sycl::half *Qtok, std::int8_t *Q8,
+                                      float *Qsc, int q_len, int nreq) {
+  constexpr int HQ = Heads<HKV>::hq;
+  constexpr int GQA = Heads<HKV>::gqa;
+  sycl::range<1> g(static_cast<size_t>(nreq) * HKV * WG_SIZE);
+  sycl::range<1> l(WG_SIZE);
+  q.submit([&](sycl::handler &h) {
+    h.parallel_for<Xe2KvTorchAbiPackQquantBatchKernel<HKV>>(
+        sycl::nd_range<1>(g, l), [=](sycl::nd_item<1> item) [[sycl::reqd_sub_group_size(SG_SIZE)]] {
+          const int lid = static_cast<int>(item.get_local_id(0));
+          const int grp = static_cast<int>(item.get_group(0));
+          const int req = grp / HKV;
+          const int kv_head = grp - req * HKV;
+          auto sg = item.get_sub_group();
+          const int lane = static_cast<int>(sg.get_local_id());
+          const int row = lid >> 1;
+          const int part = lid & 1;
+          const size_t q8_off = (static_cast<size_t>(req) * HKV + kv_head) * BM * BK;
+          const size_t sc_off = (static_cast<size_t>(req) * HKV + kv_head) * BM;
+          const int live = q_len * GQA;
+          if (row >= live) {
+            if (part == 0) Qsc[sc_off + row] = 0.f;
+            std::int8_t *dst = Q8 + q8_off + static_cast<size_t>(row) * BK + part * 128;
+#pragma unroll
+            for (int c = 0; c < 128; ++c) dst[c] = 0;
+            return;
+          }
+          const int tok = req * q_len + row / GQA;
+          const int gqa = row - (row / GQA) * GQA;
+          const int hq = kv_head * GQA + gqa;
+          const sycl::half *qrow = Qtok + (static_cast<size_t>(tok) * HQ + hq) * BK + part * 128;
+          float amax = 0.f;
+#pragma unroll
+          for (int c = 0; c < 128; ++c)
+            amax = sycl::fmax(amax, sycl::fabs(static_cast<float>(qrow[c])));
+          const float amax2 = sycl::select_from_group(sg, amax, lane ^ 1);
+          amax = sycl::fmax(amax, amax2);
+          const float scale = (amax == 0.f) ? 0.f : (amax / 127.f);
+          if (part == 0) Qsc[sc_off + row] = scale;
+          const float inv = (scale == 0.f) ? 0.f : (1.f / scale);
+          std::int8_t *dst = Q8 + q8_off + static_cast<size_t>(row) * BK + part * 128;
+#pragma unroll
+          for (int c = 0; c < 128; ++c) {
+            float qv = sycl::rint(static_cast<float>(qrow[c]) * inv);
+            qv = sycl::clamp(qv, -127.f, 127.f);
+            dst[c] = static_cast<std::int8_t>(qv);
+          }
+        });
+  });
+}
+
 template <int HKV>
 static void launch_q_quant(sycl::queue &q, const sycl::half *Qfp, std::int8_t *Q8, float *Qsc) {
   constexpr int QQUANT_HEADS = Heads<HKV>::qquant_heads;
@@ -1160,9 +1215,12 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
                                         int n_groups, int npg, int q_len, size_t k_page_stride,
                                         size_t v_page_stride, size_t sc_page_stride,
                                         const std::int32_t *visible_lens, int pages_per_block,
-                                        int splits) {
+                                        int splits, int nreq = 1, int bt_stride = 0,
+                                        int vis_stride = 0) {
   constexpr int GQA = Heads<HKV>::gqa;
-  const int nprog = n_groups * HKV;
+  // nreq > 1 (XE2_KV_BATCH_REQS): request r owns programs [r * n_groups * HKV, (r + 1) * ...), its
+  // own Q tile (Q8 / Qsc + r * one tile), block-table row, seq_lens[r] and visible_lens row.
+  const int nprog = n_groups * HKV * nreq;
   const int k_tok_stride = HKV * BK;
   const int v_tok_stride = HKV * V4_COLS;
   const int sc_tok_stride = HKV;
@@ -1177,10 +1235,15 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
       auto sg = item.get_sub_group();
       const int sg_id = static_cast<int>(sg.get_group_id());
       const int lane = static_cast<int>(sg.get_local_id());
-      const int kv_head = prog / n_groups;
-      const int grp = prog - kv_head * n_groups;
+      const int req = prog / (n_groups * HKV);
+      const int prog_r = prog - req * (n_groups * HKV);
+      const int kv_head = prog_r / n_groups;
+      const int grp = prog_r - kv_head * n_groups;
+      const std::int32_t *visr =
+          visible_lens ? visible_lens + static_cast<size_t>(req) * vis_stride : nullptr;
+      const std::int32_t *btr = bt + static_cast<size_t>(req) * bt_stride;
       const std::int64_t seq_len =
-          static_cast<std::int64_t>(visible_lens ? visible_lens[0] : seq_lens[0]);
+          static_cast<std::int64_t>(visr ? visr[0] : seq_lens[req]);
       const int npg_eff = s1_pages_for(seq_len, npg, splits);
       const int first = grp * npg_eff;
       const std::int64_t left = seq_len - static_cast<std::int64_t>(first) * BM;
@@ -1190,8 +1253,8 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
           sycl::min(static_cast<std::int64_t>(npg_eff), (left + BM - 1) / BM));
       auto phys_of = [&](int lg) {
         return (pages_per_block <= 1)
-                   ? static_cast<int>(bt[lg])
-                   : static_cast<int>(bt[lg / pages_per_block]) * pages_per_block +
+                   ? static_cast<int>(btr[lg])
+                   : static_cast<int>(btr[lg / pages_per_block]) * pages_per_block +
                          (lg % pages_per_block);
       };
       const int R = q_len * GQA;
@@ -1218,7 +1281,7 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
       const size_t ml_off = static_cast<size_t>(prog) * BM;
       auto pQ8 = sycl::address_space_cast<sycl::access::address_space::global_space,
                                           sycl::access::decorated::no>(
-          const_cast<std::int8_t *>(Q8 + q_off));
+          const_cast<std::int8_t *>(Q8 + static_cast<size_t>(req) * HKV * BM * BK + q_off));
 
       // Softmax rows of this sub-group: r = sg_id + 8 * i, i < T.
       float m_run[TMAX], l_run[TMAX], qs_row[TMAX];
@@ -1229,9 +1292,9 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
         m_run[i] = -INFINITY;
         l_run[i] = 0.f;
         const bool live = r < R;
-        qs_row[i] = live ? Qsc[qsc_off + r] : 0.f;
+        qs_row[i] = live ? Qsc[static_cast<size_t>(req) * HKV * BM + qsc_off + r] : 0.f;
         const int q_tok = r / GQA;
-        q_end[i] = live ? (visible_lens ? static_cast<std::int64_t>(visible_lens[1 + q_tok])
+        q_end[i] = live ? (visr ? static_cast<std::int64_t>(visr[1 + q_tok])
                                         : seq_len - static_cast<std::int64_t>(q_len) + q_tok + 1)
                         : 0;
       }
@@ -1255,7 +1318,7 @@ static void launch_int8k_int4v_s1_multi(sycl::queue &q, const std::int8_t *Q8, c
           l_lane[i] = 0.f;
         }
         for (int qt = 0; qt < q_len; ++qt) {
-          const int e = visible_lens ? visible_lens[1 + qt] : static_cast<int>(seq_len) - q_len + qt + 1;
+          const int e = visr ? visr[1 + qt] : static_cast<int>(seq_len) - q_len + qt + 1;
           min_qend = e < min_qend ? e : min_qend;
         }
         // Padding rows of the last live tile: P stays 0 for the whole program.
@@ -1566,7 +1629,8 @@ static void launch_s1_multi_dispatch(sycl::queue &q, const std::int8_t *Q8, cons
                                      int n_groups, int npg, int q_len, size_t k_page_stride,
                                      size_t v_page_stride, size_t sc_page_stride,
                                      const std::int32_t *visible_lens, int pages_per_block,
-                                     int splits) {
+                                     int splits, int nreq = 1, int bt_stride = 0,
+                                     int vis_stride = 0) {
   const int tiles = (q_len * Heads<HKV>::gqa + TM - 1) / TM;
   // Large GRF by default: the register-resident accumulators spill in the 128-GRF mode.
   const char *gv = std::getenv("XE2_KV_S1_GRF");
@@ -1576,7 +1640,8 @@ static void launch_s1_multi_dispatch(sycl::queue &q, const std::int8_t *Q8, cons
     launch_int8k_int4v_s1_multi<HKV, PF16, decltype(tmax)::value, decltype(grf)::value,
                                 decltype(fst)::value>(
         q, Q8, Qsc, K8, Ksc, V4, VS, VZ, bt, seq_lens, Part, M, L, n_groups, npg, q_len,
-        k_page_stride, v_page_stride, sc_page_stride, visible_lens, pages_per_block, splits);
+        k_page_stride, v_page_stride, sc_page_stride, visible_lens, pages_per_block, splits, nreq,
+        bt_stride, vis_stride);
   };
   auto pick = [&](auto grf, auto fst) {
     if (tiles <= 1) go(std::integral_constant<int, 1>{}, grf, fst);
@@ -1807,10 +1872,11 @@ static void launch_s2_merge_to_out_half(sycl::queue &q, const float *M, const fl
 // Page Acc is normalized, so the page update scales by w*L. A subgroup
 // state is already the weighted numerator, so the second update scales by w.
 template <typename OutT, typename KernelName, int HKV, int N_SG, bool TWO_PASS = false,
-          typename PartT = float>
+          typename PartT = float, bool BATCH = false>
 static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, const PartT *Acc,
                                OutT *Out, const std::int32_t *seq_lens, int n_splits, int tq,
-                               int s1_pages = 1, int s1_splits = 0) {
+                               int s1_pages = 1, int s1_splits = 0, int q_per_req = 1,
+                               int seq_stride = 0) {
   constexpr int HQ = Heads<HKV>::hq;
   constexpr int GQA = Heads<HKV>::gqa;
   constexpr int VEC = 4;
@@ -1831,9 +1897,17 @@ static void launch_s2_parallel(sycl::queue &q, const float *M, const float *L, c
           const int tok = gid / HQ;
           const int h = gid - tok * HQ;
           const int head = h / GQA;
-          const int row = tok * GQA + (h - head * GQA);
-          const int p0 = head * n_splits;
-          const std::int64_t seq_len = static_cast<std::int64_t>(seq_lens[0]);
+          // BATCH: token tok belongs to request tok / q_per_req, whose S1 programs start at
+          // req * HKV * n_splits (XE2_KV_BATCH_REQS).
+          int req = 0, tok_r = tok;
+          if constexpr (BATCH) {
+            req = tok / q_per_req;
+            tok_r = tok - req * q_per_req;
+          }
+          const int row = tok_r * GQA + (h - head * GQA);
+          const int p0 = (req * HKV + head) * n_splits;
+          const std::int64_t seq_len =
+              static_cast<std::int64_t>(seq_lens[BATCH ? static_cast<size_t>(req) * seq_stride : 0]);
           // One split = s1_pages pages (multi-page S1); the same rule as the S1 kernel.
           const std::int64_t split_tok =
               static_cast<std::int64_t>(BM) * s1_pages_for(seq_len, s1_pages, s1_splits);
@@ -2532,6 +2606,117 @@ static void int8k_int4v_decode_step(const at::Tensor &q_fp16, const at::Tensor &
                                merged_ws, out);
 }
 
+template <int HKV, int NSG, bool P16> class Xe2KvTorchAbiS2BatchHalf;
+template <int HKV, int NSG> class Xe2KvTorchAbiS2BatchFloat;
+
+// XE2_KV_BATCH_REQS=1: all requests of int8k_int4v_attn_batch in one q-pack, one S1 and one S2
+// launch (multi-page S1 only). Off unless set; 0 or 1 only.
+static bool batch_reqs_enabled() {
+  const char *v = std::getenv("XE2_KV_BATCH_REQS");
+  if (v == nullptr || (v[0] == '0' && v[1] == '\0')) return false;
+  TORCH_CHECK(v[0] == '1' && v[1] == '\0', "XE2_KV_BATCH_REQS must be 0 or 1, got '", v, "'");
+  return true;
+}
+
+// Returns false (caller keeps the per-request loop) when the batched path does not apply. The
+// per-request Q tiles live in the unused tail of the caller's partials workspace, so no allocation
+// happens inside graph capture.
+template <int HKV>
+static bool attn_batch_fused(const at::Tensor &q_fp16, const at::Tensor &k_cache,
+                             const at::Tensor &k_scale, const at::Tensor &v_cache,
+                             const at::Tensor &v_scale, const at::Tensor &v_zero,
+                             const at::Tensor &block_table, const at::Tensor &seq_lens,
+                             const at::Tensor &visible_lens, const at::Tensor &partials_ws,
+                             const at::Tensor &m_ws, const at::Tensor &l_ws, at::Tensor out,
+                             int q_len, int batch, int pages_per_block) {
+  constexpr int GQA = Heads<HKV>::gqa;
+  const int npg = s1_pages_per_program();
+  const char *sv = std::getenv("XE2_KV_S1_SPLITS");
+  const int splits = sv == nullptr ? 0 : std::max(0, std::atoi(sv));
+  if (!(npg > 1 || splits > 0) || q_len * GQA > kMultiMaxRows || !s2_parallel_enabled() ||
+      env_is_1("XE2_KV_S2_TWO_PASS"))
+    return false;
+  if (!partials_ws.defined() || !m_ws.defined() || !l_ws.defined()) return false;
+  check_paged_k<HKV>(k_cache, k_scale);
+  check_paged_v<HKV>(v_cache, v_scale, v_zero);
+  TORCH_CHECK(partials_ws.scalar_type() == at::kFloat && partials_ws.dim() == 3 &&
+                  partials_ws.size(1) == BM && partials_ws.size(2) == BV,
+              "partials_ws [P,64,256] float32");
+  const int ratio = pages_per_block < 1 ? 1 : pages_per_block;
+  const int width = static_cast<int>(block_table.size(1));
+  const int n_splits = width * ratio;
+  const int n_groups = splits > 0 ? std::min(splits, n_splits) : (n_splits + npg - 1) / npg;
+  const int64_t ws_progs = partials_ws.size(0);
+  if (m_ws.numel() < ws_progs * BM || l_ws.numel() < ws_progs * BM) return false;
+  const int64_t used_progs = static_cast<int64_t>(batch) * n_groups * HKV;
+  // Q tiles after the used partials, 256-byte aligned.
+  const int64_t part_bytes = ws_progs * BM * BV * static_cast<int64_t>(sizeof(float));
+  const int64_t q_off = (used_progs * BM * BV * static_cast<int64_t>(sizeof(float)) + 255) / 256 * 256;
+  const int64_t q8_bytes = static_cast<int64_t>(batch) * HKV * BM * BK;
+  const int64_t qsc_off = (q_off + q8_bytes + 255) / 256 * 256;
+  const int64_t need = qsc_off + static_cast<int64_t>(batch) * HKV * BM * sizeof(float);
+  if (used_progs > ws_progs || need > part_bytes) return false;
+  const bool has_vis = visible_lens.defined() && visible_lens.numel() > 0;
+  const bool half_out = out.scalar_type() == at::kHalf;
+  const bool pf16 = half_out && env_is_1("XE2_KV_PARTIAL_FP16");
+  auto &queue = current_xpu_queue();
+  auto *base = reinterpret_cast<std::uint8_t *>(partials_ws.data_ptr<float>());
+  auto *q8 = reinterpret_cast<std::int8_t *>(base + q_off);
+  auto *qsc = reinterpret_cast<float *>(base + qsc_off);
+  launch_pack_q_quant_batch<HKV>(queue, as_half_c(q_fp16), q8, qsc, q_len, batch);
+  const std::int32_t *vis = has_vis ? visible_lens.data_ptr<int32_t>() : nullptr;
+  const int vis_stride = has_vis ? static_cast<int>(visible_lens.size(1)) : 0;
+  if (!block_table.is_contiguous() || !seq_lens.is_contiguous() ||
+      (has_vis && !visible_lens.is_contiguous()))
+    return false;
+  const at::Tensor &bt = block_table;
+  auto run_s1 = [&](auto pf) {
+    launch_s1_multi_dispatch<HKV, decltype(pf)::value>(
+        queue, q8, qsc, k_cache.data_ptr<int8_t>(), k_scale.data_ptr<float>(),
+        v_cache.data_ptr<uint8_t>(), v_scale.data_ptr<float>(), v_zero.data_ptr<float>(),
+        bt.data_ptr<int32_t>(), seq_lens.data_ptr<int32_t>(), partials_ws.data_ptr<float>(),
+        m_ws.data_ptr<float>(), l_ws.data_ptr<float>(), n_groups, npg, q_len,
+        static_cast<size_t>(k_cache.stride(0)), static_cast<size_t>(v_cache.stride(0)),
+        static_cast<size_t>(k_scale.stride(0)), vis, ratio, splits, batch, width, vis_stride);
+  };
+  if (pf16) run_s1(std::true_type{}); else run_s1(std::false_type{});
+  const int tq = batch * q_len;
+  const int nsg = s2_parallel_subgroups(q_len);
+  const std::int32_t *s2_seq = vis ? vis : seq_lens.data_ptr<int32_t>();
+  const int seq_stride = vis ? vis_stride : 1;
+  const float *mp = m_ws.data_ptr<float>();
+  const float *lp = l_ws.data_ptr<float>();
+  const int s2_pages = npg;
+  if (half_out) {
+    auto *dst = reinterpret_cast<sycl::half *>(out.data_ptr<at::Half>());
+    auto go = [&](auto n, auto p16) {
+      constexpr int N = decltype(n)::value;
+      constexpr bool P = decltype(p16)::value;
+      using PartT = std::conditional_t<P, sycl::half, float>;
+      launch_s2_parallel<sycl::half, Xe2KvTorchAbiS2BatchHalf<HKV, N, P>, HKV, N, false, PartT, true>(
+          queue, mp, lp, reinterpret_cast<const PartT *>(partials_ws.data_ptr<float>()), dst, s2_seq,
+          n_groups, tq, s2_pages, splits, q_len, seq_stride);
+    };
+    auto pick = [&](auto p16) {
+      if (nsg == 8) go(std::integral_constant<int, 8>{}, p16);
+      else if (nsg == 16) go(std::integral_constant<int, 16>{}, p16);
+      else go(std::integral_constant<int, 32>{}, p16);
+    };
+    if (pf16) pick(std::true_type{}); else pick(std::false_type{});
+  } else {
+    auto go = [&](auto n) {
+      constexpr int N = decltype(n)::value;
+      launch_s2_parallel<float, Xe2KvTorchAbiS2BatchFloat<HKV, N>, HKV, N, false, float, true>(
+          queue, mp, lp, partials_ws.data_ptr<float>(), out.data_ptr<float>(), s2_seq, n_groups, tq,
+          s2_pages, splits, q_len, seq_stride);
+    };
+    if (nsg == 8) go(std::integral_constant<int, 8>{});
+    else if (nsg == 16) go(std::integral_constant<int, 16>{});
+    else go(std::integral_constant<int, 32>{});
+  }
+  return true;
+}
+
 // One graph-legal op for a uniform decode batch. Each request is one varlen
 // launch on the same in-order queue, so the single q8 tile and the split
 // workspace are reused without a Python loop and without a new matmul.
@@ -2566,6 +2751,11 @@ static void int8k_int4v_attn_batch(const at::Tensor &q_fp16, at::Tensor q8, at::
                   "visible_lens [B, 1+q_len]");
     }
     auto seq_flat = seq_lens.reshape({-1});
+    if (batch_reqs_enabled() &&
+        attn_batch_fused<HKV>(q_fp16, k_cache, k_scale, v_cache, v_scale, v_zero, block_table,
+                              seq_flat, visible_lens, partials_ws, m_ws, l_ws, out,
+                              static_cast<int>(q_len), batch, static_cast<int>(pages_per_block)))
+      return;
     for (int i = 0; i < batch; ++i) {
       const int64_t begin = static_cast<int64_t>(i) * q_len;
       auto q_i = q_fp16.narrow(0, begin, q_len);
