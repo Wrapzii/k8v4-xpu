@@ -119,6 +119,31 @@ class LaunchProfileTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 2)
                 self.assertEqual(args, [])
 
+    def spec_and_graph(self, args):
+        spec = json.loads(next(arg for arg in args if arg.startswith('--speculative-config=')).split('=', 1)[1])
+        graph = json.loads(next(arg for arg in args if arg.startswith('--compilation-config=')).split('=', 1)[1])
+        return spec, graph['cudagraph_capture_sizes']
+
+    def test_shared_mtp_depth_is_off_by_default(self):
+        for options in ({}, {'K8V4_TP': '1'}, {'K8V4_TP': '1', 'K8V4_MAX_SEQS': '1', 'K8V4_MTP_SHARED_DEPTH': '3'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                spec, _ = self.spec_and_graph(args)
+                self.assertEqual(spec, {'method': 'mtp', 'num_speculative_tokens': 6})
+
+    def test_shared_mtp_depth_sets_batch_schedule_and_captures(self):
+        result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        spec, sizes = self.spec_and_graph(args)
+        self.assertEqual(spec['num_speculative_tokens'], 6)
+        self.assertEqual(spec['num_speculative_tokens_per_batch_size'], [[1, 1, 6], [2, 4, 3]])
+        self.assertEqual(sizes, [7, 8, 12, 14, 16, 21, 28])
+        for bad in ('0', '7', 'x'):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH=bad)
+                self.assertEqual(result.returncode, 2)
+
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
                         {'K8V4_TP': '2', 'K8V4_DEVICES': '0'}, {'K8V4_DEVICES': '1,1'},

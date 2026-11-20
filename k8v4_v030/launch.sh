@@ -81,6 +81,23 @@ for ((i=1; i<=MAX_SEQS; i++)); do
   CAPTURE_SIZES+=$((i * 7))
 done
 CAPTURE_SIZES+="]"
+# Optional draft depth by batch size: K8V4_MTP_SHARED_DEPTH=N keeps 6 draft tokens while one
+# request runs and drafts N while two or more run (vLLM num_speculative_tokens_per_batch_size).
+# Unset (the default) keeps 6 for every batch. The N-depth verify widths join the capture list.
+SPEC_CONFIG='{"method":"mtp","num_speculative_tokens":6}'
+SHARED_DEPTH=${K8V4_MTP_SHARED_DEPTH:-}
+if [ -n "$SHARED_DEPTH" ]; then
+  [[ "$SHARED_DEPTH" =~ ^[1-6]$ ]] || { echo "K8V4_MTP_SHARED_DEPTH must be 1..6" >&2; exit 2; }
+  if [ "$MAX_SEQS" -gt 1 ]; then
+    SPEC_CONFIG="{\"method\":\"mtp\",\"num_speculative_tokens\":6,\"num_speculative_tokens_per_batch_size\":[[1,1,6],[2,$MAX_SEQS,$SHARED_DEPTH]]}"
+    sizes=()
+    for ((i=1; i<=MAX_SEQS; i++)); do
+      sizes+=($((i * 7)))
+      if [ "$i" -gt 1 ]; then sizes+=($((i * (1 + SHARED_DEPTH)))); fi
+    done
+    CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
+  fi
+fi
 
 if [ -z "$MODEL_DIR" ] || [ ! -d "$MODEL_DIR" ]; then
   echo "Set MODEL_DIR to the local weights directory." >&2
@@ -271,7 +288,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   "${multimodal[@]}" \
   "${api[@]}" \
   --trust-remote-code \
-  --speculative-config='{"method":"mtp","num_speculative_tokens":6}' \
+  --speculative-config="$SPEC_CONFIG" \
   --compilation-config="{\"cudagraph_mode\":\"FULL_DECODE_ONLY\",\"cudagraph_capture_sizes\":$CAPTURE_SIZES}")
 
 if [ "$DRY_RUN" = 1 ]; then
