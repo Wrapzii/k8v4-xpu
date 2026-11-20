@@ -23,6 +23,8 @@ install_onednn_det()
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
+from k8v4_v030.draft_lastrow import applies as draft_lastrow_applies
+from k8v4_v030.draft_lastrow import last_row
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
 from k8v4_v030.stage_profile import profile_enabled, profile_range
 from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD, PageLayout
@@ -241,6 +243,8 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         self._rot_k, self._rot_v = kv_rotate.from_env()
         if self._rot_k or self._rot_v:
             kv_rotate.note_once(self._rot_k, self._rot_v)
+        # K8V4_DRAFT_LASTROW: decided on the first forward, from the layer name.
+        self._draft_lastrow: bool | None = None
 
     def do_kv_cache_update(
         self,
@@ -288,7 +292,12 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        del layer, key, value
+        del key, value
+        if self._draft_lastrow is None:
+            self._draft_lastrow = draft_lastrow_applies(layer)
+            if self._draft_lastrow:
+                logger.info("K8/V4 draft layer %s: prefill attention on the last row only", getattr(layer, "layer_name", "?"))
+        del layer
         if output_scale is not None or output_block_scale is not None:
             raise RuntimeError("K8/V4 does not take an output scale")
         cache = _one_cache(kv_cache)
@@ -345,9 +354,13 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         first: int,
         count: int,
         q_len: int,
+        span: tuple[int, int] | None = None,
     ) -> None:
         _require_page_ratio(cache, meta.pages_per_block)
-        tok0, width = token_span(meta.query_starts, first, count, q_len)
+        if span is None:
+            tok0, width = token_span(meta.query_starts, first, count, q_len)
+        else:
+            tok0, width = span
         if query.shape[0] < tok0 + width:
             raise RuntimeError("query shorter than the packed segment")
         block_table = meta.block_table
@@ -425,6 +438,14 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                         "seq_len %d does not cover query %d; the kernel expects "
                         "the length to include this step" % (seq_len, width)
                     )
+                if self._draft_lastrow:
+                    # The drafter reads only this request's last row: one decode-kernel
+                    # row over the stored sequence; zeros for the rows it discards.
+                    row, zero_rows = last_row(tok0, width)
+                    if zero_rows:
+                        output.narrow(0, tok0, zero_rows).zero_()
+                    self._attn_batch(query, cache, meta, output, req, 1, 1, span=(row, 1))
+                    continue
                 row = meta.block_table[req]
                 q_fp = query.narrow(0, tok0, width).to(torch.float16)
                 prefill = head_major_prefill if prefill_mode() == "onednn" else eager_prefill
