@@ -75,6 +75,25 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('K8V4_NCONTIG_RE=in_proj_ba', args)
         self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-ncontig', args)
+    def test_warm_prefix_warmup_is_passed_only_when_set(self):
+        for options in ({}, {'K8V4_TP': '1'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(arg.startswith('K8V4_WARMUP_WARM_PREFIX') for arg in args))
+        for value in ('0', '1'):
+            result, args = self.command(K8V4_TP='1', K8V4_WARMUP_WARM_PREFIX=value)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_WARMUP_WARM_PREFIX=%s' % value, args)
+        result, args = self.command(K8V4_TP='1', K8V4_WARMUP_WARM_PREFIX='1', K8V4_WARMUP_WARM_PREFIX_CTX='32000')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_WARMUP_WARM_PREFIX_CTX=32000', args)
+        for options in ({'K8V4_WARMUP_WARM_PREFIX': '2'}, {'K8V4_WARMUP_WARM_PREFIX': 'yes'},
+                        {'K8V4_WARMUP_WARM_PREFIX_CTX': '0'}, {'K8V4_WARMUP_WARM_PREFIX_CTX': '64k'}):
+            with self.subTest(bad=options):
+                result, args = self.command(K8V4_TP='1', **options)
+                self.assertEqual(result.returncode, 2)
+
     def test_onednn_deterministic_is_passed_only_when_set(self):
         result, default = self.command(K8V4_TP='1')
         self.assertEqual(result.returncode, 0, result.stderr)

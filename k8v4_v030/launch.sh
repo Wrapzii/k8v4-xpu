@@ -199,6 +199,16 @@ fi
 if [ -n "${XE2_KV_S2_PARALLEL:-}" ]; then
   extra+=(-e "XE2_KV_S2_PARALLEL=${XE2_KV_S2_PARALLEL}")
 fi
+# Startup warmup of the warm-prefix multi-user path (k8v4_v030/warm_prefix_warmup.py). Off unless set.
+if [ -n "${K8V4_WARMUP_WARM_PREFIX:-}" ]; then
+  [[ "$K8V4_WARMUP_WARM_PREFIX" =~ ^[01]$ ]] || { echo "K8V4_WARMUP_WARM_PREFIX must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_WARMUP_WARM_PREFIX=${K8V4_WARMUP_WARM_PREFIX}")
+fi
+if [ -n "${K8V4_WARMUP_WARM_PREFIX_CTX:-}" ]; then
+  [[ "$K8V4_WARMUP_WARM_PREFIX_CTX" =~ ^[1-9][0-9]*$ ]] || {
+    echo "K8V4_WARMUP_WARM_PREFIX_CTX must be a positive integer" >&2; exit 2; }
+  extra+=(-e "K8V4_WARMUP_WARM_PREFIX_CTX=${K8V4_WARMUP_WARM_PREFIX_CTX}")
+fi
 
 # Optional Hadamard-rotated K / V cache contents (k8v4_v030/kv_rotate.py). Unset keeps the command unchanged.
 if [ -n "${K8V4_KV_ROTATE:-}" ]; then
