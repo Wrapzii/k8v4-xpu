@@ -1,4 +1,4 @@
-"""Native vLLM 0.30 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
+"""Native vLLM 0.30/0.34 attention backend for the K8/V4 kernel (2 or 4 local KV heads).
 
 vLLM owns the block table and the slot map. Decode is one C++ op per
 uniform batch. Prefill stays on the eager path unless K8V4_PREFILL=onednn,
@@ -119,9 +119,19 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
         self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
+        if not hasattr(AttentionMetadataBuilder, "set_kernel_block_size"):
+            # vLLM 0.34 dropped set_kernel_block_size. The runner now hands
+            # the builder a spec whose block size is the kernel block, and
+            # MultipleOf(64) accepts the manager block, so nothing is split.
+            self._bind_kernel_block(int(kv_cache_spec.block_size))
 
     def set_kernel_block_size(self, kernel_block_size: int) -> None:
+        # vLLM 0.30 calls this after construction; 0.34 does not.
         super().set_kernel_block_size(kernel_block_size)
+        self._bind_kernel_block(self.kernel_block_size)
+
+    def _bind_kernel_block(self, kernel_block_size: int | None) -> None:
+        self.kernel_block_size = kernel_block_size
         manager = int(self.kv_cache_spec.block_size)
         ratio = attention_pages(manager, self.kernel_block_size)
         logger.info_once(
@@ -466,7 +476,9 @@ class Xe2K8V4AttentionBackend(AttentionBackend):
         return Xe2K8V4MetadataBuilder
 
     @staticmethod
-    def get_supported_kernel_block_sizes() -> list[MultipleOf]:
+    def get_supported_kernel_block_sizes(kv_cache_spec=None) -> list[MultipleOf]:
+        # vLLM 0.34 passes the layer's KV cache spec; 0.30 passes nothing.
+        del kv_cache_spec
         return [MultipleOf(64)]
 
     @classmethod
