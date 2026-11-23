@@ -151,6 +151,80 @@ def patch_warm_prefix_warmup(root: Path) -> list[str]:
                                                   _WARM_PREFIX_MARK)]
 
 
+_MTP_FILE = "model_executor/models/qwen3_5_mtp.py"
+_EAGLE_FILE = "v1/worker/gpu/spec_decode/eagle/utils.py"
+_DRAFT_SHARED_MARK = "K8V4_DRAFT_SKIP_SHARED"
+_DRAFT_EMBED_OLD = (
+    '        self.embed_tokens = VocabParallelEmbedding(\n'
+    '            self.vocab_size,\n'
+    '            config.hidden_size,\n'
+    '        )\n'
+)
+_DRAFT_EMBED_NEW = (
+    '        try:  # k8v4: K8V4_DRAFT_SKIP_SHARED (default 0 = full draft table)\n'
+    '            from k8v4_v030.draft_shared import table_rows as _k8v4_rows\n'
+    '        except ImportError:\n'
+    '            _k8v4_rows = None\n'
+    '        self.embed_tokens = VocabParallelEmbedding(\n'
+    '            self.vocab_size if _k8v4_rows is None else _k8v4_rows(self.vocab_size, config),\n'
+    '            config.hidden_size,\n'
+    '        )\n'
+)
+_DRAFT_HEAD_OLD = (
+    '            self.lm_head = ParallelLMHead(\n'
+    '                config.vocab_size,\n'
+    '                config.hidden_size,\n'
+    '                quant_config=self.quant_config,\n'
+)
+_DRAFT_HEAD_NEW = (
+    '            try:  # k8v4: K8V4_DRAFT_SKIP_SHARED (default 0 = full draft head)\n'
+    '                from k8v4_v030.draft_shared import table_rows as _k8v4_rows\n'
+    '            except ImportError:\n'
+    '                _k8v4_rows = None\n'
+    '            self.lm_head = ParallelLMHead(\n'
+    '                config.vocab_size if _k8v4_rows is None else _k8v4_rows(config.vocab_size, config),\n'
+    '                config.hidden_size,\n'
+    '                quant_config=self.quant_config,\n'
+)
+_DRAFT_LOAD_OLD = (
+    '        loader = AutoWeightsLoader(self)\n'
+    '        return loader.load_weights(remap_weight_names(weights))\n'
+)
+_DRAFT_LOAD_NEW = (
+    '        loader = AutoWeightsLoader(self)\n'
+    '        try:  # k8v4: K8V4_DRAFT_SKIP_SHARED placeholders skip the shared tables\n'
+    '            from k8v4_v030.draft_shared import load_without_shared as _k8v4_load\n'
+    '        except ImportError:\n'
+    '            _k8v4_load = None\n'
+    '        if _k8v4_load is not None:\n'
+    '            return _k8v4_load(self, loader, remap_weight_names(weights))\n'
+    '        return loader.load_weights(remap_weight_names(weights))\n'
+)
+_DRAFT_CHECK_OLD = '    # MTP shares topk_indices_buffer with the target model. We update\n'
+_DRAFT_CHECK_NEW = (
+    '    try:  # k8v4: K8V4_DRAFT_SKIP_SHARED placeholders must now be the target tables\n'
+    '        from k8v4_v030.draft_shared import check_replaced as _k8v4_check\n'
+    '    except ImportError:\n'
+    '        _k8v4_check = None\n'
+    '    if _k8v4_check is not None:\n'
+    '        _k8v4_check(eagle_model)\n'
+    '\n' + _DRAFT_CHECK_OLD
+)
+
+
+def patch_draft_shared(root: Path) -> list[str]:
+    """K8V4_DRAFT_SKIP_SHARED hooks: placeholder draft tables (qwen3_5_mtp.py), share check (eagle/utils.py)."""
+    mtp, eagle = root / _MTP_FILE, root / _EAGLE_FILE
+    if not (mtp.is_file() and eagle.is_file()):
+        return []
+    return [
+        "draft_shared_mtp:%s" % _splice_all(
+            mtp, ((_DRAFT_EMBED_OLD, _DRAFT_EMBED_NEW), (_DRAFT_HEAD_OLD, _DRAFT_HEAD_NEW),
+                  (_DRAFT_LOAD_OLD, _DRAFT_LOAD_NEW)), _DRAFT_SHARED_MARK),
+        "draft_shared_check:%s" % _splice_all(eagle, ((_DRAFT_CHECK_OLD, _DRAFT_CHECK_NEW),), _DRAFT_SHARED_MARK),
+    ]
+
+
 _DEFAULT_ROOTS = (
     Path("/opt/venv/lib/python3.12/site-packages/vllm"),
     Path("/workspace/vllm/vllm"),
@@ -203,6 +277,7 @@ def patch_vllm_tree(root: Path) -> list[str]:
     if vocab.exists():
         notes.append("embed_copy:%s" % _splice_embed_copy(vocab))
     notes.extend(patch_warm_prefix_warmup(root))
+    notes.extend(patch_draft_shared(root))
     return notes
 
 

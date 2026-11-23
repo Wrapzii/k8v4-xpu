@@ -157,6 +157,17 @@ if [ -n "${K8V4_DTYPE:-}" ]; then
   [[ "$K8V4_DTYPE" =~ ^(bfloat16|float16)$ ]] || { echo "K8V4_DTYPE must be bfloat16 or float16" >&2; exit 2; }
   DTYPE=$K8V4_DTYPE
 fi
+# Optional GDN recurrent-state dtype (docs/2026-11-19-decode-push.md). Unset keeps vLLM's choice, which for
+# Qwen3.5-family checkpoints is the config's mamba_ssm_dtype (float32 in the Swift bake). float16 halves the
+# GDN state memory (KV 384K -> 445K tokens at util 0.96, 4 seqs, one B70) and changes numerics; the stock spec
+# kernel is not faster with it (16-bit state stores), K8V4_GDN_RECOVERSSM is. Off unless set.
+mamba=()
+if [ -n "${K8V4_MAMBA_SSM_DTYPE:-}" ]; then
+  [[ "$K8V4_MAMBA_SSM_DTYPE" =~ ^(float32|float16|bfloat16)$ ]] || {
+    echo "K8V4_MAMBA_SSM_DTYPE must be float32, float16 or bfloat16" >&2; exit 2;
+  }
+  mamba+=(--mamba-ssm-cache-dtype="$K8V4_MAMBA_SSM_DTYPE")
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots
@@ -252,6 +263,16 @@ if [ -n "${K8V4_CHAT_TEMPLATE_FIX:-}" ]; then
     serve+=(-I /opt/k8v4/k8v4_v030/chat_template_fix.py --serve)
   fi
 fi
+# Optional host-resident INT8 embedding table (k8v4_v030/embed_int8_runtime.py). Off unless set.
+if [ -n "${K8V4_EMBED_HOST:-}" ]; then
+  [[ "$K8V4_EMBED_HOST" =~ ^[01]$ ]] || { echo "K8V4_EMBED_HOST must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_EMBED_HOST=${K8V4_EMBED_HOST}")
+fi
+# MTP draft skips loading the tables it shares with the target (k8v4_v030/draft_shared.py). Off unless set.
+if [ -n "${K8V4_DRAFT_SKIP_SHARED:-}" ]; then
+  [[ "$K8V4_DRAFT_SKIP_SHARED" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_SKIP_SHARED must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_SKIP_SHARED=${K8V4_DRAFT_SKIP_SHARED}")
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
@@ -303,6 +324,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --tool-call-parser=qwen3_xml \
   --reasoning-parser=qwen3 \
   "${prefix[@]}" \
+  "${mamba[@]}" \
   "${multimodal[@]}" \
   "${api[@]}" \
   --trust-remote-code \
