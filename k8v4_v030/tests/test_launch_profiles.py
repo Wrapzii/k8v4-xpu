@@ -388,6 +388,95 @@ class LaunchProfileTest(unittest.TestCase):
             self.assertIn('K8V4_RSSM_VERIFY=slm', args)
             self.assertIn('K8V4_RSSM_DEFER_COMMIT=1', args)
             self.assertEqual(len(args), len(base) + 4)
+    def test_k8v4_draft_lastrow_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if arg.startswith('K8V4_DRAFT_LASTROW=')])
+        result, args = self.command(K8V4_TP='1', K8V4_DRAFT_LASTROW='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_DRAFT_LASTROW=1', args)
+        self.assertEqual(len(args), len(default) + 2)
+
+    def test_draft_vocab_is_mounted_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if 'draft_vocab' in arg])
+        with tempfile.NamedTemporaryFile('w', suffix='.json') as ids:
+            ids.write('[0, 1, 2]')
+            ids.flush()
+            result, args = self.command(K8V4_TP='1', K8V4_DRAFT_VOCAB=ids.name)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('%s:/opt/k8v4/draft_vocab.json:ro' % os.path.realpath(ids.name), args)
+            self.assertIn('K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json', args)
+            self.assertEqual(len(args), len(default) + 4)
+        result, _ = self.command(K8V4_TP='1', K8V4_DRAFT_VOCAB='/nonexistent/ids.json')
+        self.assertEqual(result.returncode, 2)
+
+    def test_k8v4_verify_chunk_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if arg.startswith('K8V4_VERIFY_CHUNK=')])
+        result, args = self.command(K8V4_TP='1', K8V4_VERIFY_CHUNK='8')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_VERIFY_CHUNK=8', args)
+        self.assertEqual(len(args), len(default) + 2)
+
+    def test_deep_draft_profile_only_when_set(self):
+        def spec_and_sizes(args):
+            spec = json.loads(next(x for x in args if x.startswith('--speculative-config=')).split('=', 1)[1])
+            graph = json.loads(next(x for x in args if x.startswith('--compilation-config=')).split('=', 1)[1])
+            return spec, graph['cudagraph_capture_sizes']
+
+        _, default = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4')
+        self.assertEqual(spec_and_sizes(default), ({'method': 'mtp', 'num_speculative_tokens': 6}, [7, 14, 21, 28]))
+        self.assertFalse([x for x in default if x.startswith(('K8V4_DEEP', 'K8V4_VERIFY'))])
+        result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        spec, sizes = spec_and_sizes(args)
+        self.assertEqual(spec, {'method': 'mtp', 'num_speculative_tokens': 15,
+                                'num_speculative_tokens_per_batch_size': [[1, 1, 15], [2, 4, 3]]})
+        self.assertEqual(sizes, [7, 8, 12, 16])
+        self.assertIn('K8V4_DEEP_DRAFT=12,16', args)
+        self.assertIn('K8V4_VERIFY_CHUNK=8', args)
+        _, one = self.command(K8V4_TP='1', K8V4_DEEP_DRAFT='12,16')
+        self.assertEqual(spec_and_sizes(one)[1], [7, 16])
+        for bad in ({'K8V4_DEEP_DRAFT': 'x'}, {'K8V4_DEEP_DRAFT': '12,16', 'K8V4_DEEP_DEPTH': '40'}):
+            with self.subTest(bad=bad):
+                result, _ = self.command(K8V4_TP='1', **bad)
+                self.assertEqual(result.returncode, 2)
+    def test_deep_all_widens_the_capture_list_only_when_set(self):
+        def sizes(args):
+            graph = json.loads(next(x for x in args if x.startswith('--compilation-config=')).split('=', 1)[1])
+            return graph['cudagraph_capture_sizes']
+
+        _, deep = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16')
+        self.assertFalse([x for x in deep if x.startswith('K8V4_DEEP_ALL')])
+        result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16', K8V4_DEEP_ALL='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sizes(args), [7, 8, 12, 16, 32, 48, 64])
+        self.assertIn('K8V4_DEEP_ALL=1', args)
+        self.assertEqual(len(args), len(deep) + 2)
+        _, zero = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16', K8V4_DEEP_ALL='0')
+        self.assertEqual(_no_temp(zero), _no_temp(deep))
+        _, anyone = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_DEEP_DRAFT='12,16', K8V4_DEEP_ALL='any')
+        self.assertEqual(sizes(anyone), [7, 8, 12, 16, 32, 48, 64])
+        self.assertIn('K8V4_DEEP_ALL=any', anyone)
+        for bad in ({'K8V4_DEEP_ALL': '1'}, {'K8V4_DEEP_DRAFT': '12,16', 'K8V4_DEEP_ALL': 'yes'}):
+            with self.subTest(bad=bad):
+                result, _ = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', **bad)
+                self.assertEqual(result.returncode, 2)
+
+    def test_draft_fused_decode_is_passed_only_when_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertFalse([arg for arg in default if 'K8V4_DRAFT_FUSED_DECODE' in arg])
+        for value in ('0', '1'):
+            with self.subTest(value=value):
+                result, args = self.command(K8V4_TP='1', K8V4_DRAFT_FUSED_DECODE=value)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('K8V4_DRAFT_FUSED_DECODE=%s' % value, args)
+                self.assertEqual(len(args), len(default) + 2)
+        for bad in ('2', 'yes', '1 '):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_DRAFT_FUSED_DECODE=bad)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(b'K8V4_DRAFT_FUSED_DECODE', result.stderr)
 
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},

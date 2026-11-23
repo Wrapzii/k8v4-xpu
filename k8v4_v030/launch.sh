@@ -144,6 +144,30 @@ if [ -n "$SHARED_DEPTH" ]; then
     CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
   fi
 fi
+# Deep copy drafting (k8v4_v030/deep_draft.py, vLLM 0.34): K8V4_DEEP_DRAFT=lo,hi n-gram lengths.
+# A lone copying request drafts K8V4_DEEP_DEPTH (default 15) copied tokens, verified in decode-tile
+# chunks (K8V4_VERIFY_CHUNK, default 8); otherwise it keeps MTP depth 6, and 2+ requests draft 3.
+# Off unless set; the default speculative config and capture list are unchanged.
+if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
+  [[ "$K8V4_DEEP_DRAFT" =~ ^[0-9]+(,[0-9]+)?$ ]] || { echo "K8V4_DEEP_DRAFT must be lo,hi" >&2; exit 2; }
+  DEEP_DEPTH=${K8V4_DEEP_DEPTH:-15}
+  [[ "$DEEP_DEPTH" =~ ^[0-9]+$ ]] && [ "$DEEP_DEPTH" -ge 7 ] && [ "$DEEP_DEPTH" -le 31 ] || { echo "K8V4_DEEP_DEPTH must be 7..31" >&2; exit 2; }
+  SCHEDULE="[1,1,$DEEP_DEPTH]"
+  if [ "$MAX_SEQS" -gt 1 ]; then SCHEDULE+=",[2,$MAX_SEQS,3]"; fi
+  SPEC_CONFIG="{\"method\":\"mtp\",\"num_speculative_tokens\":$DEEP_DEPTH,\"num_speculative_tokens_per_batch_size\":[$SCHEDULE]}"
+  sizes=(7 $((DEEP_DEPTH + 1)))
+  for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * 4))); done
+  # K8V4_DEEP_ALL=1: two or more requests that are all copying draft the deep depth too; =any: while
+  # any of them copies (k8v4_v030/deep_draft.py). Every batch width at the deep depth joins the capture list.
+  DEEP_ALL=${K8V4_DEEP_ALL:-0}
+  [[ "$DEEP_ALL" =~ ^(0|1|any)$ ]] || { echo "K8V4_DEEP_ALL must be 0, 1 or any" >&2; exit 2; }
+  if [ "$DEEP_ALL" != 0 ]; then
+    for ((i=2; i<=MAX_SEQS; i++)); do sizes+=($((i * (DEEP_DEPTH + 1)))); done
+  fi
+  CAPTURE_SIZES="[$(printf '%s\n' "${sizes[@]}" | sort -nu | paste -sd, -)]"
+elif [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then
+  echo "K8V4_DEEP_ALL needs K8V4_DEEP_DRAFT" >&2; exit 2
+fi
 
 if [ -z "$MODEL_DIR" ] || [ ! -d "$MODEL_DIR" ]; then
   echo "Set MODEL_DIR to the local weights directory." >&2
@@ -244,6 +268,12 @@ if [ -n "${K8V4_RSSM_DEFER_COMMIT:-}" ]; then
     [ "${K8V4_GDN_RECOVERSSM:-}" = 1 ] || { echo "K8V4_RSSM_DEFER_COMMIT=1 needs K8V4_GDN_RECOVERSSM=1" >&2; exit 2; }
     extra+=(-e K8V4_RSSM_DEFER_COMMIT=1)
   fi
+fi
+# Optional: all draft decode steps of a batch in one XPU graph (k8v4_v030/draft_fused.py). Bit-identical
+# drafts; removes the per-step draft metadata builds and graph launches. Off unless set.
+if [ -n "${K8V4_DRAFT_FUSED_DECODE:-}" ]; then
+  [[ "$K8V4_DRAFT_FUSED_DECODE" =~ ^[01]$ ]] || { echo "K8V4_DRAFT_FUSED_DECODE must be 0 or 1" >&2; exit 2; }
+  extra+=(-e "K8V4_DRAFT_FUSED_DECODE=${K8V4_DRAFT_FUSED_DECODE}")
 fi
 if [ "$TP" = 2 ]; then
   extra+=(
@@ -396,6 +426,30 @@ if [ -n "${XE2_KV_CASCADE:-}" ]; then
     0|1) extra+=(-e "XE2_KV_CASCADE=${XE2_KV_CASCADE}") ;;
     *) echo "XE2_KV_CASCADE must be 0 or 1, got '$XE2_KV_CASCADE'" >&2; exit 2 ;;
   esac
+fi
+
+# MTP draft-layer prefill attention on the last row only (k8v4_v030/draft_lastrow.py). Off unless set.
+if [ -n "${K8V4_DRAFT_LASTROW:-}" ]; then
+  extra+=(-e "K8V4_DRAFT_LASTROW=${K8V4_DRAFT_LASTROW}")
+fi
+
+# Frequency-ranked MTP draft vocabulary (k8v4_v030/draft_vocab.py): a host JSON list of token ids,
+# mounted read-only. Off unless set.
+if [ -n "${K8V4_DRAFT_VOCAB:-}" ]; then
+  [ -f "$K8V4_DRAFT_VOCAB" ] || { echo "K8V4_DRAFT_VOCAB must name a JSON file: $K8V4_DRAFT_VOCAB" >&2; exit 2; }
+  extra+=(-v "$(realpath "$K8V4_DRAFT_VOCAB"):/opt/k8v4/draft_vocab.json:ro" -e K8V4_DRAFT_VOCAB=/opt/k8v4/draft_vocab.json)
+fi
+
+# Spec-decode verify wider than the 10-row decode tile, in row chunks (k8v4_v030/verify_chunk.py). Off unless set.
+if [ -n "${K8V4_VERIFY_CHUNK:-}" ]; then
+  extra+=(-e "K8V4_VERIFY_CHUNK=${K8V4_VERIFY_CHUNK}")
+fi
+
+if [ -n "${K8V4_DEEP_DRAFT:-}" ]; then
+  extra+=(-e "K8V4_DEEP_DRAFT=${K8V4_DEEP_DRAFT}")
+  if [ -z "${K8V4_VERIFY_CHUNK:-}" ]; then extra+=(-e K8V4_VERIFY_CHUNK=8); fi
+  if [ -n "${K8V4_DEEP_MTP_DEPTH:-}" ]; then extra+=(-e "K8V4_DEEP_MTP_DEPTH=${K8V4_DEEP_MTP_DEPTH}"); fi
+  if [ "${K8V4_DEEP_ALL:-0}" != 0 ]; then extra+=(-e "K8V4_DEEP_ALL=${K8V4_DEEP_ALL}"); fi
 fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \

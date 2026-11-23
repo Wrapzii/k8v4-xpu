@@ -23,6 +23,11 @@ install_onednn_det()
 from k8v4_v030.attn_time import attention_span
 from k8v4_v030.cache_views import bind_regions
 from k8v4_v030.dequant import eager_prefill
+from k8v4_v030.draft_fused import enabled as draft_fused_enabled
+from k8v4_v030.draft_lastrow import applies as draft_lastrow_applies
+from k8v4_v030.draft_lastrow import last_row
+from k8v4_v030.verify_chunk import chunk_rows, max_query_rows
+from k8v4_v030.verify_chunk import plan as verify_plan
 from k8v4_v030.onednn_prefill import head_major_prefill, prefill_mode
 from k8v4_v030.stage_profile import profile_enabled, profile_range
 from k8v4_v030.layout import CACHE_DTYPE, DECODE_MAX_T, PAGE, SLOT_BYTES_PER_HEAD, PageLayout
@@ -124,11 +129,24 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
         )
         # MTP6 with no parallel drafting pulls q=7 into the decode group.
         self._init_reorder_batch_threshold(1, supports_spec_as_decode=True)
+        self._apply_draft_fused_decode()
         if not hasattr(AttentionMetadataBuilder, "set_kernel_block_size"):
             # vLLM 0.34 dropped set_kernel_block_size. The runner now hands
             # the builder a spec whose block size is the kernel block, and
             # MultipleOf(64) accepts the manager block, so nothing is split.
             self._bind_kernel_block(int(kv_cache_spec.block_size))
+
+    def _apply_draft_fused_decode(self) -> None:
+        # K8V4_DRAFT_FUSED_DECODE (k8v4_v030/draft_fused.py): let vLLM 0.34's speculator capture all
+        # draft decode steps in one graph. Unset leaves the base class value (False).
+        if draft_fused_enabled():
+            self.supports_draft_decode_metadata_update = True
+
+    def update_draft_decode_metadata(self, metadata: Xe2K8V4Metadata) -> None:
+        # Only called with K8V4_DRAFT_FUSED_DECODE=1. The decode kernel reads seq_lens, block_table and
+        # slot_mapping from the runner's persistent device buffers, which the speculator advances in place;
+        # the host fields are the same for every one-row-per-request draft step. Nothing to refresh.
+        del metadata
 
     def set_kernel_block_size(self, kernel_block_size: int) -> None:
         # vLLM 0.30 calls this after construction; 0.34 does not.
@@ -191,7 +209,7 @@ class Xe2K8V4MetadataBuilder(AttentionMetadataBuilder[Xe2K8V4Metadata]):
             max_query_len=int(cam.max_query_len),
             max_seq_len=int(cam.max_seq_len),
             pages_per_block=attention_pages(spec.block_size, self.kernel_block_size),
-            packed_q_len=uniform_packed_q_len(starts),
+            packed_q_len=uniform_packed_q_len(starts, max_query_rows()),
             layout=self.layout,
         )
 
@@ -241,6 +259,8 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         self._rot_k, self._rot_v = kv_rotate.from_env()
         if self._rot_k or self._rot_v:
             kv_rotate.note_once(self._rot_k, self._rot_v)
+        # K8V4_DRAFT_LASTROW: decided on the first forward, from the layer name.
+        self._draft_lastrow: bool | None = None
 
     def do_kv_cache_update(
         self,
@@ -288,7 +308,13 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         output_scale: torch.Tensor | None = None,
         output_block_scale: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        del layer, key, value
+        del key, value
+        if self._draft_lastrow is None:
+            self._draft_lastrow = draft_lastrow_applies(layer)
+            if self._draft_lastrow:
+                print("k8v4 draft layer %s: prefill attention on the last row only"
+                      % getattr(layer, "layer_name", "?"), flush=True)
+        del layer
         if output_scale is not None or output_block_scale is not None:
             raise RuntimeError("K8/V4 does not take an output scale")
         cache = _one_cache(kv_cache)
@@ -328,7 +354,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         output: torch.Tensor,
     ) -> None:
         q_len = int(meta.packed_q_len)
-        if q_len < 1 or q_len > DECODE_MAX_T:
+        if q_len < 1 or q_len > max_query_rows():
             raise RuntimeError("packed q_len %d" % q_len)
         segments = query_segments(meta.query_starts)
         if len(segments) != 1 or segments[0][2] != q_len:
@@ -345,11 +371,18 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         first: int,
         count: int,
         q_len: int,
+        span: tuple[int, int] | None = None,
     ) -> None:
         _require_page_ratio(cache, meta.pages_per_block)
-        tok0, width = token_span(meta.query_starts, first, count, q_len)
+        if span is None:
+            tok0, width = token_span(meta.query_starts, first, count, q_len)
+        else:
+            tok0, width = span
         if query.shape[0] < tok0 + width:
             raise RuntimeError("query shorter than the packed segment")
+        if q_len > DECODE_MAX_T:
+            self._attn_chunked(query, cache, meta, output, first, count, q_len, tok0, width)
+            return
         block_table = meta.block_table
         if block_table.ndim != 2 or block_table.shape[0] < first + count:
             raise RuntimeError("block_table shape %s" % (tuple(block_table.shape),))
@@ -398,6 +431,66 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         attention_span("decode", _decode_attn)
         output.narrow(0, tok0, width).copy_(out_buf)
 
+    def _attn_chunked(
+        self,
+        query: torch.Tensor,
+        cache: torch.Tensor,
+        meta: Xe2K8V4Metadata,
+        output: torch.Tensor,
+        first: int,
+        count: int,
+        q_len: int,
+        tok0: int,
+        width: int,
+    ) -> None:
+        """K8V4_VERIFY_CHUNK: a verify wider than the decode tile, in row chunks.
+
+        Rows [r0, r1) of every request are the last rows of a sequence that is
+        q_len - r1 tokens shorter, so each chunk is one decode-kernel call with
+        trimmed seq_lens (see k8v4_v030/verify_chunk.py).
+        """
+        chunk = chunk_rows()
+        if not chunk:
+            raise RuntimeError("q_len %d needs K8V4_VERIFY_CHUNK" % q_len)
+        block_table = meta.block_table.narrow(0, first, count)
+        seq_lens = meta.seq_lens.reshape(-1).narrow(0, first, count)
+        q_rows = query.narrow(0, tok0, width).reshape(count, q_len, -1)
+        o_rows = output.narrow(0, tok0, width).reshape(count, q_len, -1)
+        scratch = get_scratch(query.device, self.layout)
+        nprog = workspace_programs(int(block_table.shape[1]), meta.pages_per_block, self.layout)
+        partials, m_state, l_state, merged = scratch.workspace(nprog)
+        views = bind_regions(cache, self.layout)
+        for r0, r1, trim in verify_plan(q_len, chunk):
+            rows = r1 - r0
+            q_buf, out_buf = scratch.attention_pair(count * rows)
+            q_buf.view(count, rows, -1).copy_(q_rows[:, r0:r1])
+            lens = seq_lens - trim if trim else seq_lens
+
+            def _decode_attn() -> None:
+                ops().int8k_int4v_attn_batch(
+                    q_buf,
+                    scratch.q8,
+                    scratch.q_scale,
+                    views["k"],
+                    views["k_scale"],
+                    views["v"],
+                    views["v_scale"],
+                    views["v_zero"],
+                    block_table,
+                    lens,
+                    scratch.visible,
+                    partials,
+                    m_state,
+                    l_state,
+                    merged,
+                    out_buf,
+                    rows,
+                    meta.pages_per_block,
+                )
+
+            attention_span("decode", _decode_attn)
+            o_rows[:, r0:r1].copy_(out_buf.view(count, rows, -1))
+
     def _eager(
         self,
         query: torch.Tensor,
@@ -413,7 +506,7 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
         for first, count, q_len in query_segments(meta.query_starts):
             if q_len == 0:
                 continue
-            if 1 <= q_len <= DECODE_MAX_T:
+            if 1 <= q_len <= DECODE_MAX_T or (q_len <= max_query_rows() and chunk_rows()):
                 self._attn_batch(query, cache, meta, output, first, count, q_len)
                 continue
             for offset in range(count):
@@ -425,6 +518,14 @@ class Xe2K8V4Impl(AttentionImpl[Xe2K8V4Metadata]):
                         "seq_len %d does not cover query %d; the kernel expects "
                         "the length to include this step" % (seq_len, width)
                     )
+                if self._draft_lastrow:
+                    # The drafter reads only this request's last row: one decode-kernel
+                    # row over the stored sequence; zeros for the rows it discards.
+                    row, zero_rows = last_row(tok0, width)
+                    if zero_rows:
+                        output.narrow(0, tok0, zero_rows).zero_()
+                    self._attn_batch(query, cache, meta, output, req, 1, 1, span=(row, 1))
+                    continue
                 row = meta.block_table[req]
                 q_fp = query.narrow(0, tok0, width).to(torch.float16)
                 prefill = head_major_prefill if prefill_mode() == "onednn" else eager_prefill
