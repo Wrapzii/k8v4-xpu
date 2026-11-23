@@ -214,6 +214,37 @@ if [ -n "${K8V4_MAMBA_SSM_DTYPE:-}" ]; then
   }
   mamba+=(--mamba-ssm-cache-dtype="$K8V4_MAMBA_SSM_DTYPE")
 fi
+# Optional RecoverSSM spec verify on the GDN layers (k8v4_v030/gdn_recoverssm.py): K8V4_GDN_RECOVERSSM=1 passes
+# --use-replayssm and mounts build/libk8v4_rssm.so (k8v4_v030/compile_rssm.sh; K8V4_RSSM_LIB overrides the path).
+# Off unless set.
+rssm=()
+if [ -n "${K8V4_GDN_RECOVERSSM:-}" ]; then
+  [[ "$K8V4_GDN_RECOVERSSM" =~ ^[01]$ ]] || { echo "K8V4_GDN_RECOVERSSM must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_GDN_RECOVERSSM" = 1 ]; then
+    RSSM_LIB=${K8V4_RSSM_LIB:-$ROOT/build/libk8v4_rssm.so}
+    [ -f "$RSSM_LIB" ] || { echo "K8V4_GDN_RECOVERSSM=1 needs $RSSM_LIB (run k8v4_v030/compile_rssm.sh)" >&2; exit 2; }
+    extra+=(-v "$(cd "$(dirname "$RSSM_LIB")" && pwd)/$(basename "$RSSM_LIB"):/opt/k8v4/libk8v4_rssm.so:ro"
+            -e K8V4_GDN_RECOVERSSM=1 -e K8V4_RSSM_LIB=/opt/k8v4/libk8v4_rssm.so)
+    rssm+=(--use-replayssm)
+  fi
+fi
+# Optional RecoverSSM verify kernel and deferred commit (k8v4_v030/rssm_defer.py, native/rssm/rssm_verify_slm.hpp):
+# K8V4_RSSM_VERIFY=slm stages each window's inputs in SLM (bit-identical, -6% verify); K8V4_RSSM_DEFER_COMMIT=1
+# folds a step's accepted records in the next step's verify instead of a separate commit pass over the states
+# (bit-identical; -0.5 ms per 4-user 63K step). Both need K8V4_GDN_RECOVERSSM=1 and a libk8v4_rssm.so built from
+# this tree; windows of at most 16 tokens (deep drafting at depth 15 fits). Off unless set.
+if [ -n "${K8V4_RSSM_VERIFY:-}" ]; then
+  [[ "$K8V4_RSSM_VERIFY" =~ ^(stock|slm)$ ]] || { echo "K8V4_RSSM_VERIFY must be stock or slm" >&2; exit 2; }
+  [ "${K8V4_GDN_RECOVERSSM:-}" = 1 ] || { echo "K8V4_RSSM_VERIFY needs K8V4_GDN_RECOVERSSM=1" >&2; exit 2; }
+  extra+=(-e "K8V4_RSSM_VERIFY=$K8V4_RSSM_VERIFY")
+fi
+if [ -n "${K8V4_RSSM_DEFER_COMMIT:-}" ]; then
+  [[ "$K8V4_RSSM_DEFER_COMMIT" =~ ^[01]$ ]] || { echo "K8V4_RSSM_DEFER_COMMIT must be 0 or 1" >&2; exit 2; }
+  if [ "$K8V4_RSSM_DEFER_COMMIT" = 1 ]; then
+    [ "${K8V4_GDN_RECOVERSSM:-}" = 1 ] || { echo "K8V4_RSSM_DEFER_COMMIT=1 needs K8V4_GDN_RECOVERSSM=1" >&2; exit 2; }
+    extra+=(-e K8V4_RSSM_DEFER_COMMIT=1)
+  fi
+fi
 if [ "$TP" = 2 ]; then
   extra+=(
     -e CCL_SYCL_ALLREDUCE_LL=twoshots
@@ -419,6 +450,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --reasoning-parser=qwen3 \
   "${prefix[@]}" \
   "${mamba[@]}" \
+  "${rssm[@]}" \
   "${multimodal[@]}" \
   "${api[@]}" \
   --trust-remote-code \
