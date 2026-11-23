@@ -331,6 +331,41 @@ if [ "$GDN_HEADS" = 1 ]; then
   [ -f "$GDN_LIB" ] || { echo "K8V4_GDN_HEADS=1 needs $GDN_LIB (run k8v4_v030/compile_gdn.sh)" >&2; exit 2; }
   extra+=(-v "$(cd "$(dirname "$GDN_LIB")" && pwd)/$(basename "$GDN_LIB"):/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so:ro")
 fi
+# Optional fp16 S1 partial outputs (about -18% on the q7 verify attention op at 128K). Off unless set.
+if [ -n "${XE2_KV_PARTIAL_FP16:-}" ]; then
+  extra+=(-e "XE2_KV_PARTIAL_FP16=${XE2_KV_PARTIAL_FP16}")
+fi
+# Sub-group-parallel S1 for the 1-token draft is on by default; set 0 to disable.
+if [ -n "${XE2_KV_SMALL_S1:-}" ]; then
+  extra+=(-e "XE2_KV_SMALL_S1=${XE2_KV_SMALL_S1}")
+fi
+# Optional multi-page decode S1 (see docs/2026-11-19-decode-s1-multipage.md). Off unless set.
+for v in XE2_KV_S1_SPLITS XE2_KV_S1_PAGES XE2_KV_S1_GRF; do
+  if [ -n "${!v:-}" ]; then
+    extra+=(-e "$v=${!v}")
+  fi
+done
+# Optional faster multi-row S1 for the multi-page kernel (docs/2026-11-19-decode-s1-rows.md). Off unless set.
+if [ -n "${XE2_KV_S1_FAST:-}" ]; then
+  case "$XE2_KV_S1_FAST" in
+    0|1) extra+=(-e "XE2_KV_S1_FAST=${XE2_KV_S1_FAST}") ;;
+    *) echo "XE2_KV_S1_FAST must be 0 or 1, got '$XE2_KV_S1_FAST'" >&2; exit 2 ;;
+  esac
+fi
+# Optional one launch for all requests of a decode batch (q-pack, S1, S2; multi-page S1 only). Off unless set.
+if [ -n "${XE2_KV_BATCH_REQS:-}" ]; then
+  case "$XE2_KV_BATCH_REQS" in
+    0|1) extra+=(-e "XE2_KV_BATCH_REQS=${XE2_KV_BATCH_REQS}") ;;
+    *) echo "XE2_KV_BATCH_REQS must be 0 or 1, got '$XE2_KV_BATCH_REQS'" >&2; exit 2 ;;
+  esac
+fi
+# Optional shared-prefix cascade for the one-row drafter batch (needs XE2_KV_BATCH_REQS=1). Off unless set.
+if [ -n "${XE2_KV_CASCADE:-}" ]; then
+  case "$XE2_KV_CASCADE" in
+    0|1) extra+=(-e "XE2_KV_CASCADE=${XE2_KV_CASCADE}") ;;
+    *) echo "XE2_KV_CASCADE must be 0 or 1, got '$XE2_KV_CASCADE'" >&2; exit 2 ;;
+  esac
+fi
 
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
