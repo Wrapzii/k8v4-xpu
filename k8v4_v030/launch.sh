@@ -43,6 +43,52 @@ if [ -n "${K8V4_ONEDNN_DETERMINISTIC:-}" ]; then
   [[ "$K8V4_ONEDNN_DETERMINISTIC" =~ ^[01]$ ]] || { echo "K8V4_ONEDNN_DETERMINISTIC must be 0 or 1" >&2; exit 2; }
   ncontig_env+=(-e "K8V4_ONEDNN_DETERMINISTIC=${K8V4_ONEDNN_DETERMINISTIC}")
 fi
+# Optional wider W4A8 prefill gate (see k8v4_v030/w4a8_prefill.py). Unset keeps MLP-only and the
+# command unchanged; a set value is passed through and gets its own compile-cache namespace.
+w4a8_env=()
+if [ -n "${K8V4_W4A8_LAYERS:-}" ]; then
+  [[ "$K8V4_W4A8_LAYERS" =~ ^(all|(mlp|attn|gdn|other)(,(mlp|attn|gdn|other))*)$ ]] || {
+    echo "K8V4_W4A8_LAYERS must be all or a comma list of mlp,attn,gdn,other" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_LAYERS=${K8V4_W4A8_LAYERS}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-layers-${K8V4_W4A8_LAYERS//,/-}"
+fi
+# Optional s4 / grouped-scale W4A8 library (k8v4_v030/native/w4a8). K8V4_W4A8_KERNEL=onednn needs
+# K8V4_W4A8_LIB = the host path of libk8v4_w4a8.so, mounted read-only into the container.
+if [ -n "${K8V4_W4A8_KERNEL:-}" ]; then
+  [[ "$K8V4_W4A8_KERNEL" =~ ^(xpu|onednn)$ ]] || { echo "K8V4_W4A8_KERNEL must be xpu or onednn" >&2; exit 2; }
+  w4a8_env+=(-e "K8V4_W4A8_KERNEL=${K8V4_W4A8_KERNEL}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-kernel-${K8V4_W4A8_KERNEL}"
+  if [ "$K8V4_W4A8_KERNEL" = onednn ]; then
+    [ -n "${K8V4_W4A8_LIB:-}" ] && [ -f "${K8V4_W4A8_LIB}" ] || {
+      echo "K8V4_W4A8_KERNEL=onednn needs K8V4_W4A8_LIB=<host path of libk8v4_w4a8.so>" >&2; exit 2;
+    }
+    w4a8_env+=(-v "${K8V4_W4A8_LIB}:/opt/k8v4/libk8v4_w4a8.so:ro")
+  fi
+fi
+if [ -n "${K8V4_W4A8_AGROUP:-}" ]; then
+  [[ "$K8V4_W4A8_AGROUP" =~ ^(0|32|64|128)$ ]] || { echo "K8V4_W4A8_AGROUP must be 0, 32, 64 or 128" >&2; exit 2; }
+  [ "$K8V4_W4A8_AGROUP" = 0 ] || [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || {
+    echo "K8V4_W4A8_AGROUP needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2;
+  }
+  w4a8_env+=(-e "K8V4_W4A8_AGROUP=${K8V4_W4A8_AGROUP}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-agroup-${K8V4_W4A8_AGROUP}"
+fi
+if [ -n "${K8V4_W4A8_FUSED:-}" ]; then
+  # silu and gnorm need grouped scales (K8V4_W4A8_AGROUP); addnorm also runs with per-token scales.
+  fused_ok=1
+  [[ "$K8V4_W4A8_FUSED" =~ ^(silu|gnorm|addnorm)(,(silu|gnorm|addnorm)){0,2}$ ]] || fused_ok=0
+  for f in silu gnorm addnorm; do
+    if [[ ",$K8V4_W4A8_FUSED," =~ ,$f,(.*,)?$f, ]]; then fused_ok=0; fi
+  done
+  [ "$fused_ok" = 1 ] || { echo "K8V4_W4A8_FUSED must be a comma list of silu, gnorm, addnorm" >&2; exit 2; }
+  [ "${K8V4_W4A8_KERNEL:-}" = onednn ] || { echo "K8V4_W4A8_FUSED needs K8V4_W4A8_KERNEL=onednn" >&2; exit 2; }
+  if [[ ",$K8V4_W4A8_FUSED," =~ ,(silu|gnorm), ]] && [[ "${K8V4_W4A8_AGROUP:-0}" == 0 ]]; then
+    echo "K8V4_W4A8_FUSED=silu/gnorm needs K8V4_W4A8_AGROUP" >&2; exit 2
+  fi
+  w4a8_env+=(-e "K8V4_W4A8_FUSED=${K8V4_W4A8_FUSED}")
+  CACHE_NAMESPACE="${CACHE_NAMESPACE}-fused-${K8V4_W4A8_FUSED//,/-}"
+fi
 DRY_RUN=${K8V4_DRY_RUN:-0}
 [[ "$DRY_RUN" =~ ^[01]$ && "$PREFIX_CACHING" =~ ^[01]$ ]] || {
   echo "K8V4_DRY_RUN and K8V4_PREFIX_CACHING must be 0 or 1" >&2; exit 2;
@@ -274,6 +320,18 @@ if [ -n "${K8V4_DRAFT_SKIP_SHARED:-}" ]; then
   extra+=(-e "K8V4_DRAFT_SKIP_SHARED=${K8V4_DRAFT_SKIP_SHARED}")
 fi
 
+# Optional head-parallel GDN prefill kernels (see docs/2026-11-19-gdn-heads.md): K8V4_GDN_HEADS=1 mounts
+# build/libgdn_attn_kernels_xe_2.so (k8v4_v030/compile_gdn.sh; K8V4_GDN_HEADS_LIB overrides the path)
+# over the image's vllm-xpu-kernels copy (build it against the same vLLM image). Bit-identical outputs.
+# Off unless set.
+GDN_HEADS=${K8V4_GDN_HEADS:-0}
+[[ "$GDN_HEADS" =~ ^[01]$ ]] || { echo "K8V4_GDN_HEADS must be 0 or 1" >&2; exit 2; }
+if [ "$GDN_HEADS" = 1 ]; then
+  GDN_LIB=${K8V4_GDN_HEADS_LIB:-$ROOT/build/libgdn_attn_kernels_xe_2.so}
+  [ -f "$GDN_LIB" ] || { echo "K8V4_GDN_HEADS=1 needs $GDN_LIB (run k8v4_v030/compile_gdn.sh)" >&2; exit 2; }
+  extra+=(-v "$(cd "$(dirname "$GDN_LIB")" && pwd)/$(basename "$GDN_LIB"):/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so:ro")
+fi
+
 docker_cmd=(docker run -d --name "$NAME" --restart=no \
   --device /dev/dri --group-add "$render_gid" --ipc=host --shm-size=8g \
   -p "${BIND_HOST}:${PORT}:8000" \
@@ -285,6 +343,7 @@ docker_cmd=(docker run -d --name "$NAME" --restart=no \
   -v "${HERE}:/opt/k8v4/k8v4_v030:ro" \
   "${extra[@]}" \
   "${ncontig_env[@]}" \
+  "${w4a8_env[@]}" \
   -e PYTHONPATH=/opt/k8v4 \
   -e XE2_KV_LIB=/opt/k8v4/libxe2_kv.so \
   -e K8V4_SDPA_LIB=/opt/k8v4/libk8v4_sdpa.so \

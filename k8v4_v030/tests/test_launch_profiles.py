@@ -162,6 +162,21 @@ class LaunchProfileTest(unittest.TestCase):
             with self.subTest(bad=bad):
                 result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH=bad)
                 self.assertEqual(result.returncode, 2)
+    def test_w4a8_layers_is_passed_only_when_set(self):
+        result, default = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('K8V4_W4A8_LAYERS' in arg for arg in default))
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_LAYERS='mlp,attn,gdn')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_W4A8_LAYERS=mlp,attn,gdn', args)
+        self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-layers-mlp-attn-gdn', args)
+        def stable(argv):
+            return [a for a in argv if a not in ('-e', 'K8V4_W4A8_LAYERS=mlp,attn,gdn')
+                    and not a.startswith(('VLLM_CACHE_ROOT=', '/tmp', '/var/folders')) and ':/model' not in a]
+        self.assertEqual(stable(args), stable(default))
+        for bad in ('qkv', 'mlp,', 'all,mlp'):
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_LAYERS=bad)
+            self.assertEqual(result.returncode, 2, bad)
 
     def test_dtype_is_bfloat16_unless_set(self):
         _, default = self.command(K8V4_TP='1')
@@ -220,6 +235,73 @@ class LaunchProfileTest(unittest.TestCase):
                 result, args = self.command(K8V4_TP='1', K8V4_MAMBA_SSM_DTYPE=bad)
                 self.assertEqual(result.returncode, 2)
                 self.assertIn(b'K8V4_MAMBA_SSM_DTYPE', result.stderr)
+
+    def test_w4a8_kernel_and_group_need_the_library(self):
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn')
+        self.assertEqual(result.returncode, 2)
+        result, args = self.command(K8V4_TP='1', K8V4_W4A8_AGROUP='64')
+        self.assertEqual(result.returncode, 2)
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn', K8V4_W4A8_LIB=lib.name,
+                                        K8V4_W4A8_AGROUP='64')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('%s:/opt/k8v4/libk8v4_w4a8.so:ro' % lib.name, args)
+            self.assertIn('K8V4_W4A8_KERNEL=onednn', args)
+            self.assertIn('K8V4_W4A8_AGROUP=64', args)
+            self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-kernel-onednn-agroup-64', args)
+            result, args = self.command(K8V4_TP='1', K8V4_W4A8_KERNEL='b70', K8V4_W4A8_LIB=lib.name)
+            self.assertEqual(result.returncode, 2)
+
+    def test_w4a8_fused_needs_onednn_and_group(self):
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            base = dict(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn', K8V4_W4A8_LIB=lib.name)
+            result, args = self.command(K8V4_W4A8_FUSED='silu', **base)
+            self.assertEqual(result.returncode, 2)
+            result, args = self.command(K8V4_W4A8_FUSED='gelu', K8V4_W4A8_AGROUP='64', **base)
+            self.assertEqual(result.returncode, 2)
+            result, args = self.command(K8V4_W4A8_FUSED='silu', K8V4_W4A8_AGROUP='64', **base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_W4A8_FUSED=silu', args)
+            self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-kernel-onednn-agroup-64-fused-silu', args)
+
+    def test_w4a8_fused_addnorm_takes_per_token_scales(self):
+        with tempfile.NamedTemporaryFile(suffix='.so') as lib:
+            base = dict(K8V4_TP='1', K8V4_W4A8_KERNEL='onednn', K8V4_W4A8_LIB=lib.name)
+            result, args = self.command(K8V4_W4A8_FUSED='addnorm', **base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_W4A8_FUSED=addnorm', args)
+            self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-kernel-onednn-fused-addnorm', args)
+            result, args = self.command(K8V4_W4A8_FUSED='silu,gnorm,addnorm', K8V4_W4A8_AGROUP='64', **base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_W4A8_FUSED=silu,gnorm,addnorm', args)
+            for bad in (dict(K8V4_W4A8_FUSED='addnorm,silu', **base), dict(K8V4_W4A8_FUSED='addnorm,addnorm', **base),
+                        dict(K8V4_W4A8_FUSED='addnorm', K8V4_TP='1'), dict(K8V4_W4A8_FUSED='addnorm,', **base)):
+                with self.subTest(bad=bad):
+                    result, args = self.command(**bad)
+                    self.assertEqual(result.returncode, 2)
+    def test_gdn_heads_mount_is_opt_in(self):
+        lib_target = '/opt/venv/lib/python3.12/site-packages/vllm_xpu_kernels/libgdn_attn_kernels_xe_2.so'
+        def norm(args):  # each call gets its own temporary model and cache directories
+            return [a for a in args if not a.endswith((':/model:ro', ':/root/.cache/vllm'))]
+        _, default = self.command(K8V4_TP='1')
+        _, off = self.command(K8V4_TP='1', K8V4_GDN_HEADS='0')
+        default, off = norm(default), norm(off)
+        self.assertEqual(default, off)
+        self.assertFalse(any(lib_target in arg for arg in default))
+        with tempfile.TemporaryDirectory() as temp:
+            lib = Path(temp) / 'libgdn_attn_kernels_xe_2.so'
+            lib.write_bytes(b'')
+            result, args = self.command(K8V4_TP='1', K8V4_GDN_HEADS='1', K8V4_GDN_HEADS_LIB=str(lib))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            mount = args.index('%s:%s:ro' % (lib, lib_target))
+            self.assertEqual(args[mount - 1], '-v')
+            self.assertEqual(norm([a for i, a in enumerate(args) if i not in (mount - 1, mount)]), default)
+            for options in ({'K8V4_GDN_HEADS': 'yes'},
+                            {'K8V4_GDN_HEADS': '1', 'K8V4_GDN_HEADS_LIB': str(Path(temp) / 'missing.so')}):
+                with self.subTest(options=options):
+                    result, args = self.command(K8V4_TP='1', **options)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(args, [])
 
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
