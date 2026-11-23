@@ -75,6 +75,25 @@ class LaunchProfileTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('K8V4_NCONTIG_RE=in_proj_ba', args)
         self.assertIn('VLLM_CACHE_ROOT=/root/.cache/vllm/w4a8-tp1-v1-ncontig', args)
+    def test_warm_prefix_warmup_is_passed_only_when_set(self):
+        for options in ({}, {'K8V4_TP': '1'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(arg.startswith('K8V4_WARMUP_WARM_PREFIX') for arg in args))
+        for value in ('0', '1'):
+            result, args = self.command(K8V4_TP='1', K8V4_WARMUP_WARM_PREFIX=value)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('K8V4_WARMUP_WARM_PREFIX=%s' % value, args)
+        result, args = self.command(K8V4_TP='1', K8V4_WARMUP_WARM_PREFIX='1', K8V4_WARMUP_WARM_PREFIX_CTX='32000')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('K8V4_WARMUP_WARM_PREFIX_CTX=32000', args)
+        for options in ({'K8V4_WARMUP_WARM_PREFIX': '2'}, {'K8V4_WARMUP_WARM_PREFIX': 'yes'},
+                        {'K8V4_WARMUP_WARM_PREFIX_CTX': '0'}, {'K8V4_WARMUP_WARM_PREFIX_CTX': '64k'}):
+            with self.subTest(bad=options):
+                result, args = self.command(K8V4_TP='1', **options)
+                self.assertEqual(result.returncode, 2)
+
     def test_onednn_deterministic_is_passed_only_when_set(self):
         result, default = self.command(K8V4_TP='1')
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -90,6 +109,74 @@ class LaunchProfileTest(unittest.TestCase):
         result, _ = self.command(K8V4_TP='1', K8V4_ONEDNN_DETERMINISTIC='yes')
         self.assertEqual(result.returncode, 2)
         self.assertIn(b'K8V4_ONEDNN_DETERMINISTIC must be 0 or 1', result.stderr)
+
+    def test_prefix_match_unit_is_absent_unless_set(self):
+        for options in ({}, {'K8V4_TP': '1', 'K8V4_PREFIX_CACHING': '1'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(any(arg.startswith('--prefix-match-unit') for arg in args))
+                self.assertNotIn('--enable-mamba-shared-prefix-checkpoint', args)
+
+    def test_prefix_match_unit_and_junctions_pass_through(self):
+        result, args = self.command(K8V4_TP='1', K8V4_PREFIX_CACHING='1', K8V4_PREFIX_MATCH_UNIT='64')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--prefix-match-unit=64', args)
+        self.assertNotIn('--enable-mamba-shared-prefix-checkpoint', args)
+        result, args = self.command(K8V4_PREFIX_MATCH_UNIT='64', K8V4_PREFIX_JUNCTIONS='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--prefix-match-unit=64', args)
+        self.assertIn('--enable-mamba-shared-prefix-checkpoint', args)
+
+    def test_invalid_prefix_match_settings_are_rejected(self):
+        for options in ({'K8V4_PREFIX_MATCH_UNIT': '32'}, {'K8V4_PREFIX_MATCH_UNIT': '96'},
+                        {'K8V4_PREFIX_MATCH_UNIT': 'x'}, {'K8V4_PREFIX_MATCH_UNIT': '064'},
+                        {'K8V4_TP': '1', 'K8V4_PREFIX_MATCH_UNIT': '64'},
+                        {'K8V4_PREFIX_JUNCTIONS': '1'}, {'K8V4_PREFIX_JUNCTIONS': 'yes'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(args, [])
+
+    def spec_and_graph(self, args):
+        spec = json.loads(next(arg for arg in args if arg.startswith('--speculative-config=')).split('=', 1)[1])
+        graph = json.loads(next(arg for arg in args if arg.startswith('--compilation-config=')).split('=', 1)[1])
+        return spec, graph['cudagraph_capture_sizes']
+
+    def test_shared_mtp_depth_is_off_by_default(self):
+        for options in ({}, {'K8V4_TP': '1'}, {'K8V4_TP': '1', 'K8V4_MAX_SEQS': '1', 'K8V4_MTP_SHARED_DEPTH': '3'}):
+            with self.subTest(options=options):
+                result, args = self.command(**options)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                spec, _ = self.spec_and_graph(args)
+                self.assertEqual(spec, {'method': 'mtp', 'num_speculative_tokens': 6})
+
+    def test_shared_mtp_depth_sets_batch_schedule_and_captures(self):
+        result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH='3')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        spec, sizes = self.spec_and_graph(args)
+        self.assertEqual(spec['num_speculative_tokens'], 6)
+        self.assertEqual(spec['num_speculative_tokens_per_batch_size'], [[1, 1, 6], [2, 4, 3]])
+        self.assertEqual(sizes, [7, 8, 12, 14, 16, 21, 28])
+        for bad in ('0', '7', 'x'):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_MAX_SEQS='4', K8V4_MTP_SHARED_DEPTH=bad)
+                self.assertEqual(result.returncode, 2)
+
+    def test_dtype_is_bfloat16_unless_set(self):
+        _, default = self.command(K8V4_TP='1')
+        self.assertIn('--dtype=bfloat16', default)
+        for dtype in ('bfloat16', 'float16'):
+            with self.subTest(dtype=dtype):
+                result, args = self.command(K8V4_TP='1', K8V4_DTYPE=dtype)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('--dtype=%s' % dtype, args)
+                self.assertEqual(len(args), len(default))
+        for bad in ('fp16', 'half', 'float32', 'auto'):
+            with self.subTest(bad=bad):
+                result, args = self.command(K8V4_TP='1', K8V4_DTYPE=bad)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(b'K8V4_DTYPE', result.stderr)
 
     def test_invalid_gpu_selections_are_rejected_before_launch(self):
         for options in ({'K8V4_TP': '4'}, {'K8V4_TP': '1', 'K8V4_DEVICES': '0,1'},
@@ -331,3 +418,39 @@ class DefaultCommandTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 got = [a.replace(str(ROOT), '<ROOT>') for a in _no_temp(args)]
                 self.assertEqual(got, want)
+
+    def test_agent_api_knobs_are_absent_by_default(self):
+        result, args = self.command(K8V4_TP='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(arg.startswith('--default-chat-template-kwargs') for arg in args))
+        self.assertNotIn('--enable-prompt-tokens-details', args)
+        self.assertNotIn('--entrypoint', args)
+        self.assertFalse(any(arg.startswith('VLLM_HTTP_TIMEOUT_KEEP_ALIVE=') for arg in args))
+        image = args.index('vllm-openai-xpu:v0.34.0-k8v4-unified')
+        self.assertEqual(args[image + 1], '/model')
+
+    def test_agent_api_knobs_pass_through(self):
+        result, args = self.command(K8V4_TP='1', K8V4_CHAT_TEMPLATE_KWARGS='{"reasoning_effort":"medium"}',
+                                    K8V4_PROMPT_TOKENS_DETAILS='1', K8V4_HTTP_KEEP_ALIVE='300',
+                                    K8V4_CHAT_TEMPLATE_FIX='1')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--default-chat-template-kwargs={"reasoning_effort":"medium"}', args)
+        self.assertIn('--enable-prompt-tokens-details', args)
+        self.assertIn('VLLM_HTTP_TIMEOUT_KEEP_ALIVE=300', args)
+        image = args.index('vllm-openai-xpu:v0.34.0-k8v4-unified')
+        self.assertEqual(args[image - 2:image], ['--entrypoint', 'python3'])
+        self.assertEqual(args[image + 1:image + 5],
+                         ['-I', '/opt/k8v4/k8v4_v030/chat_template_fix.py', '--serve', '/model'])
+        result, args = self.command(K8V4_TP='1', K8V4_PROMPT_TOKENS_DETAILS='0', K8V4_CHAT_TEMPLATE_FIX='0')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('--enable-prompt-tokens-details', args)
+        self.assertNotIn('--entrypoint', args)
+
+    def test_agent_api_knobs_reject_bad_values(self):
+        for options in ({'K8V4_CHAT_TEMPLATE_KWARGS': 'medium'}, {'K8V4_CHAT_TEMPLATE_KWARGS': '{"a":}'},
+                        {'K8V4_PROMPT_TOKENS_DETAILS': 'yes'}, {'K8V4_HTTP_KEEP_ALIVE': '0'},
+                        {'K8V4_HTTP_KEEP_ALIVE': '5s'}, {'K8V4_CHAT_TEMPLATE_FIX': 'on'}):
+            with self.subTest(options=options):
+                result, args = self.command(K8V4_TP='1', **options)
+                self.assertEqual(result.returncode, 2)
+                self.assertEqual(args, [])
